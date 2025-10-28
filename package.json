@@ -1,5 +1,5 @@
 {
-  "name": "open-alpha-arena",
+  "name": "hyper-alpha-arena",
   "private": true,
   "scripts": {
     "dev": "concurrently \"pnpm run dev:backend\" \"pnpm run dev:frontend\"",

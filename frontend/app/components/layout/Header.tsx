@@ -25,7 +25,7 @@ interface HeaderProps {
   onUserChange?: (username: string) => void
 }
 
-export default function Header({ title = 'Crypto Paper Trading', currentUser, currentAccount, showAccountSelector = false, onUserChange }: HeaderProps) {
+export default function Header({ title = 'Hyper Alpha Arena', currentUser, currentAccount, showAccountSelector = false, onUserChange }: HeaderProps) {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof document === 'undefined') return 'dark'
     return document.documentElement.classList.contains('dark') ? 'dark' : 'light'

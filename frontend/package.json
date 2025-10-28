@@ -1,5 +1,5 @@
 {
-  "name": "my-frontend",
+  "name": "hyper-alpha-arena-frontend",
   "private": true,
   "scripts": {
     "dev": "vite --port 5621",

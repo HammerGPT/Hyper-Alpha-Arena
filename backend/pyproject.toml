@@ -3,8 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "my-backend"
-version = "0.1.0"
+name = "hyper-alpha-arena-backend"
+version = "0.2.0"
 dependencies = [
     "fastapi",
     "uvicorn",
