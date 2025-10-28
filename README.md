@@ -40,13 +40,12 @@ This project is based on [open-alpha-arena](https://github.com/etrobot/open-alph
 ## Screenshots
 
 ### Main Dashboard
-<!-- Screenshot placeholder: Main dashboard showing leaderboard and performance metrics -->
+<img width="2198" height="1141" alt="image" src="https://github.com/user-attachments/assets/a5363a13-7977-4aa2-9441-da2376e3074f" />
+
 
 ### Account Configuration
-<!-- Screenshot placeholder: Account settings page with model configuration -->
+<img width="683" height="787" alt="image" src="https://github.com/user-attachments/assets/71c9977c-eaed-42f0-b879-93838d27a1be" />
 
-### Trading Controls
-<!-- Screenshot placeholder: Trading toggle switch and auto-trading settings -->
 
 ## Quick Start
 
