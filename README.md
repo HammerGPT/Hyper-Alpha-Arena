@@ -24,6 +24,16 @@ This project is based on [open-alpha-arena](https://github.com/etrobot/open-alph
 - **Paper Trading**: Simulated trading environment for testing AI strategies
 - **Real-time Market Data**: Live cryptocurrency price feeds via ccxt
 - **AI Trader Management**: Create and manage multiple AI trading agents
+- **Real-time Trading Triggers**: Event-driven AI trading with configurable strategies
+  - Real-time trigger: Execute on every market update
+  - Interval trigger: Execute at fixed time intervals
+  - Tick batch trigger: Execute after N price updates
+- **System Logs & Monitoring**: Comprehensive logging system for debugging and monitoring
+  - Real-time price update tracking (60-second snapshots)
+  - AI decision logs with full reasoning context
+  - Error and warning detection
+  - Filterable log categories and severity levels
+  - Auto-refresh dashboard with statistics
 - **Auto Trading**: Automated trading scheduler with customizable intervals
 - **WebSocket Updates**: Real-time portfolio and position updates
 - **Performance Dashboard**: Track AI model performance metrics
@@ -55,26 +65,68 @@ This project is based on [open-alpha-arena](https://github.com/etrobot/open-alph
 
 ## Quick Start
 
+### Prerequisites
+
 ```bash
-# 1. Install dependencies
+# Install pnpm (Node.js package manager)
 npm install -g pnpm
+
+# Install uv (Python package manager)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source $HOME/.local/bin/env
-
-# 2. Clone and setup
-git clone https://github.com/HammerGPT/Hyper-Alpha-Arena.git
-cd Hyper-Alpha-Arena
-pnpm install
-cd backend && uv sync && cd ..
-
-# 3. Build and start
-pnpm run build:frontend
-cp -r frontend/dist/* backend/static/
-cd backend
-uv run uvicorn main:app --host 0.0.0.0 --port 8802
 ```
 
-Open http://localhost:8802 and configure your AI traders through the web interface.
+### Installation
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/HammerGPT/Hyper-Alpha-Arena.git
+cd Hyper-Alpha-Arena
+
+# 2. Install frontend dependencies
+pnpm install
+
+# 3. Install backend dependencies
+cd backend && uv sync && cd ..
+
+# 4. Build frontend (one-time setup)
+pnpm run build:frontend
+cp -r frontend/dist/* backend/static/
+```
+
+### Running the Application
+
+```bash
+# Start the server using the startup script
+./start_arena.sh
+```
+
+The startup script will:
+- Start the backend service on port 8802
+- Initialize the trading strategy manager
+- Enable real-time price monitoring
+- Activate the system logging service
+
+**Access the application**: Open http://localhost:8802 in your browser
+
+**Stop the server**:
+```bash
+screen -S alpha-arena -X quit
+```
+
+### First-Time Setup
+
+1. Open http://localhost:8802
+2. Navigate to AI Traders section
+3. Create your first AI trader:
+   - Name: e.g., "GPT-5 Trader"
+   - Model: Select from dropdown (gpt-5-mini, claude-sonnet-4.5, etc.)
+   - API Key: Your OpenAI/Anthropic/Deepseek API key
+   - Base URL: Leave default or use custom endpoint
+4. Configure trading strategy:
+   - Trigger Mode: Real-time (recommended for active trading)
+   - Enable Strategy: Toggle to activate
+5. Monitor logs in System Logs section to verify setup
 
 ## Supported LLM Models
 
@@ -95,16 +147,41 @@ Open http://localhost:8802 and configure your AI traders through the web interfa
 │   - AI Trader Management              │
 │   - Trading Dashboard                 │
 │   - Performance Charts                │
+│   - System Logs Viewer                │
 └───────────────┬────────────────────────┘
                 │ REST API + WebSocket
                 ▼
 ┌────────────────────────────────────────┐
 │   Backend (FastAPI + Python)          │
-│   - Multi-model LLM Integration       │
-│   - Trading Engine                    │
-│   - Market Data Service (ccxt)        │
-│   - Auto Trading Scheduler            │
-│   - Risk Management                   │
+│                                        │
+│   ┌──────────────────────────────┐   │
+│   │  Trading Engine              │   │
+│   │  - Real-time Strategy Manager│   │
+│   │  - Multi-model LLM Router    │   │
+│   │  - Order Execution           │   │
+│   └──────────────────────────────┘   │
+│                                        │
+│   ┌──────────────────────────────┐   │
+│   │  Market Data Service         │   │
+│   │  - Price Stream (1.5s polls) │   │
+│   │  - Event Publisher           │   │
+│   │  - Price Cache               │   │
+│   └──────────────────────────────┘   │
+│                                        │
+│   ┌──────────────────────────────┐   │
+│   │  System Logger               │   │
+│   │  - Log Collector (500 cache) │   │
+│   │  - Price Snapshots (60s)     │   │
+│   │  - AI Decision Tracking      │   │
+│   │  - Error Monitoring          │   │
+│   └──────────────────────────────┘   │
+│                                        │
+│   ┌──────────────────────────────┐   │
+│   │  Database (SQLite)           │   │
+│   │  - AI Decision Logs          │   │
+│   │  - Trading History           │   │
+│   │  - Strategy Configs          │   │
+│   └──────────────────────────────┘   │
 └───────────────┬────────────────────────┘
                 │
                 ▼
@@ -166,6 +243,18 @@ Open http://localhost:8802 and configure your AI traders through the web interfa
 2. **Performance Optimization**: 10x faster account operations (5s to 0.5s)
 3. **Enhanced UI**: Improved interface mimicking Alpha Arena design
 4. **Hyperliquid Integration**: Real trading capabilities (in development)
+5. **System Logging & Monitoring**: Comprehensive real-time logging system
+   - In-memory log collector (500 entries)
+   - Auto-categorization (price updates, AI decisions, errors)
+   - Frontend dashboard with filtering and auto-refresh
+   - Price snapshot tracking every 60 seconds
+6. **Critical Bug Fixes**:
+   - Fixed race condition in trading strategy manager causing AI traders to freeze
+   - Resolved state management issues preventing real-time triggers
+   - Corrected API trailing slash issues in frontend
+   - Fixed FastAPI type annotation errors
+7. **Real-time Trading Triggers**: Event-driven strategy execution with configurable modes
+8. **Database Enhancements**: Added snapshot fields for AI decision debugging (prompt, reasoning, decision)
 
 ## Contributing
 
