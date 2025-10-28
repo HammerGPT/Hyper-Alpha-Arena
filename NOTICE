@@ -1,0 +1,16 @@
+Hyper Alpha Arena
+Copyright 2025 Heliki AI Community
+
+This product includes software developed by Heliki AI Community (https://www.heliki.com/).
+
+This project is based on open-alpha-arena (https://github.com/etrobot/open-alpha-arena),
+originally created by etrobot. We express our gratitude for their foundational work.
+
+Key improvements and modifications made by Heliki AI Community:
+- Fixed LLM API compatibility for GPT-5, o1, and Deepseek models
+- Enhanced UI to simulate Alpha Arena experience
+- Optimized backend performance (10x improvement in account operations)
+- Added support for Hyperliquid integration (in development)
+
+For more information, visit: https://www.heliki.com/
+GitHub Repository: https://github.com/HammerGPT/Hyper-Alpha-Arena

@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: usmover
+    restart: unless-stopped
+    ports:
+      - "5611:5611" 
+    volumes:
+      - ./data:/app/data 
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.usmover.rule=Host(`oaa.finan.club`)"
+      - "traefik.http.routers.usmover.entrypoints=websecure"
+      - "traefik.http.routers.usmover.tls.certresolver=letsencrypt"
+      - "traefik.http.services.usmover.loadbalancer.server.port=5611"
+    networks:
+      - traefik
+
+networks:
+  traefik:
+    external: true
