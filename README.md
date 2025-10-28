@@ -50,19 +50,6 @@ This project is based on [open-alpha-arena](https://github.com/etrobot/open-alph
 
 ## Quick Start
 
-### Option 1: Docker (Recommended)
-
-```bash
-git clone https://github.com/HammerGPT/Hyper-Alpha-Arena.git
-cd Hyper-Alpha-Arena
-docker build -t hyper-alpha-arena .
-docker run -d -p 8802:8802 hyper-alpha-arena
-```
-
-Open http://localhost:8802 in your browser.
-
-### Option 2: Manual Installation
-
 ```bash
 # 1. Install dependencies
 npm install -g pnpm
@@ -82,11 +69,7 @@ cd backend
 uv run uvicorn main:app --host 0.0.0.0 --port 8802
 ```
 
-Open http://localhost:8802 in your browser.
-
-### Next Steps
-
-Configure your AI trading accounts through the web interface. All settings (API keys, models, trading parameters) are managed via the UI.
+Open http://localhost:8802 and configure your AI trading accounts through the web interface.
 
 ## Supported LLM Models
 
