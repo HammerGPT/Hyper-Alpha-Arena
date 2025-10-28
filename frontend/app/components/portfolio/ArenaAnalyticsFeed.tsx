@@ -436,7 +436,7 @@ export default function ArenaAnalyticsFeed({
             }}
             className="h-8 rounded border border-border bg-muted px-2 text-xs uppercase tracking-wide text-foreground"
           >
-            <option value="">All Models</option>
+            <option value="">All Traders</option>
             {accountOptions.map((meta) => (
               <option key={meta.account_id} value={meta.account_id}>
                 {meta.name}{meta.model ? ` (${meta.model})` : ''}

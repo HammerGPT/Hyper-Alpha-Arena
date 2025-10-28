@@ -51,6 +51,19 @@ function formatPercent(value?: number | null) {
   return `${(value * 100).toFixed(2)}%`
 }
 
+function formatTriggerMode(mode?: string | null) {
+  switch (mode) {
+    case 'realtime':
+      return 'Real-time Trigger'
+    case 'interval':
+      return 'Fixed Interval'
+    case 'tick_batch':
+      return 'Tick Batch'
+    default:
+      return 'Unknown Trigger Mode'
+  }
+}
+
 export default function AlphaArenaFeed({
   refreshKey,
   autoRefreshInterval = 60_000,
@@ -261,7 +274,7 @@ export default function AlphaArenaFeed({
             }}
             className="h-8 rounded border border-border bg-muted px-2 text-xs uppercase tracking-wide text-foreground"
           >
-            <option value="">All Models</option>
+            <option value="">All Traders</option>
             {accountOptions.map((meta) => (
               <option key={meta.account_id} value={meta.account_id}>
                 {meta.name}{meta.model ? ` (${meta.model})` : ''}
@@ -433,6 +446,16 @@ export default function AlphaArenaFeed({
                               )}
                               {entry.symbol}
                             </span>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground uppercase tracking-wide">
+                          <span>{formatTriggerMode(entry.trigger_mode)}</span>
+                          <span>{entry.strategy_enabled ? 'Strategy Enabled' : 'Strategy Disabled'}</span>
+                          {entry.last_trigger_at && (
+                            <span>Last Trigger {formatDate(entry.last_trigger_at)}</span>
+                          )}
+                          {typeof entry.trigger_latency_seconds === 'number' && (
+                            <span>Trigger Latency {entry.trigger_latency_seconds.toFixed(1)}s</span>
                           )}
                         </div>
                         <div className="text-xs text-muted-foreground">

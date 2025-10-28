@@ -492,9 +492,9 @@ export default function AssetCurve({ data: initialData, wsRef, highlightAccountI
         </div>
       </div>
 
-      {/* Account Asset Ranking */}
+      {/* AI Trader Asset Ranking */}
       <div className="mt-6">
-        <div className="text-xs font-medium mb-3 text-secondary-foreground">Account Asset Ranking</div>
+        <div className="text-xs font-medium mb-3 text-secondary-foreground">AI Trader Asset Ranking</div>
         <div className="flex flex-wrap gap-3">
           {rankedAccounts.map((account, index) => {
             const accountId = accountByUsername.get(account.username)
