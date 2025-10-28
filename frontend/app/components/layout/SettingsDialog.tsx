@@ -69,7 +69,7 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated }:
       setAccounts(data)
     } catch (error) {
       console.error('Failed to load accounts:', error)
-      toast.error('Failed to load accounts')
+      toast.error('Failed to load AI traders')
     } finally {
       setLoading(false)
     }
@@ -93,7 +93,7 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated }:
       setTestResult(null)
 
       if (!newAccount.name || !newAccount.name.trim()) {
-        setError('Account name is required')
+        setError('Trader name is required')
         setLoading(false)
         setTesting(false)
         return
@@ -116,7 +116,7 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated }:
             setTesting(false)
             return
           }
-          setTestResult('✅ LLM connection test passed! Creating account...')
+          setTestResult('✅ LLM connection test passed! Creating AI trader...')
         } catch (testError) {
           const message = testError instanceof Error ? testError.message : 'LLM connection test failed'
           setError(`LLM Test Failed: ${message}`)
@@ -133,15 +133,15 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated }:
       setShowAddForm(false)
       await loadAccounts()
 
-      toast.success('Account created successfully!')
+      toast.success('AI trader created successfully!')
 
       // Notify parent component that account was created
       onAccountUpdated?.()
     } catch (error) {
       console.error('Failed to create account:', error)
-      const errorMessage = error instanceof Error ? error.message : 'Failed to create account'
+      const errorMessage = error instanceof Error ? error.message : 'Failed to create AI trader'
       setError(errorMessage)
-      toast.error(`Failed to create account: ${errorMessage}`)
+      toast.error(`Failed to create AI trader: ${errorMessage}`)
     } finally {
       setLoading(false)
       setTesting(false)
@@ -158,7 +158,7 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated }:
       setTestResult(null)
       
       if (!editAccount.name || !editAccount.name.trim()) {
-        setError('Account name is required')
+        setError('Trader name is required')
         setLoading(false)
         setTesting(false)
         return
@@ -195,7 +195,7 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated }:
       }
       
       setTesting(false)
-      setTestResult('Test passed! Saving account...')
+      setTestResult('Test passed! Saving AI trader...')
 
       console.log('Updating account with data:', editAccount)
       await updateAccount(editingId, editAccount)
@@ -204,16 +204,16 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated }:
       setTestResult(null)
       await loadAccounts()
       
-      toast.success('Account updated successfully!')
+      toast.success('AI trader updated successfully!')
       
       // Notify parent component that account was updated
       onAccountUpdated?.()
     } catch (error) {
       console.error('Failed to update account:', error)
-      const errorMessage = error instanceof Error ? error.message : 'Failed to update account'
+      const errorMessage = error instanceof Error ? error.message : 'Failed to update AI trader'
       setError(errorMessage)
       setTestResult(null)
-      toast.error(`Failed to update account: ${errorMessage}`)
+      toast.error(`Failed to update AI trader: ${errorMessage}`)
     } finally {
       setLoading(false)
       setTesting(false)
@@ -260,9 +260,9 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated }:
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
-          <DialogTitle>Account Management</DialogTitle>
+          <DialogTitle>AI Trader Management</DialogTitle>
           <DialogDescription>
-            Manage your trading accounts and AI configurations
+            Manage your AI traders and their configurations
           </DialogDescription>
         </DialogHeader>
 
@@ -276,19 +276,19 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated }:
           {/* Existing Accounts */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-medium">Trading Accounts</h3>
+              <h3 className="text-lg font-medium">AI Traders</h3>
               <Button
                 onClick={() => setShowAddForm(!showAddForm)}
                 size="sm"
                 className="flex items-center gap-2"
               >
                 <Plus className="h-4 w-4" />
-                Add Account
+                Add AI Trader
               </Button>
             </div>
 
             {loading && accounts.length === 0 ? (
-              <div>Loading accounts...</div>
+              <div>Loading AI traders...</div>
             ) : (
               <div className="space-y-3">
                 {accounts.map((account) => (
@@ -297,7 +297,7 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated }:
                       <div className="space-y-3">
                         <div className="grid grid-cols-2 gap-3">
                           <Input
-                            placeholder="Account name"
+                            placeholder="Trader name"
                             value={editAccount.name || ''}
                             onChange={(e) => setEditAccount({ ...editAccount, name: e.target.value })}
                           />
@@ -398,11 +398,11 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated }:
           {/* Add New Account Form */}
           {showAddForm && (
             <div className="space-y-4 border-t pt-4">
-              <h3 className="text-lg font-medium">Add New Account</h3>
+              <h3 className="text-lg font-medium">Add New AI Trader</h3>
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <Input
-                    placeholder="Account name"
+                    placeholder="Trader name"
                     value={newAccount.name || ''}
                     onChange={(e) => setNewAccount({ ...newAccount, name: e.target.value })}
                   />

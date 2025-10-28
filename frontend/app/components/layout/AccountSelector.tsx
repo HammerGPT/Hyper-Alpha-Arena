@@ -85,14 +85,14 @@ export default function AccountSelector({ currentAccount, onAccountChange, usern
     return (
       <div className="w-64">
         <div className="text-xs text-muted-foreground p-2 border rounded">
-          No accounts found
+          No AI traders found
         </div>
       </div>
     )
   }
 
   const displayName = (account: AccountWithAssets) => {
-    const accountName = account.name || account.username || `${account.account_type} Account`
+    const accountName = account.name || account.username || `${account.account_type} Trader`
     return accountName
   }
 
@@ -108,13 +108,13 @@ export default function AccountSelector({ currentAccount, onAccountChange, usern
         onValueChange={(value) => onAccountChange(parseInt(value))}
       >
         <SelectTrigger className="w-full">
-          <SelectValue placeholder="Select Account" className="truncate">
+          <SelectValue placeholder="Select AI Trader" className="truncate">
             <span className="truncate block">
-              {currentAccountWithAssets 
-                ? displayName(currentAccountWithAssets) 
-                : currentAccount 
-                  ? `${currentAccount.name || 'Unknown Account'}` 
-                  : 'Select Account'
+              {currentAccountWithAssets
+                ? displayName(currentAccountWithAssets)
+                : currentAccount
+                  ? `${currentAccount.name || 'Unknown Trader'}`
+                  : 'Select AI Trader'
               }
             </span>
           </SelectValue>

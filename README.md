@@ -23,7 +23,7 @@ This project is based on [open-alpha-arena](https://github.com/etrobot/open-alph
 - **Multi-Model LLM Support**: GPT-5, o1, GPT-4o, Claude, Deepseek, and other OpenAI-compatible models
 - **Paper Trading**: Simulated trading environment for testing AI strategies
 - **Real-time Market Data**: Live cryptocurrency price feeds via ccxt
-- **Account Management**: Create and manage multiple AI trading accounts
+- **AI Trader Management**: Create and manage multiple AI trading agents
 - **Auto Trading**: Automated trading scheduler with customizable intervals
 - **WebSocket Updates**: Real-time portfolio and position updates
 - **Performance Dashboard**: Track AI model performance metrics
@@ -43,7 +43,7 @@ This project is based on [open-alpha-arena](https://github.com/etrobot/open-alph
 <img width="2198" height="1141" alt="image" src="https://github.com/user-attachments/assets/a5363a13-7977-4aa2-9441-da2376e3074f" />
 
 
-### Account Configuration
+### AI Trader Configuration
 <img width="683" height="787" alt="image" src="https://github.com/user-attachments/assets/71c9977c-eaed-42f0-b879-93838d27a1be" />
 
 
@@ -68,7 +68,7 @@ cd backend
 uv run uvicorn main:app --host 0.0.0.0 --port 8802
 ```
 
-Open http://localhost:8802 and configure your AI trading accounts through the web interface.
+Open http://localhost:8802 and configure your AI traders through the web interface.
 
 ## Supported LLM Models
 
@@ -86,7 +86,7 @@ Open http://localhost:8802 and configure your AI trading accounts through the we
 ```
 ┌────────────────────────────────────────┐
 │   Frontend (React + TypeScript)       │
-│   - Account Management                │
+│   - AI Trader Management              │
 │   - Trading Dashboard                 │
 │   - Performance Charts                │
 └───────────────┬────────────────────────┘

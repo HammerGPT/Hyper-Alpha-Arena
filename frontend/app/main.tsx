@@ -236,7 +236,7 @@ function App() {
     }
     try {
       wsRef.current.send(JSON.stringify({ type: 'switch_user', username }))
-      toast('Switching account...', { icon: '🔄' })
+      toast('Switching AI trader...', { icon: '🔄' })
     } catch (e) {
       console.error(e)
       toast.error('Failed to switch user')
@@ -251,10 +251,10 @@ function App() {
     }
     try {
       wsRef.current.send(JSON.stringify({ type: 'switch_account', account_id: accountId }))
-      toast('Switching account...', { icon: '🔄' })
+      toast('Switching AI trader...', { icon: '🔄' })
     } catch (e) {
       console.error(e)
-      toast.error('Failed to switch account')
+      toast.error('Failed to switch AI trader')
     }
   }
 
