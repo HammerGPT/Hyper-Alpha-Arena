@@ -37,8 +37,8 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 ENV PYTHONPATH=/app
 
 # Expose port
-EXPOSE 5611
+EXPOSE 8802
 
 # Start the application
 WORKDIR /app
-CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "5611"]
+CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8802"]

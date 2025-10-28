@@ -48,140 +48,45 @@ This project is based on [open-alpha-arena](https://github.com/etrobot/open-alph
 ### Trading Controls
 <!-- Screenshot placeholder: Trading toggle switch and auto-trading settings -->
 
-## Installation
+## Quick Start
 
-### Prerequisites
-
-- **Operating System**: Linux, macOS, or Windows (WSL recommended)
-- **Python**: 3.11 or higher
-- **Node.js**: 18.x or higher
-- **Package Managers**:
-  - [pnpm](https://pnpm.io/installation): `npm install -g pnpm`
-  - [uv](https://github.com/astral-sh/uv): Python package manager
-
-### System Requirements
-
-- RAM: Minimum 4GB, recommended 8GB
-- Disk Space: At least 2GB free space
-- Internet: Stable connection for market data and LLM API calls
-
-### Step 1: Install Package Managers
-
-```bash
-# Install pnpm globally
-npm install -g pnpm
-
-# Install uv (Python package manager)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-source $HOME/.local/bin/env
-```
-
-### Step 2: Clone the Repository
+### Option 1: Docker (Recommended)
 
 ```bash
 git clone https://github.com/HammerGPT/Hyper-Alpha-Arena.git
 cd Hyper-Alpha-Arena
+docker build -t hyper-alpha-arena .
+docker run -d -p 8802:8802 hyper-alpha-arena
 ```
 
-### Step 3: Install Dependencies
+Open http://localhost:8802 in your browser.
+
+### Option 2: Manual Installation
 
 ```bash
-# Install frontend dependencies
+# 1. Install dependencies
+npm install -g pnpm
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env
+
+# 2. Clone and setup
+git clone https://github.com/HammerGPT/Hyper-Alpha-Arena.git
+cd Hyper-Alpha-Arena
 pnpm install
+cd backend && uv sync && cd ..
 
-# Install backend dependencies
-cd backend
-uv sync
-cd ..
-```
-
-### Step 4: Build Frontend
-
-```bash
-# Build the React frontend
+# 3. Build and start
 pnpm run build:frontend
-
-# Copy build to backend static folder
-rm -rf backend/static/*
 cp -r frontend/dist/* backend/static/
-```
-
-### Step 5: Configure Environment Variables
-
-Create a `.env` file in the `backend` directory:
-
-```bash
-cd backend
-cat > .env << EOF
-# Database
-DATABASE_URL=sqlite:///./trading.db
-
-# API Configuration (optional, can be set via UI)
-# OPENAI_API_KEY=your_openai_api_key
-# ANTHROPIC_API_KEY=your_anthropic_api_key
-# DEEPSEEK_API_KEY=your_deepseek_api_key
-
-# Server Configuration
-HOST=0.0.0.0
-PORT=8802
-EOF
-```
-
-### Step 6: Start the Backend Service
-
-```bash
-# Start backend server
 cd backend
 uv run uvicorn main:app --host 0.0.0.0 --port 8802
-
-# Or run in background with screen (Linux/macOS)
-screen -dmS hyper-arena bash -c "uv run uvicorn main:app --host 0.0.0.0 --port 8802"
 ```
 
-### Step 7: Verify Installation
+Open http://localhost:8802 in your browser.
 
-```bash
-# Check health endpoint
-curl http://localhost:8802/api/health
+### Next Steps
 
-# Expected response: {"status":"healthy"}
-```
-
-### Step 8: Access the Application
-
-Open your browser and navigate to:
-```
-http://localhost:8802
-```
-
-## Usage
-
-### 1. Create an AI Trading Account
-
-1. Click the settings icon in the top-right corner
-2. Click "Add Account"
-3. Fill in the account details:
-   - **Account Name**: e.g., "GPT-5 Trader"
-   - **Model Name**: e.g., `gpt-5-mini`, `deepseek-chat`, `claude-3-5-sonnet`
-   - **Base URL**: API endpoint (default: `https://api.openai.com/v1`)
-   - **API Key**: Your LLM provider API key
-   - **Initial Capital**: Starting balance (default: $10,000)
-4. Click "Test Connection" to verify the API configuration
-5. Click "Save" to create the account
-
-### 2. Enable Auto Trading
-
-1. In the account settings, find the trading account
-2. Toggle the "Auto Trading" switch
-3. The AI model will start making trading decisions at regular intervals
-4. Monitor performance on the main dashboard
-
-### 3. View Performance
-
-- **Portfolio Value**: Real-time account balance
-- **Positions**: Current open positions
-- **Trade History**: Past trading decisions
-- **Performance Metrics**: PnL, win rate, and other statistics
+Configure your AI trading accounts through the web interface. All settings (API keys, models, trading parameters) are managed via the UI.
 
 ## Supported LLM Models
 
@@ -266,27 +171,6 @@ http://localhost:8802
 - [ ] User-submitted AI agents
 - [ ] On-chain trade verification
 - [ ] Mobile-responsive UI
-
-## Development
-
-### Running in Development Mode
-
-```bash
-# Start backend with auto-reload
-cd backend
-uv run uvicorn main:app --reload --port 8802
-
-# Start frontend dev server (optional)
-cd frontend
-pnpm run dev
-```
-
-### Running Tests
-
-```bash
-cd backend
-uv run pytest
-```
 
 ## Key Improvements Over Original Project
 
