@@ -42,9 +42,15 @@ This project is based on [open-alpha-arena](https://github.com/etrobot/open-alph
 ### Main Dashboard
 <img width="2198" height="1141" alt="image" src="https://github.com/user-attachments/assets/a5363a13-7977-4aa2-9441-da2376e3074f" />
 
+### Model Chat Prompt
+<img width="1843" height="1111" alt="image" src="https://github.com/user-attachments/assets/daafe0ab-a584-46ba-8805-d50aa4696ad3" />
 
 ### AI Trader Configuration
-<img width="683" height="787" alt="image" src="https://github.com/user-attachments/assets/71c9977c-eaed-42f0-b879-93838d27a1be" />
+<img width="1849" height="1107" alt="image" src="https://github.com/user-attachments/assets/e59d59ae-0cf2-4665-9d59-7fc016e55d3b" />
+
+### System Log
+<img width="1854" height="1120" alt="image" src="https://github.com/user-attachments/assets/59fe62ac-77a4-498b-a09a-ca8f8ec19620" />
+
 
 
 ## Quick Start
