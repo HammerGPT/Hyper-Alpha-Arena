@@ -1,6 +1,6 @@
-import React, { useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import AssetCurveWithData from './AssetCurveWithData'
-import TradingPanel from '@/components/trading/TradingPanel'
+import StrategyPanel from '@/components/portfolio/StrategyPanel'
 import { AIDecision } from '@/lib/api'
 import AlphaArenaFeed from './AlphaArenaFeed'
 import ArenaAnalyticsFeed from './ArenaAnalyticsFeed'
@@ -76,7 +76,7 @@ interface AccountDataViewProps {
   onRefreshData: () => void
   accountRefreshTrigger?: number
   showAssetCurves?: boolean
-  showTradingPanel?: boolean
+  showStrategyPanel?: boolean
   accounts?: any[]
   loadingAccounts?: boolean
 }
@@ -90,9 +90,41 @@ export default function AccountDataView(props: AccountDataViewProps) {
     onSwitchAccount,
     accountRefreshTrigger,
     showAssetCurves = true,
-    showTradingPanel = false,
+    showStrategyPanel = false,
   } = props
   const [selectedArenaAccount, setSelectedArenaAccount] = useState<number | 'all'>('all')
+  const currentAccountId = overview?.account?.id ?? null
+
+  useEffect(() => {
+    if (!currentAccountId) return
+    if (selectedArenaAccount === 'all') return
+    if (selectedArenaAccount !== currentAccountId) {
+      setSelectedArenaAccount(currentAccountId)
+    }
+  }, [currentAccountId, selectedArenaAccount])
+
+  const handleArenaAccountChange = useCallback((value: number | 'all') => {
+    setSelectedArenaAccount(value)
+    if (value !== 'all' && currentAccountId !== value) {
+      onSwitchAccount(value)
+    }
+  }, [onSwitchAccount, currentAccountId])
+
+  const handleStrategyAccountChange = useCallback((accountId: number) => {
+    setSelectedArenaAccount(accountId)
+    if (currentAccountId !== accountId) {
+      onSwitchAccount(accountId)
+    }
+  }, [onSwitchAccount, currentAccountId])
+
+  const strategyAccounts = useMemo(() => {
+    if (!props.accounts || props.accounts.length === 0) return []
+    return props.accounts.map((account: any) => ({
+      id: account.id,
+      name: account.name || account.username || `Trader ${account.id}`,
+      model: account.model ?? null,
+    }))
+  }, [props.accounts])
 
   if (!overview) {
     return (
@@ -117,52 +149,36 @@ export default function AccountDataView(props: AccountDataViewProps) {
           </div>
         )}
 
-        {/* Tabs and Trading Panel */}
+        {/* Tabs and Strategy Panel */}
         <div className={`${showAssetCurves ? 'col-span-2' : 'col-span-1'} overflow-hidden flex flex-col min-h-0`}>
           {/* Content Area */}
-          <div className={`flex-1 h-0 overflow-hidden ${showTradingPanel ? 'grid grid-cols-4 gap-4' : ''}`}>
-            <div className={`${showTradingPanel ? 'col-span-3' : 'col-span-1'} h-full overflow-hidden flex flex-col`}>
+          <div className={`flex-1 h-0 overflow-hidden ${showStrategyPanel ? 'grid grid-cols-4 gap-4' : ''}`}>
+            <div className={`${showStrategyPanel ? 'col-span-3' : 'col-span-1'} h-full overflow-hidden flex flex-col`}>
               {showAssetCurves ? (
                 <AlphaArenaFeed
                   refreshKey={accountRefreshTrigger}
                   wsRef={wsRef}
                   selectedAccount={selectedArenaAccount}
-                  onSelectedAccountChange={setSelectedArenaAccount}
+                  onSelectedAccountChange={handleArenaAccountChange}
                 />
               ) : (
                 <ArenaAnalyticsFeed
                   refreshKey={accountRefreshTrigger}
                   selectedAccount={selectedArenaAccount}
-                  onSelectedAccountChange={setSelectedArenaAccount}
+                  onSelectedAccountChange={handleArenaAccountChange}
                 />
               )}
             </div>
 
-            {showTradingPanel && (
+            {showStrategyPanel && overview?.account && (
               <div className="col-span-1 overflow-hidden min-h-0">
-                <TradingPanel
-                  onPlace={(payload) => {
-                    if (wsRef?.current && wsRef.current.readyState === WebSocket.OPEN) {
-                      wsRef.current.send(JSON.stringify({
-                        type: 'place_order',
-                        ...payload
-                      }))
-                    }
-                  }}
-                  user={overview?.account ? {
-                    id: overview.account.id.toString(),
-                    current_cash: overview.account.current_cash,
-                    frozen_cash: overview.account.frozen_cash,
-                    has_password: true
-                  } : undefined}
-                  positions={positions.map(p => ({
-                    symbol: p.symbol,
-                    market: p.market,
-                    available_quantity: p.available_quantity
-                  }))}
-                  lastPrices={Object.fromEntries(
-                    positions.map(p => [`${p.symbol}.${p.market}`, p.last_price ?? null])
-                  )}
+                <StrategyPanel
+                  accountId={overview.account.id}
+                  accountName={overview.account.name}
+                  refreshKey={accountRefreshTrigger}
+                  accounts={strategyAccounts}
+                  onAccountChange={handleStrategyAccountChange}
+                  accountsLoading={props.loadingAccounts}
                 />
               </div>
             )}

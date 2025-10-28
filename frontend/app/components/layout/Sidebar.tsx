@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { PieChart, Settings, TrendingUp, BarChart3 } from 'lucide-react'
+import { PieChart, Settings, TrendingUp, BarChart3, FileText } from 'lucide-react'
 import SettingsDialog from './SettingsDialog'
 
 interface SidebarProps {
@@ -38,6 +38,18 @@ export default function Sidebar({ currentPage = 'comprehensive', onPageChange, o
             title="Portfolio"
           >
             <PieChart className="w-5 h-5" />
+          </button>
+
+          <button
+            className={`flex items-center justify-center w-10 h-10 rounded-lg transition-colors ${
+              currentPage === 'system-logs'
+                ? 'bg-secondary/80 text-secondary-foreground'
+                : 'hover:bg-muted text-muted-foreground'
+            }`}
+            onClick={() => onPageChange?.('system-logs')}
+            title="System Logs"
+          >
+            <FileText className="w-5 h-5" />
           </button>
 
           <button

@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 import os
 
 from database.connection import engine, Base, SessionLocal
@@ -39,6 +40,20 @@ def on_startup():
     # Seed trading configs if empty
     db: Session = SessionLocal()
     try:
+        # Ensure AI decision log table has snapshot columns (backfill on existing installs)
+        try:
+            columns = {row[1] for row in db.execute(text("PRAGMA table_info(ai_decision_logs)"))}
+            if "prompt_snapshot" not in columns:
+                db.execute(text("ALTER TABLE ai_decision_logs ADD COLUMN prompt_snapshot TEXT"))
+            if "reasoning_snapshot" not in columns:
+                db.execute(text("ALTER TABLE ai_decision_logs ADD COLUMN reasoning_snapshot TEXT"))
+            if "decision_snapshot" not in columns:
+                db.execute(text("ALTER TABLE ai_decision_logs ADD COLUMN decision_snapshot TEXT"))
+            db.commit()
+        except Exception as migration_err:
+            db.rollback()
+            print(f"[startup] Failed to ensure AI decision log snapshot columns: {migration_err}")
+
         if db.query(TradingConfig).count() == 0:
             for cfg in DEFAULT_TRADING_CONFIGS.values():
                 db.add(
@@ -111,6 +126,10 @@ def on_startup():
     finally:
         db.close()
     
+    # Initialize system log collector
+    from services.system_logger import setup_system_logger
+    setup_system_logger()
+
     # Initialize all services (scheduler, market data tasks, auto trading, etc.)
     from services.startup import initialize_services
     initialize_services()
@@ -131,6 +150,7 @@ from api.config_routes import router as config_router
 from api.ranking_routes import router as ranking_router
 from api.crypto_routes import router as crypto_router
 from api.arena_routes import router as arena_router
+from api.system_log_routes import router as system_log_router
 # Removed: AI account routes merged into account_routes (unified AI trader accounts)
 
 app.include_router(market_data_router)
@@ -140,6 +160,7 @@ app.include_router(config_router)
 app.include_router(ranking_router)
 app.include_router(crypto_router)
 app.include_router(arena_router)
+app.include_router(system_log_router)
 # app.include_router(ai_account_router, prefix="/api")  # Removed - merged into account_router
 
 # WebSocket endpoint

@@ -495,14 +495,14 @@ export default function AssetCurve({ data: initialData, wsRef, highlightAccountI
       {/* AI Trader Asset Ranking */}
       <div className="mt-6">
         <div className="text-xs font-medium mb-3 text-secondary-foreground">AI Trader Asset Ranking</div>
-        <div className="flex flex-wrap gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {rankedAccounts.map((account, index) => {
             const accountId = accountByUsername.get(account.username)
             const isMuted = highlightActive && accountId !== highlightAccountId
             return (
               <div
                 key={account.username}
-                className="bg-white dark:bg-background border-2 border-gray-900 dark:border-gray-200 px-4 py-3 rounded-lg flex items-center gap-3"
+                className="bg-white dark:bg-background border-2 border-gray-900 dark:border-gray-200 px-4 py-3 rounded-lg flex items-center gap-3 min-w-0"
               >
                 {account.logo ? (
                   <img
@@ -516,7 +516,7 @@ export default function AssetCurve({ data: initialData, wsRef, highlightAccountI
                     {account.username.slice(0, 2).toUpperCase()}
                   </div>
                 )}
-                <div className={`transition-opacity ${isMuted ? 'opacity-40' : ''}`}>
+                <div className={`min-w-0 transition-opacity ${isMuted ? 'opacity-40' : ''}`}>
                   <div className="text-xs font-medium text-secondary-foreground">
                     {account.username.replace('default_', '').toUpperCase()}
                   </div>

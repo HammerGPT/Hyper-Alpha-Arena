@@ -10,6 +10,11 @@ from services.auto_trader import (
     AI_TRADE_JOB_ID
 )
 from services.scheduler import start_scheduler, setup_market_tasks, task_scheduler
+from services.market_stream import start_market_stream, stop_market_stream
+from services.market_events import subscribe_price_updates, unsubscribe_price_updates
+from services.asset_snapshot_service import handle_price_update
+from services.trading_commands import AI_TRADING_SYMBOLS
+from services.trading_strategy import start_trading_strategy_manager, stop_trading_strategy_manager
 
 logger = logging.getLogger(__name__)
 
@@ -20,15 +25,11 @@ def initialize_services():
         # Start the scheduler
         start_scheduler()
         logger.info("Scheduler service started")
-        
+
         # Set up market-related scheduled tasks
         setup_market_tasks()
         logger.info("Market scheduled tasks have been set up")
 
-        # Start automatic cryptocurrency trading simulation task (5-minute interval)
-        schedule_auto_trading(interval_seconds=300)
-        logger.info("Automatic cryptocurrency trading task started (5-minute interval)")
-        
         # Add price cache cleanup task (every 2 minutes)
         from services.price_cache import clear_expired_prices
         task_scheduler.add_interval_task(
@@ -38,13 +39,26 @@ def initialize_services():
         )
         logger.info("Price cache cleanup task started (2-minute interval)")
 
+        # Start market data stream and subscribe asset snapshot handler
+        start_market_stream(AI_TRADING_SYMBOLS, interval_seconds=1.5)
+        subscribe_price_updates(handle_price_update)
+        logger.info("Market data stream initialized with asset snapshot handler")
+
+        # Start price snapshot logger (every 60 seconds)
+        from services.system_logger import price_snapshot_logger
+        price_snapshot_logger.start()
+        logger.info("Price snapshot logger started (60-second interval)")
+
+        # Start AI trading strategy manager
+        start_trading_strategy_manager()
+
         # Start asset curve broadcast task (every 60 seconds)
         from services.scheduler import start_asset_curve_broadcast
         start_asset_curve_broadcast()
         logger.info("Asset curve broadcast task started (60-second interval)")
 
         logger.info("All services initialized successfully")
-        
+
     except Exception as e:
         logger.error(f"Service initialization failed: {e}")
         raise
@@ -54,9 +68,14 @@ def shutdown_services():
     """Shut down all services"""
     try:
         from services.scheduler import stop_scheduler
+        from services.system_logger import price_snapshot_logger
+        stop_trading_strategy_manager()
+        stop_market_stream()
+        unsubscribe_price_updates(handle_price_update)
+        price_snapshot_logger.stop()
         stop_scheduler()
         logger.info("All services have been shut down")
-        
+
     except Exception as e:
         logger.error(f"Failed to shut down services: {e}")
 

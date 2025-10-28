@@ -175,6 +175,23 @@ export interface TradingAccountUpdate {
   auto_trading_enabled?: boolean
 }
 
+export type StrategyTriggerMode = 'realtime' | 'interval' | 'tick_batch'
+
+export interface StrategyConfig {
+  trigger_mode: StrategyTriggerMode
+  interval_seconds?: number | null
+  tick_batch_size?: number | null
+  enabled: boolean
+  last_trigger_at?: string | null
+}
+
+export interface StrategyConfigUpdate {
+  trigger_mode: StrategyTriggerMode
+  interval_seconds?: number | null
+  tick_batch_size?: number | null
+  enabled: boolean
+}
+
 
 export async function loginUser(username: string, password: string): Promise<UserAuthResponse> {
   const response = await apiRequest('/users/login', {
@@ -199,6 +216,19 @@ export async function createTradingAccount(account: TradingAccountCreate, sessio
   const response = await apiRequest(`/accounts/?session_token=${sessionToken}`, {
     method: 'POST',
     body: JSON.stringify(account),
+  })
+  return response.json()
+}
+
+export async function getAccountStrategy(accountId: number): Promise<StrategyConfig> {
+  const response = await apiRequest(`/account/${accountId}/strategy`)
+  return response.json()
+}
+
+export async function updateAccountStrategy(accountId: number, config: StrategyConfigUpdate): Promise<StrategyConfig> {
+  const response = await apiRequest(`/account/${accountId}/strategy`, {
+    method: 'PUT',
+    body: JSON.stringify(config),
   })
   return response.json()
 }
@@ -325,6 +355,13 @@ export interface ArenaModelChatEntry {
   total_balance: number
   order_id?: number | null
   decision_time?: string | null
+  trigger_mode?: StrategyTriggerMode | null
+  strategy_enabled?: boolean
+  last_trigger_at?: string | null
+  trigger_latency_seconds?: number | null
+  prompt_snapshot?: string | null
+  reasoning_snapshot?: string | null
+  decision_snapshot?: string | null
 }
 
 export interface ArenaModelChatResponse {

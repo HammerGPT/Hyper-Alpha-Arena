@@ -4,7 +4,7 @@ Trading Commands Service - Handles order execution and trading logic
 import logging
 import random
 from decimal import Decimal
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple, List, Iterable
 
 from sqlalchemy.orm import Session
 
@@ -79,14 +79,26 @@ def _select_side(db: Session, account: Account, symbol: str, max_value: float) -
     return side, quantity
 
 
-def place_ai_driven_crypto_order(max_ratio: float = 0.2) -> None:
-    """Place crypto order based on AI model decision for all active accounts"""
+def place_ai_driven_crypto_order(max_ratio: float = 0.2, account_ids: Optional[Iterable[int]] = None) -> None:
+    """Place crypto order based on AI model decision.
+
+    Args:
+        max_ratio: maximum portion of portfolio to allocate per trade.
+        account_ids: optional iterable of account IDs to process (defaults to all active accounts).
+    """
     db = SessionLocal()
     try:
         accounts = get_active_ai_accounts(db)
         if not accounts:
             logger.debug("No available accounts, skipping AI trading")
             return
+
+        if account_ids is not None:
+            id_set = {int(acc_id) for acc_id in account_ids}
+            accounts = [acc for acc in accounts if acc.id in id_set]
+            if not accounts:
+                logger.debug("No matching accounts for provided IDs: %s", account_ids)
+                return
 
         # Get latest market prices once for all accounts
         prices = _get_market_prices(AI_TRADING_SYMBOLS)

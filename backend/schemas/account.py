@@ -43,3 +43,21 @@ class AccountOverview(BaseModel):
     account: AccountOut
     total_assets: float  # Total assets in USD
     positions_value: float  # Total positions value in USD
+
+
+class StrategyConfigBase(BaseModel):
+    """Base fields shared by strategy config schemas"""
+    trigger_mode: str
+    interval_seconds: Optional[int] = None
+    tick_batch_size: Optional[int] = None
+    enabled: bool = True
+
+
+class StrategyConfigUpdate(StrategyConfigBase):
+    """Incoming payload for updating strategy configuration"""
+    pass
+
+
+class StrategyConfig(StrategyConfigBase):
+    """Strategy configuration response"""
+    last_trigger_at: Optional[str] = None

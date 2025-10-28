@@ -4,7 +4,7 @@ Provides completed trades, model chat summaries, and consolidated positions
 for showcasing multi-model trading activity on the dashboard.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from math import sqrt
 from statistics import mean, pstdev
 from typing import Dict, List, Optional, Tuple
@@ -20,6 +20,7 @@ from database.models import (
     Position,
     AIDecisionLog,
     Order,
+    AccountStrategyConfig,
 )
 from services.asset_calculator import calc_positions_value
 from services.price_cache import get_cached_price, cache_price
@@ -295,7 +296,39 @@ def get_model_chat(
 
     entries: List[dict] = []
 
+    account_ids = {account.id for _, account in decision_rows}
+    strategy_map = {
+        cfg.account_id: cfg
+        for cfg in db.query(AccountStrategyConfig)
+        .filter(AccountStrategyConfig.account_id.in_(account_ids))
+        .all()
+    }
+
     for log, account in decision_rows:
+        strategy = strategy_map.get(account.id)
+        last_trigger_iso = None
+        trigger_latency = None
+        trigger_mode = None
+        strategy_enabled = None
+
+        if strategy:
+            trigger_mode = strategy.trigger_mode
+            strategy_enabled = strategy.enabled == "true"
+            if strategy.last_trigger_at:
+                last_dt = strategy.last_trigger_at
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+                last_trigger_iso = last_dt.isoformat()
+
+                log_dt = log.decision_time
+                if log_dt:
+                    if log_dt.tzinfo is None:
+                        log_dt = log_dt.replace(tzinfo=timezone.utc)
+                    try:
+                        trigger_latency = abs((log_dt - last_dt).total_seconds())
+                    except Exception:
+                        trigger_latency = None
+
         entries.append(
             {
                 "id": log.id,
@@ -313,6 +346,13 @@ def get_model_chat(
                 "decision_time": log.decision_time.isoformat()
                 if log.decision_time
                 else None,
+                "trigger_mode": trigger_mode,
+                "strategy_enabled": strategy_enabled,
+                "last_trigger_at": last_trigger_iso,
+                "trigger_latency_seconds": trigger_latency,
+                "prompt_snapshot": log.prompt_snapshot,
+                "reasoning_snapshot": log.reasoning_snapshot,
+                "decision_snapshot": log.decision_snapshot,
             }
         )
 

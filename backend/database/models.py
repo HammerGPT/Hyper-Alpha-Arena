@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DECIMAL, TIMESTAMP, ForeignKey, UniqueConstraint, Float, Date, DateTime
+from sqlalchemy import Column, Integer, String, DECIMAL, TIMESTAMP, ForeignKey, UniqueConstraint, Float, Date, DateTime, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import datetime
@@ -209,6 +209,51 @@ class CryptoKline(Base):
     __table_args__ = (UniqueConstraint('symbol', 'market', 'period', 'timestamp'),)
 
 
+class CryptoPriceTick(Base):
+    __tablename__ = "crypto_price_ticks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    market = Column(String(10), nullable=False, default="CRYPTO")
+    price = Column(DECIMAL(18, 8), nullable=False)
+    event_time = Column(TIMESTAMP, nullable=False, index=True)
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+
+
+class AccountAssetSnapshot(Base):
+    __tablename__ = "account_asset_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False, index=True)
+    total_assets = Column(DECIMAL(18, 6), nullable=False)
+    cash = Column(DECIMAL(18, 6), nullable=False)
+    positions_value = Column(DECIMAL(18, 6), nullable=False)
+    trigger_symbol = Column(String(20), nullable=True)
+    trigger_market = Column(String(10), nullable=True, default="CRYPTO")
+    event_time = Column(TIMESTAMP, nullable=False, index=True)
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
+
+    account = relationship("Account")
+
+
+class AccountStrategyConfig(Base):
+    __tablename__ = "account_strategy_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False, unique=True)
+    trigger_mode = Column(String(20), nullable=False, default="realtime")  # realtime / interval / tick_batch
+    interval_seconds = Column(Integer, nullable=True)  # for interval mode
+    tick_batch_size = Column(Integer, nullable=True)  # for tick_batch mode
+    enabled = Column(String(10), nullable=False, default="true")
+    last_trigger_at = Column(TIMESTAMP, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at = Column(
+        TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
+    )
+
+    account = relationship("Account")
+
+
 class AIDecisionLog(Base):
     __tablename__ = "ai_decision_logs"
 
@@ -223,6 +268,9 @@ class AIDecisionLog(Base):
     total_balance = Column(DECIMAL(18, 2), nullable=False)  # total balance at decision time
     executed = Column(String(10), nullable=False, default="false")  # whether the decision was executed
     order_id = Column(Integer, ForeignKey("orders.id"), nullable=True)  # linked order if executed
+    prompt_snapshot = Column(Text, nullable=True)
+    reasoning_snapshot = Column(Text, nullable=True)
+    decision_snapshot = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
 
     # Relationships

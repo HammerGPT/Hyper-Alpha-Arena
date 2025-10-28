@@ -12,7 +12,10 @@ import logging
 
 from database.connection import SessionLocal
 from database.models import Account, Position, Trade, CryptoPrice
-from services.ai_decision_service import build_chat_completion_endpoints
+from services.ai_decision_service import build_chat_completion_endpoints, _extract_text_from_message
+from schemas.account import StrategyConfig, StrategyConfigUpdate
+from repositories.strategy_repo import get_strategy_by_account, upsert_strategy
+from services.trading_strategy import strategy_manager
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +40,26 @@ def _normalize_bool(value, default=True) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"true", "1", "yes", "y", "on"}
     return bool(value)
+
+
+def _serialize_strategy(account: Account, strategy) -> StrategyConfig:
+    """Convert database strategy config to API schema."""
+    last_trigger = strategy.last_trigger_at
+    if last_trigger:
+        if last_trigger.tzinfo is None:
+            last_iso = last_trigger.replace(tzinfo=timezone.utc).isoformat()
+        else:
+            last_iso = last_trigger.astimezone(timezone.utc).isoformat()
+    else:
+        last_iso = None
+
+    return StrategyConfig(
+        trigger_mode=strategy.trigger_mode or "realtime",
+        interval_seconds=strategy.interval_seconds,
+        tick_batch_size=strategy.tick_batch_size,
+        enabled=(strategy.enabled == "true" and account.auto_trading_enabled == "true"),
+        last_trigger_at=last_iso,
+    )
 
 
 @router.get("/list")
@@ -118,6 +141,85 @@ async def get_specific_account_overview(account_id: int, db: Session = Depends(g
     except Exception as e:
         logger.error(f"Failed to get account {account_id} overview: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get account overview: {str(e)}")
+
+
+@router.get("/{account_id}/strategy", response_model=StrategyConfig)
+async def get_account_strategy(account_id: int, db: Session = Depends(get_db)):
+    """Fetch AI trading strategy configuration for an account."""
+    account = (
+        db.query(Account)
+        .filter(Account.id == account_id, Account.is_active == "true")
+        .first()
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    strategy = get_strategy_by_account(db, account_id)
+    if not strategy:
+        strategy = upsert_strategy(
+            db,
+            account_id=account_id,
+            trigger_mode="realtime",
+            interval_seconds=1,
+            tick_batch_size=1,
+            enabled=(account.auto_trading_enabled == "true"),
+        )
+        strategy_manager.refresh_strategies(force=True)
+
+    return _serialize_strategy(account, strategy)
+
+
+@router.put("/{account_id}/strategy", response_model=StrategyConfig)
+async def update_account_strategy(
+    account_id: int,
+    payload: StrategyConfigUpdate,
+    db: Session = Depends(get_db),
+):
+    """Update AI trading strategy configuration for an account."""
+    account = (
+        db.query(Account)
+        .filter(Account.id == account_id, Account.is_active == "true")
+        .first()
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    valid_modes = {"realtime", "interval", "tick_batch"}
+    if payload.trigger_mode not in valid_modes:
+        raise HTTPException(status_code=400, detail="Invalid trigger_mode")
+
+    if payload.trigger_mode == "interval":
+        if payload.interval_seconds is None or payload.interval_seconds <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="interval_seconds must be > 0 for interval mode",
+            )
+    else:
+        interval_seconds = None
+
+    if payload.trigger_mode == "tick_batch":
+        if payload.tick_batch_size is None or payload.tick_batch_size <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="tick_batch_size must be > 0 for tick_batch mode",
+            )
+    else:
+        tick_batch_size = None
+
+    interval_seconds = payload.interval_seconds if payload.trigger_mode == "interval" else None
+    tick_batch_size = payload.tick_batch_size if payload.trigger_mode == "tick_batch" else None
+
+    strategy = upsert_strategy(
+        db,
+        account_id=account_id,
+        trigger_mode=payload.trigger_mode,
+        interval_seconds=interval_seconds,
+        tick_batch_size=tick_batch_size,
+        enabled=payload.enabled,
+    )
+
+    strategy_manager.refresh_strategies(force=True)
+    return _serialize_strategy(account, strategy)
 
 
 @router.get("/overview")
@@ -600,18 +702,19 @@ async def test_llm_connection(payload: dict):
                         finish_reason = choice.get("finish_reason", "")
 
                         # Get content from message
-                        content = message.get("content", "")
+                        raw_content = message.get("content")
+                        content = _extract_text_from_message(raw_content)
 
                         # For reasoning models (GPT-5, o1), check reasoning field if content is empty
                         if not content and is_reasoning_model:
-                            reasoning = message.get("reasoning", "")
+                            reasoning = _extract_text_from_message(message.get("reasoning"))
                             if reasoning:
-                                # Use reasoning content as proof of successful connection
                                 logger.info(f"LLM test successful for model {model} at {endpoint} (reasoning model)")
+                                snippet = reasoning[:100] + "..." if len(reasoning) > 100 else reasoning
                                 return {
                                     "success": True,
                                     "message": f"Connection successful! Model {model} (reasoning model) responded correctly.",
-                                    "response": f"[Reasoning: {reasoning[:100]}...]" if len(reasoning) > 100 else f"[Reasoning: {reasoning}]"
+                                    "response": f"[Reasoning: {snippet}]"
                                 }
 
                         # Standard content check

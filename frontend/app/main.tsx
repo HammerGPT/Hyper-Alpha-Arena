@@ -17,6 +17,7 @@ import Header from '@/components/layout/Header'
 import Sidebar from '@/components/layout/Sidebar'
 import Portfolio from '@/components/portfolio/Portfolio'
 import ComprehensiveView from '@/components/portfolio/ComprehensiveView'
+import SystemLogs from '@/components/layout/SystemLogs'
 import { AIDecision, getAccounts } from '@/lib/api'
 
 interface User {
@@ -50,6 +51,7 @@ interface Trade { id: number; order_id: number; account_id: number; symbol: stri
 const PAGE_TITLES: Record<string, string> = {
   portfolio: 'Crypto Paper Trading',
   comprehensive: 'Hyper Alpha Arena',
+  'system-logs': 'System Logs',
 }
 
 function App() {
@@ -312,6 +314,10 @@ function App() {
             accounts={accounts}
             loadingAccounts={accountsLoading}
           />
+        )}
+
+        {currentPage === 'system-logs' && (
+          <SystemLogs />
         )}
       </main>
     )

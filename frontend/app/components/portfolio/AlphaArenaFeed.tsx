@@ -80,6 +80,7 @@ export default function AlphaArenaFeed({
     selectedAccountProp ?? 'all',
   )
   const [expandedChat, setExpandedChat] = useState<number | null>(null)
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
   const [manualRefreshKey, setManualRefreshKey] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -259,7 +260,19 @@ export default function AlphaArenaFeed({
     }
     onSelectedAccountChange?.(value)
     setExpandedChat(null)
+    setExpandedSections({})
   }
+
+  const toggleSection = (entryId: number, section: 'prompt' | 'reasoning' | 'decision') => {
+    const key = `${entryId}-${section}`
+    setExpandedSections((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }))
+  }
+
+  const isSectionExpanded = (entryId: number, section: 'prompt' | 'reasoning' | 'decision') =>
+    !!expandedSections[`${entryId}-${section}`]
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -417,7 +430,23 @@ export default function AlphaArenaFeed({
                         <button
                           type="button"
                           className="w-full text-left border border-border rounded bg-muted/30 p-4 space-y-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                          onClick={() => setExpandedChat((current) => (current === entry.id ? null : entry.id))}
+                          onClick={() =>
+                            setExpandedChat((current) => {
+                              const next = current === entry.id ? null : entry.id
+                              if (current === entry.id) {
+                                setExpandedSections((prev) => {
+                                  const nextState = { ...prev }
+                                  Object.keys(nextState).forEach((key) => {
+                                    if (key.startsWith(`${entry.id}-`)) {
+                                      delete nextState[key]
+                                    }
+                                  })
+                                  return nextState
+                                })
+                              }
+                              return next
+                            })
+                          }
                         >
                         <div className="flex flex-wrap items-center justify-between gap-2 text-xs uppercase tracking-wide text-muted-foreground">
                           <div className="flex items-center gap-2">
@@ -451,16 +480,65 @@ export default function AlphaArenaFeed({
                         <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground uppercase tracking-wide">
                           <span>{formatTriggerMode(entry.trigger_mode)}</span>
                           <span>{entry.strategy_enabled ? 'Strategy Enabled' : 'Strategy Disabled'}</span>
-                          {entry.last_trigger_at && (
-                            <span>Last Trigger {formatDate(entry.last_trigger_at)}</span>
-                          )}
-                          {typeof entry.trigger_latency_seconds === 'number' && (
-                            <span>Trigger Latency {entry.trigger_latency_seconds.toFixed(1)}s</span>
-                          )}
                         </div>
                         <div className="text-xs text-muted-foreground">
                           {isExpanded ? entry.reason : `${entry.reason.slice(0, 160)}${entry.reason.length > 160 ? '…' : ''}`}
                         </div>
+                        {isExpanded && (
+                          <div className="space-y-2 pt-3">
+                            {[{
+                              label: 'USER_PROMPT' as const,
+                              section: 'prompt' as const,
+                              content: entry.prompt_snapshot,
+                              empty: 'No prompt available',
+                            }, {
+                              label: 'CHAIN_OF_THOUGHT' as const,
+                              section: 'reasoning' as const,
+                              content: entry.reasoning_snapshot,
+                              empty: 'No reasoning available',
+                            }, {
+                              label: 'TRADING_DECISIONS' as const,
+                              section: 'decision' as const,
+                              content: entry.decision_snapshot,
+                              empty: 'No decision payload available',
+                            }].map(({ label, section, content, empty }) => {
+                              const open = isSectionExpanded(entry.id, section)
+                              const displayContent = content?.trim()
+                              return (
+                                <div key={section} className="border border-border/60 rounded-md bg-background/60">
+                                  <button
+                                    type="button"
+                                    className="flex w-full items-center justify-between px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+                                    onClick={(event) => {
+                                      event.stopPropagation()
+                                      toggleSection(entry.id, section)
+                                    }}
+                                  >
+                                    <span className="flex items-center gap-2">
+                                      <span className="text-xs">{open ? '▼' : '▶'}</span>
+                                      {label.replace(/_/g, ' ')}
+                                    </span>
+                                    <span className="text-[10px] text-muted-foreground/80">{open ? 'Hide details' : 'Show details'}</span>
+                                  </button>
+                                  {open && (
+                                    <div
+                                      className="border-t border-border/40 bg-muted/40 px-3 py-3 text-xs text-muted-foreground"
+                                      onClick={(event) => event.stopPropagation()}
+                                    >
+                                      {displayContent ? (
+                                        <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground/90">
+                                          {displayContent}
+                                        </pre>
+                                      ) : (
+                                        <span className="text-muted-foreground/70">{empty}</span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
                         <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground uppercase tracking-wide">
                           <span>Prev Portion: <span className="font-semibold text-foreground">{(entry.prev_portion * 100).toFixed(1)}%</span></span>
                           <span>Target Portion: <span className="font-semibold text-foreground">{(entry.target_portion * 100).toFixed(1)}%</span></span>

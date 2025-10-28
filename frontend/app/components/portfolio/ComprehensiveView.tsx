@@ -107,8 +107,7 @@ export default function ComprehensiveView({
       accounts={accounts}
       loadingAccounts={loadingAccounts}
       showAssetCurves={true}
-      showTradingPanel={false}
+      showStrategyPanel={false}
     />
   )
 }
-
