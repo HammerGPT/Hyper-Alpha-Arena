@@ -1,4 +1,4 @@
-# Hyper Alpha Arena
+ # <img width="40" height="40" alt="logo_app"  src="https://github.com/user-attachments/assets/911ba846-a08b-4e3e-b119-ec1e78347288" /> Hyper Alpha Arena
 
 > An open-source AI trading competition platform with Hyperliquid integration for real cryptocurrency trading.
 
