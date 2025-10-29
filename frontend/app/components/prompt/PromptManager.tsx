@@ -218,40 +218,38 @@ export default function PromptManager() {
   return (
     <div className="h-full w-full overflow-hidden flex flex-col gap-4">
       <div className="flex flex-col lg:flex-row gap-4 h-full overflow-hidden">
-        <Card className="w-full lg:w-64 flex-shrink-0">
-          <CardHeader>
-            <CardTitle className="text-sm">Templates</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ScrollArea className="h-[320px]">
-              <div className="flex flex-col gap-2">
-                {templates.map((tpl) => (
-                  <Button
-                    key={tpl.id}
-                    variant={tpl.key === selectedKey ? 'default' : 'outline'}
-                    className="justify-start"
-                    onClick={() => handleSelectTemplate(tpl.key)}
-                    disabled={loading}
-                  >
-                    <div className="flex flex-col items-start">
-                      <span className="font-semibold text-sm">{tpl.name}</span>
-                      <span className="text-xs text-muted-foreground">{tpl.key}</span>
-                    </div>
-                  </Button>
-                ))}
-              </div>
-            </ScrollArea>
-          </CardContent>
-        </Card>
-
+        {/* LEFT COLUMN - Template Selection + Edit Area */}
         <div className="flex-1 flex flex-col gap-4 overflow-hidden">
           <Card className="flex-1 overflow-hidden">
             <CardHeader>
-              <CardTitle className="text-base">
-                {selectedTemplate ? selectedTemplate.name : 'Select a template'}
-              </CardTitle>
+              <CardTitle className="text-base">Prompt Template Editor</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-4 h-full overflow-hidden">
+              {/* Template Selection Dropdown */}
+              <div>
+                <label className="text-xs uppercase text-muted-foreground">Template</label>
+                <Select
+                  value={selectedKey || ''}
+                  onValueChange={handleSelectTemplate}
+                  disabled={loading}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={loading ? 'Loading...' : 'Select a template'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {templates.map((tpl) => (
+                      <SelectItem key={tpl.id} value={tpl.key}>
+                        <div className="flex flex-col items-start">
+                          <span className="font-semibold">{tpl.name}</span>
+                          <span className="text-xs text-muted-foreground">{tpl.key}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Description Input */}
               <div>
                 <label className="text-xs uppercase text-muted-foreground">Description</label>
                 <Input
@@ -262,6 +260,7 @@ export default function PromptManager() {
                 />
               </div>
 
+              {/* Template Text Area */}
               <div className="flex-1 flex flex-col overflow-hidden">
                 <label className="text-xs uppercase text-muted-foreground">Template Text</label>
                 <textarea
@@ -272,6 +271,7 @@ export default function PromptManager() {
                 />
               </div>
 
+              {/* Action Buttons */}
               <div className="flex justify-end gap-2">
                 <Button
                   variant="outline"
@@ -286,61 +286,66 @@ export default function PromptManager() {
               </div>
             </CardContent>
           </Card>
+        </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Account Prompt Bindings</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead className="text-left text-muted-foreground">
-                    <tr>
-                      <th className="py-2 pr-4">Account</th>
-                      <th className="py-2 pr-4">Model</th>
-                      <th className="py-2 pr-4">Template</th>
-                      <th className="py-2 pr-4 text-right">Actions</th>
+        {/* RIGHT COLUMN - Binding Management */}
+        <Card className="w-full lg:w-[40rem] flex-shrink-0 overflow-hidden">
+          <CardHeader>
+            <CardTitle className="text-base">Account Prompt Bindings</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-6 h-full overflow-hidden">
+            {/* Bindings Table */}
+            <div className="flex-1 overflow-auto">
+              <table className="min-w-full text-sm">
+                <thead className="text-left text-muted-foreground">
+                  <tr>
+                    <th className="py-2 pr-4">Account</th>
+                    <th className="py-2 pr-4">Model</th>
+                    <th className="py-2 pr-4">Template</th>
+                    <th className="py-2 pr-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bindings.map((binding) => (
+                    <tr key={binding.id} className="border-t">
+                      <td className="py-2 pr-4">{binding.accountName}</td>
+                      <td className="py-2 pr-4 text-muted-foreground">
+                        {binding.accountModel || '—'}
+                      </td>
+                      <td className="py-2 pr-4">{binding.promptName}</td>
+                      <td className="py-2 pr-4 text-right space-x-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleEditBinding(binding)}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive"
+                          onClick={() => handleDeleteBinding(binding.id)}
+                        >
+                          Delete
+                        </Button>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {bindings.map((binding) => (
-                      <tr key={binding.id} className="border-t">
-                        <td className="py-2 pr-4">{binding.accountName}</td>
-                        <td className="py-2 pr-4 text-muted-foreground">
-                          {binding.accountModel || '—'}
-                        </td>
-                        <td className="py-2 pr-4">{binding.promptName}</td>
-                        <td className="py-2 pr-4 text-right space-x-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleEditBinding(binding)}
-                          >
-                            Edit
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-destructive"
-                            onClick={() => handleDeleteBinding(binding.id)}
-                          >
-                            Delete
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                    {bindings.length === 0 && (
-                      <tr>
-                        <td colSpan={4} className="py-4 text-center text-muted-foreground">
-                          No prompt bindings configured.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+                  {bindings.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="py-4 text-center text-muted-foreground">
+                        No prompt bindings configured.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* Binding Form */}
+            <div className="space-y-4 border-t pt-4">
+              <div className="grid grid-cols-1 gap-3">
                 <div>
                   <label className="text-xs uppercase text-muted-foreground">
                     AI Trader
@@ -411,9 +416,9 @@ export default function PromptManager() {
                   Save Binding
                 </Button>
               </div>
-            </CardContent>
-          </Card>
-        </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   )
