@@ -1,7 +1,7 @@
 #!/bin/bash
 # Alpha Arena Startup Script with System Logging
 
-cd /home/wwwroot/open-alpha-arena/backend
+cd /home/Hyper-Alpha-Arena/backend
 
 echo "=== Alpha Arena Startup Script ==="
 echo "Starting backend service on port 8802..."
