@@ -14,7 +14,7 @@ if screen -list | grep -q "alpha-arena"; then
 fi
 
 # Start new screen session with virtual environment
-screen -dmS alpha-arena bash -c "cd /home/wwwroot/open-alpha-arena/backend && .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8802"
+screen -dmS alpha-arena bash -c "cd /home/Hyper-Alpha-Arena/backend && .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8802"
 
 # Wait for service to start
 echo "Waiting for service to start..."
