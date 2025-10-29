@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react'
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   ArenaAccountMeta,
@@ -26,6 +26,19 @@ type FeedTab = 'trades' | 'model-chat' | 'positions'
 
 const DEFAULT_LIMIT = 100
 const MODEL_CHAT_LIMIT = 60
+const CACHE_STALE_MS = 45_000
+
+type CacheKey = string
+
+interface FeedCacheEntry {
+  trades: ArenaTrade[]
+  modelChat: ArenaModelChatEntry[]
+  positions: ArenaPositionsAccount[]
+  accountsMeta: ArenaAccountMeta[]
+  lastFetched: number
+}
+
+const FEED_CACHE = new Map<CacheKey, FeedCacheEntry>()
 
 function formatCurrency(value: number, minimumFractionDigits = 2) {
   return value.toLocaleString(undefined, {
@@ -88,6 +101,8 @@ export default function AlphaArenaFeed({
   // Track seen items for highlight animation
   const seenTradeIds = useRef<Set<number>>(new Set())
   const seenDecisionIds = useRef<Set<number>>(new Set())
+  const prevManualRefreshKey = useRef(manualRefreshKey)
+  const prevRefreshKey = useRef(refreshKey)
 
   useEffect(() => {
     if (selectedAccountProp !== undefined) {
@@ -96,6 +111,35 @@ export default function AlphaArenaFeed({
   }, [selectedAccountProp])
 
   const activeAccount = selectedAccountProp ?? internalSelectedAccount
+  const cacheKey: CacheKey = activeAccount === 'all' ? 'all' : String(activeAccount)
+
+  const primeFromCache = useCallback(
+    (key: CacheKey) => {
+      const cached = FEED_CACHE.get(key)
+      if (!cached) return false
+      setTrades(cached.trades)
+      setModelChat(cached.modelChat)
+      setPositions(cached.positions)
+      setAccountsMeta(cached.accountsMeta)
+      setLoading(false)
+      return true
+    },
+    [],
+  )
+
+  const writeCache = useCallback(
+    (key: CacheKey, entry: Partial<FeedCacheEntry>) => {
+      const existing = FEED_CACHE.get(key)
+      FEED_CACHE.set(key, {
+        trades: entry.trades ?? existing?.trades ?? [],
+        modelChat: entry.modelChat ?? existing?.modelChat ?? [],
+        positions: entry.positions ?? existing?.positions ?? [],
+        accountsMeta: entry.accountsMeta ?? existing?.accountsMeta ?? [],
+        lastFetched: entry.lastFetched ?? Date.now(),
+      })
+    },
+    [],
+  )
 
   // Listen for real-time WebSocket updates
   useEffect(() => {
@@ -113,23 +157,25 @@ export default function AlphaArenaFeed({
 
         if (msg.type === 'trade_update' && msg.trade) {
           // Prepend new trade to the list
-          setTrades(prev => {
+          setTrades((prev) => {
             // Check if trade already exists to prevent duplicates
-            const exists = prev.some(t => t.trade_id === msg.trade.trade_id)
+            const exists = prev.some((t) => t.trade_id === msg.trade.trade_id)
             if (exists) return prev
-            return [msg.trade, ...prev].slice(0, DEFAULT_LIMIT)
+            const next = [msg.trade, ...prev].slice(0, DEFAULT_LIMIT)
+            writeCache(cacheKey, { trades: next })
+            return next
           })
         }
 
         if (msg.type === 'position_update' && msg.positions) {
           // Update positions for the relevant account
-          setPositions(prev => {
+          setPositions((prev) => {
             // If no account_id specified in message, this is a full update for one account
             const accountId = msg.positions[0]?.account_id
             if (!accountId) return msg.positions
 
             // Replace positions for this specific account
-            const otherAccounts = prev.filter(acc => acc.account_id !== accountId)
+            const otherAccounts = prev.filter((acc) => acc.account_id !== accountId)
             // Find if we have position data in the message
             const newAccountPositions = msg.positions.filter((p: any) => p.account_id === accountId)
 
@@ -137,14 +183,16 @@ export default function AlphaArenaFeed({
               // Construct account snapshot from positions
               const accountSnapshot = {
                 account_id: accountId,
-                account_name: prev.find(acc => acc.account_id === accountId)?.account_name || '',
-                model: prev.find(acc => acc.account_id === accountId)?.model || null,
+                account_name: prev.find((acc) => acc.account_id === accountId)?.account_name || '',
+                model: prev.find((acc) => acc.account_id === accountId)?.model || null,
                 available_cash: 0, // Will be updated by next snapshot
                 total_unrealized_pnl: 0,
                 total_return: null,
-                positions: newAccountPositions
+                positions: newAccountPositions,
               }
-              return [...otherAccounts, accountSnapshot]
+              const next = [...otherAccounts, accountSnapshot]
+              writeCache(cacheKey, { positions: next })
+              return next
             }
 
             return prev
@@ -153,11 +201,13 @@ export default function AlphaArenaFeed({
 
         if (msg.type === 'model_chat_update' && msg.decision) {
           // Prepend new AI decision to the list
-          setModelChat(prev => {
+          setModelChat((prev) => {
             // Check if decision already exists to prevent duplicates
-            const exists = prev.some(entry => entry.id === msg.decision.id)
+            const exists = prev.some((entry) => entry.id === msg.decision.id)
             if (exists) return prev
-            return [msg.decision, ...prev].slice(0, MODEL_CHAT_LIMIT)
+            const next = [msg.decision, ...prev].slice(0, MODEL_CHAT_LIMIT)
+            writeCache(cacheKey, { modelChat: next })
+            return next
           })
         }
       } catch (err) {
@@ -170,14 +220,31 @@ export default function AlphaArenaFeed({
     return () => {
       wsRef.current?.removeEventListener('message', handleMessage)
     }
-  }, [wsRef, activeAccount])
+  }, [wsRef, activeAccount, cacheKey, writeCache])
 
   useEffect(() => {
     let intervalId: NodeJS.Timeout | null = null
+    let isMounted = true
 
-    const fetchData = async () => {
+    const shouldForce =
+      manualRefreshKey !== prevManualRefreshKey.current ||
+      refreshKey !== prevRefreshKey.current
+
+    prevManualRefreshKey.current = manualRefreshKey
+    prevRefreshKey.current = refreshKey
+
+    const fetchData = async (forceReload: boolean) => {
       try {
-        setLoading(true)
+        const cached = FEED_CACHE.get(cacheKey)
+        const isFresh = cached ? Date.now() - cached.lastFetched < CACHE_STALE_MS : false
+        if (!forceReload && isFresh) {
+          setLoading(false)
+          return
+        }
+
+        if (!cached) {
+          setLoading(true)
+        }
         setError(null)
 
         const accountId = activeAccount === 'all' ? undefined : activeAccount
@@ -188,9 +255,11 @@ export default function AlphaArenaFeed({
           getArenaPositions({ account_id: accountId }),
         ])
 
-        setTrades(tradeRes.trades || [])
-        setModelChat(chatRes.entries || [])
-        setPositions(positionRes.accounts || [])
+        if (!isMounted) return
+
+        const nextTrades = tradeRes.trades || []
+        const nextModelChat = chatRes.entries || []
+        const nextPositions = positionRes.accounts || []
 
         const candidateMetas: ArenaAccountMeta[] = [
           ...(tradeRes.accounts || []),
@@ -206,6 +275,10 @@ export default function AlphaArenaFeed({
           })),
         ]
 
+        setTrades(nextTrades)
+        setModelChat(nextModelChat)
+        setPositions(nextPositions)
+        let mergedMetas: ArenaAccountMeta[] = []
         setAccountsMeta((prev) => {
           const metaMap = new Map<number, ArenaAccountMeta>()
           prev.forEach((meta) => {
@@ -218,7 +291,16 @@ export default function AlphaArenaFeed({
               model: meta.model ?? null,
             })
           })
-          return Array.from(metaMap.values())
+          mergedMetas = Array.from(metaMap.values())
+          return mergedMetas
+        })
+
+        writeCache(cacheKey, {
+          trades: nextTrades,
+          modelChat: nextModelChat,
+          positions: nextPositions,
+          accountsMeta: mergedMetas,
+          lastFetched: Date.now(),
         })
       } catch (err) {
         console.error('Failed to load Hyper Alpha Arena feed:', err)
@@ -229,18 +311,32 @@ export default function AlphaArenaFeed({
       }
     }
 
-    fetchData()
+    const hadCache = primeFromCache(cacheKey)
+    if (!hadCache) {
+      setLoading(true)
+    }
+
+    fetchData(shouldForce)
 
     if (autoRefreshInterval > 0) {
-      intervalId = setInterval(fetchData, autoRefreshInterval)
+      intervalId = setInterval(() => fetchData(false), autoRefreshInterval)
     }
 
     return () => {
       if (intervalId) {
         clearInterval(intervalId)
       }
+      isMounted = false
     }
-  }, [activeAccount, refreshKey, autoRefreshInterval, manualRefreshKey])
+  }, [
+    activeAccount,
+    refreshKey,
+    autoRefreshInterval,
+    manualRefreshKey,
+    cacheKey,
+    primeFromCache,
+    writeCache,
+  ])
 
   const accountOptions = useMemo(() => {
     const unique = new Map<number, ArenaAccountMeta>()

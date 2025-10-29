@@ -1,26 +1,29 @@
+import asyncio
+import json
+import logging
+import threading
+from datetime import date, datetime, timedelta
+from typing import Dict, Optional, Set
+
 from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
-from typing import Dict, Set
-import json
 
 from database.connection import SessionLocal
-from repositories.user_repo import get_or_create_user, get_user
-from repositories.account_repo import get_or_create_default_account, get_account
+from database.models import AIDecisionLog, Account, CryptoPrice, Trade, User
+from repositories.account_repo import get_account, get_or_create_default_account
 from repositories.order_repo import list_orders
 from repositories.position_repo import list_positions
+from repositories.user_repo import get_or_create_user, get_user
 from services.asset_calculator import calc_positions_value
+from services.asset_curve_calculator import get_all_asset_curves_data_new
 from services.market_data import get_last_price
 from services.scheduler import add_account_snapshot_job, remove_account_snapshot_job
-from database.models import Trade, User, Account, CryptoPrice, AIDecisionLog
-from sqlalchemy import func
-from datetime import datetime, timedelta, date
-import logging
-from services.asset_curve_calculator import get_all_asset_curves_data_new
 
 
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[int, Set[WebSocket]] = {}
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     async def connect(self, websocket: WebSocket):
         pass  # WebSocket is already accepted in the endpoint
@@ -70,6 +73,35 @@ class ConnectionManager:
                     logging.warning(f"Failed to broadcast message to WebSocket: {e}")
                     websockets.discard(ws)
 
+    def has_connections(self) -> bool:
+        return any(self.active_connections.values())
+
+    def set_event_loop(self, loop: asyncio.AbstractEventLoop):
+        if loop and loop.is_running():
+            self._loop = loop
+
+    def schedule_task(self, coro):
+        loop = None
+        if self._loop and self._loop.is_running():
+            loop = self._loop
+        else:
+            try:
+                loop = asyncio.get_running_loop()
+                if loop.is_running():
+                    self._loop = loop
+            except RuntimeError:
+                loop = None
+
+        if loop and loop.is_running():
+            asyncio.run_coroutine_threadsafe(coro, loop)
+            return
+
+        # Fallback: run in a dedicated daemon thread to avoid blocking the caller
+        def _run():
+            asyncio.run(coro)
+
+        threading.Thread(target=_run, daemon=True).start()
+
 
 manager = ConnectionManager()
 
@@ -88,6 +120,15 @@ async def broadcast_asset_curve_update(timeframe: str = "1h"):
         logging.error(f"Failed to broadcast asset curve update: {e}")
     finally:
         db.close()
+
+
+async def broadcast_arena_asset_update(update_payload: dict):
+    """Broadcast aggregated arena asset update to all connected clients"""
+    message = {
+        "type": "arena_asset_update",
+        **update_payload,
+    }
+    await manager.broadcast_to_all(message)
 
 
 async def broadcast_trade_update(trade_data: dict):
@@ -155,9 +196,6 @@ def get_all_asset_curves_data(db: Session, timeframe: str = "1h"):
         timeframe: Time period for the curve, options: "5m", "1h", "1d"
     """
     return get_all_asset_curves_data_new(db, timeframe)
-
-
-manager = ConnectionManager()
 
 
 async def _send_snapshot_optimized(db: Session, account_id: int):
@@ -422,6 +460,10 @@ async def _send_snapshot(db: Session, account_id: int):
 
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    try:
+        manager.set_event_loop(asyncio.get_running_loop())
+    except RuntimeError:
+        pass
     account_id: int | None = None
     user_id: int | None = None  # Initialize user_id to avoid UnboundLocalError
 

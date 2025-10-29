@@ -18,6 +18,7 @@ import Sidebar from '@/components/layout/Sidebar'
 import Portfolio from '@/components/portfolio/Portfolio'
 import ComprehensiveView from '@/components/portfolio/ComprehensiveView'
 import SystemLogs from '@/components/layout/SystemLogs'
+import PromptManager from '@/components/prompt/PromptManager'
 import { AIDecision, getAccounts } from '@/lib/api'
 
 interface User {
@@ -52,6 +53,7 @@ const PAGE_TITLES: Record<string, string> = {
   portfolio: 'Crypto Paper Trading',
   comprehensive: 'Hyper Alpha Arena',
   'system-logs': 'System Logs',
+  'prompt-management': 'Prompt Templates',
 }
 
 function App() {
@@ -318,6 +320,10 @@ function App() {
 
         {currentPage === 'system-logs' && (
           <SystemLogs />
+        )}
+
+        {currentPage === 'prompt-management' && (
+          <PromptManager />
         )}
       </main>
     )

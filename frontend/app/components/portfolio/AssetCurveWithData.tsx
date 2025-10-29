@@ -57,15 +57,43 @@ interface ChartLabel {
   username: string
 }
 
+const CACHE_STALE_MS = 45_000
+const SUPPORTED_TIMEFRAMES: Timeframe[] = ['5m', '1h', '1d']
+
+interface TimeframeCacheEntry {
+  data: AssetCurveData[]
+  lastFetched: number
+  initialized: boolean
+}
+
 export default function AssetCurve({ data: initialData, wsRef, highlightAccountId }: AssetCurveProps) {
   const [timeframe, setTimeframe] = useState<Timeframe>('1h')
   const [data, setData] = useState<AssetCurveData[]>(initialData || [])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isInitialized, setIsInitialized] = useState(false)
+  const cacheRef = useRef<Map<Timeframe, TimeframeCacheEntry>>(new Map())
   const logoCacheRef = useRef<Map<string, HTMLImageElement>>(new Map())
   const [chartLabels, setChartLabels] = useState<ChartLabel[]>([])
   const chartContainerRef = useRef<HTMLDivElement>(null)
+  const [liveAccountTotals, setLiveAccountTotals] = useState<Map<number, number>>(new Map())
+  const storeCache = useCallback((tf: Timeframe, nextData: AssetCurveData[]) => {
+    cacheRef.current.set(tf, {
+      data: nextData,
+      lastFetched: Date.now(),
+      initialized: true,
+    })
+  }, [])
+
+  const primeFromCache = useCallback((tf: Timeframe) => {
+    const cached = cacheRef.current.get(tf)
+    if (!cached) return false
+    setData(cached.data)
+    setLoading(false)
+    setError(null)
+    setIsInitialized(prev => prev || cached.initialized)
+    return true
+  }, [])
 
   // Listen for WebSocket asset curve updates
   useEffect(() => {
@@ -74,15 +102,33 @@ export default function AssetCurve({ data: initialData, wsRef, highlightAccountI
     const handleMessage = (event: MessageEvent) => {
       try {
         const msg = JSON.parse(event.data)
-        if (msg.type === 'asset_curve_data' && msg.timeframe === timeframe) {
-          setData(msg.data || [])
-          setLoading(false)
-          setError(null)
-          setIsInitialized(true)
-        } else if (msg.type === 'asset_curve_update' && msg.timeframe === timeframe) {
-          // Real-time update for current timeframe
-          setData(msg.data || [])
-          setIsInitialized(true)
+        if (msg?.type === 'arena_asset_update' && msg.accounts) {
+          setLiveAccountTotals((prev) => {
+            const next = new Map(prev)
+            ;(msg.accounts as Array<{ account_id: number; total_assets?: number }>).forEach(
+              (account) => {
+                if (account?.account_id != null) {
+                  next.set(account.account_id, Number(account.total_assets ?? 0))
+                }
+              },
+            )
+            return next
+          })
+        }
+        if (msg.type === 'asset_curve_data' || msg.type === 'asset_curve_update') {
+          const tf = msg.timeframe as Timeframe
+          if (SUPPORTED_TIMEFRAMES.includes(tf)) {
+            const nextData = msg.data || []
+            storeCache(tf, nextData)
+            if (tf === timeframe) {
+              setData(nextData)
+              if (msg.type === 'asset_curve_data') {
+                setLoading(false)
+                setError(null)
+              }
+              setIsInitialized(true)
+            }
+          }
         }
       } catch (err) {
         console.error('Failed to parse WebSocket message:', err)
@@ -94,29 +140,47 @@ export default function AssetCurve({ data: initialData, wsRef, highlightAccountI
     return () => {
       wsRef.current?.removeEventListener('message', handleMessage)
     }
-  }, [wsRef, timeframe])
+  }, [wsRef, timeframe, storeCache])
 
   // Request data when timeframe changes
   useEffect(() => {
+    const cached = cacheRef.current.get(timeframe)
+    const isFresh = cached ? Date.now() - cached.lastFetched < CACHE_STALE_MS : false
+    const hadCache = primeFromCache(timeframe)
+
+    if (isFresh) {
+      return
+    }
+
     if (wsRef?.current && wsRef.current.readyState === WebSocket.OPEN) {
-      setLoading(true)
+      if (!hadCache) {
+        setLoading(true)
+      }
       setError(null)
-      wsRef.current.send(JSON.stringify({
-        type: 'get_asset_curve',
-        timeframe: timeframe
-      }))
-    } else if (initialData && timeframe === '1h' && !isInitialized) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'get_asset_curve',
+          timeframe,
+        }),
+      )
+    } else if (!hadCache && initialData && timeframe === '1h' && !isInitialized) {
       // Only use initial data on first mount, not on subsequent prop changes
       setData(initialData)
       setIsInitialized(true)
+      storeCache('1h', initialData)
     }
-  }, [timeframe, wsRef])
+  }, [timeframe, wsRef, initialData, isInitialized, primeFromCache, storeCache])
 
   // Initialize with initial data only once on first mount
   useEffect(() => {
     if (initialData && !isInitialized && timeframe === '1h') {
       setData(initialData)
       setIsInitialized(true)
+      cacheRef.current.set('1h', {
+        data: initialData,
+        lastFetched: Date.now(),
+        initialized: true,
+      })
     }
   }, []) // Empty dependency array - only run on mount
 
@@ -216,7 +280,13 @@ export default function AssetCurve({ data: initialData, wsRef, highlightAccountI
       const logoImage = getLogoImage(logoInfo?.src)
 
       const values = timestamps.map(ts => groupedData[ts][username] ?? null)
-      const latestValue = values.reduce<number | null>((acc, value) => {
+      const adjustedValues = [...values]
+      const liveOverride =
+        currentAccountId !== undefined ? liveAccountTotals.get(currentAccountId) : undefined
+      if (liveOverride !== undefined && adjustedValues.length) {
+        adjustedValues[adjustedValues.length - 1] = liveOverride
+      }
+      const latestValue = adjustedValues.reduce<number | null>((acc, value) => {
         if (value !== null && value !== undefined) {
           return value
         }
@@ -225,7 +295,7 @@ export default function AssetCurve({ data: initialData, wsRef, highlightAccountI
 
       return {
         label: username.replace('default_', '').toUpperCase(),
-        data: values,
+        data: adjustedValues,
         borderColor: isHighlighted ? baseColor : toRgba(baseColor, 0.25),
         backgroundColor: isHighlighted ? toRgba(baseColor, 0.15) : toRgba(baseColor, 0.05),
         borderWidth: isHighlighted ? 3 : 1.5,
@@ -249,22 +319,24 @@ export default function AssetCurve({ data: initialData, wsRef, highlightAccountI
       }
     })
 
-    const summaries = uniqueUsers
-      .map(username => {
-        const latestData = data
-          .filter(item => item.username === username)
-          .sort((a, b) => {
-            const dateA = new Date(a.datetime_str || a.date || 0).getTime()
-            const dateB = new Date(b.datetime_str || b.date || 0).getTime()
-            return dateB - dateA
-          })[0]
-        return {
-          username,
-          assets: latestData?.total_assets || 0,
-          accountId: accountMap.get(username),
-          logo: getModelLogo(username),
-        }
-      })
+    const summaries = uniqueUsers.map((username) => {
+      const latestData = data
+        .filter((item) => item.username === username)
+        .sort((a, b) => {
+          const dateA = new Date(a.datetime_str || a.date || 0).getTime()
+          const dateB = new Date(b.datetime_str || b.date || 0).getTime()
+          return dateB - dateA
+        })[0]
+      const accountId = accountMap.get(username)
+      const liveOverride =
+        accountId !== undefined ? liveAccountTotals.get(accountId) ?? undefined : undefined
+      return {
+        username,
+        assets: (liveOverride ?? latestData?.total_assets) || 0,
+        accountId,
+        logo: getModelLogo(username),
+      }
+    })
 
     return {
       chartData: {
@@ -292,7 +364,7 @@ export default function AssetCurve({ data: initialData, wsRef, highlightAccountI
       accountSummaries: summaries,
       accountByUsername: accountMap,
     }
-  }, [data, timeframe, highlightActive, highlightAccountId, getLogoImage])
+  }, [data, timeframe, highlightActive, highlightAccountId, getLogoImage, liveAccountTotals])
 
   const rankedAccounts = useMemo(
     () => accountSummaries.slice().sort((a, b) => b.assets - a.assets),
@@ -303,7 +375,10 @@ export default function AssetCurve({ data: initialData, wsRef, highlightAccountI
     return {
       id: 'dataset-endpoint-logo',
       afterDatasetsDraw(chart: ChartJS) {
-        const { ctx, data: chartDataset, chartArea } = chart
+        const { ctx, data: chartDataset } = chart
+        if (!ctx || typeof ctx.save !== 'function') {
+          return
+        }
         if (!chartDataset.datasets.length) return
 
         const style = getComputedStyle(ctx.canvas)
@@ -439,8 +514,8 @@ export default function AssetCurve({ data: initialData, wsRef, highlightAccountI
   }
 
   return (
-    <div className="p-6 h-full flex flex-col gap-6">
-      <div className="space-y-4">
+    <div className="p-6 h-full min-h-0 flex flex-col gap-6">
+      <div className="flex-1 min-h-0 flex flex-col gap-4">
         <div className="flex justify-between items-center">
           <Tabs value={timeframe} onValueChange={handleTimeframeChange}>
             <TabsList>
@@ -450,7 +525,7 @@ export default function AssetCurve({ data: initialData, wsRef, highlightAccountI
             </TabsList>
           </Tabs>
         </div>
-        <div className="h-[calc(80vh-10rem)] relative" ref={chartContainerRef}>
+        <div className="flex-1 relative min-h-[320px]" ref={chartContainerRef}>
           {loading ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-muted-foreground">Loading...</div>

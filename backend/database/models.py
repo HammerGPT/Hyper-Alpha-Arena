@@ -62,6 +62,12 @@ class Account(Base):
     user = relationship("User", back_populates="accounts")
     positions = relationship("Position", back_populates="account")
     orders = relationship("Order", back_populates="account")
+    prompt_binding = relationship(
+        "AccountPromptBinding",
+        back_populates="account",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
 
 class UserAuthSession(Base):
@@ -276,6 +282,44 @@ class AIDecisionLog(Base):
     # Relationships
     account = relationship("Account")
     order = relationship("Order")
+
+
+class PromptTemplate(Base):
+    __tablename__ = "prompt_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String(100), unique=True, nullable=False)
+    name = Column(String(200), nullable=False)
+    description = Column(String(500), nullable=True)
+    template_text = Column(Text, nullable=False)
+    system_template_text = Column(Text, nullable=False)
+    updated_by = Column(String(100), nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at = Column(
+        TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
+    )
+
+    account_bindings = relationship(
+        "AccountPromptBinding",
+        back_populates="prompt_template",
+        cascade="all, delete-orphan",
+    )
+
+
+class AccountPromptBinding(Base):
+    __tablename__ = "account_prompt_bindings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False, unique=True)
+    prompt_template_id = Column(Integer, ForeignKey("prompt_templates.id"), nullable=False)
+    updated_by = Column(String(100), nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at = Column(
+        TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
+    )
+
+    account = relationship("Account", back_populates="prompt_binding")
+    prompt_template = relationship("PromptTemplate", back_populates="account_bindings")
 
 
 # CRYPTO market trading configuration constants

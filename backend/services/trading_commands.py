@@ -9,7 +9,12 @@ from typing import Dict, Optional, Tuple, List, Iterable
 from sqlalchemy.orm import Session
 
 from database.connection import SessionLocal
-from database.models import Position, Account
+from database.models import (
+    Position,
+    Account,
+    CRYPTO_MIN_COMMISSION,
+    CRYPTO_COMMISSION_RATE,
+)
 from services.asset_calculator import calc_positions_value
 from services.market_data import get_last_price
 from services.order_matching import create_order, check_and_execute_order
@@ -25,6 +30,16 @@ from services.ai_decision_service import (
 logger = logging.getLogger(__name__)
 
 AI_TRADING_SYMBOLS: List[str] = ["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE"]
+
+
+def _estimate_buy_cash_needed(price: float, quantity: float) -> Decimal:
+    """Estimate cash required for a BUY including commission."""
+    notional = Decimal(str(price)) * Decimal(str(quantity))
+    commission = max(
+        notional * Decimal(str(CRYPTO_COMMISSION_RATE)),
+        Decimal(str(CRYPTO_MIN_COMMISSION)),
+    )
+    return notional + commission
 
 
 def _get_market_prices(symbols: List[str]) -> Dict[str, float]:
@@ -119,7 +134,7 @@ def place_ai_driven_crypto_order(max_ratio: float = 0.2, account_ids: Optional[I
                     continue
 
                 # Call AI for trading decision
-                decision = call_ai_for_decision(account, portfolio, prices)
+                decision = call_ai_for_decision(db, account, portfolio, prices)
                 if not decision or not isinstance(decision, dict):
                     logger.warning(f"Failed to get AI decision for {account.name}, skipping")
                     continue
@@ -168,6 +183,7 @@ def place_ai_driven_crypto_order(max_ratio: float = 0.2, account_ids: Optional[I
                 if operation == "buy":
                     # Calculate quantity based on available cash and target portion
                     available_cash = float(account.current_cash)
+                    available_cash_dec = Decimal(str(account.current_cash))
                     order_value = available_cash * target_portion
                     # For crypto, support fractional quantities - use float instead of int
                     quantity = float(Decimal(str(order_value)) / Decimal(str(price)))
@@ -178,6 +194,17 @@ def place_ai_driven_crypto_order(max_ratio: float = 0.2, account_ids: Optional[I
                     if quantity <= 0:
                         logger.info(f"Calculated BUY quantity <= 0 for {symbol} for {account.name}, skipping")
                         # Save decision with execution failure
+                        save_ai_decision(db, account, decision, portfolio, executed=False)
+                        continue
+
+                    cash_needed = _estimate_buy_cash_needed(price, quantity)
+                    if available_cash_dec < cash_needed:
+                        logger.info(
+                            "Skipping BUY for %s due to insufficient cash after fees: need $%.2f, current cash $%.2f",
+                            account.name,
+                            float(cash_needed),
+                            float(available_cash_dec),
+                        )
                         save_ai_decision(db, account, decision, portfolio, executed=False)
                         continue
                     
@@ -211,16 +238,32 @@ def place_ai_driven_crypto_order(max_ratio: float = 0.2, account_ids: Optional[I
                 # Create and execute order
                 name = SUPPORTED_SYMBOLS[symbol]
                 
-                order = create_order(
-                    db=db,
-                    account=account,
-                    symbol=symbol,
-                    name=name,
-                    side=side,
-                    order_type="MARKET",
-                    price=None,
-                    quantity=quantity,
-                )
+                try:
+                    order = create_order(
+                        db=db,
+                        account=account,
+                        symbol=symbol,
+                        name=name,
+                        side=side,
+                        order_type="MARKET",
+                        price=None,
+                        quantity=quantity,
+                    )
+                except ValueError as create_err:
+                    message = str(create_err)
+                    if "Insufficient cash" in message or "Insufficient positions" in message:
+                        logger.info(
+                            "Skipping order for %s (%s %s): %s",
+                            account.name,
+                            side,
+                            symbol,
+                            message,
+                        )
+                        db.rollback()
+                        save_ai_decision(db, account, decision, portfolio, executed=False)
+                        continue
+                    # Unexpected validation error - re-raise
+                    raise
 
                 db.commit()
                 db.refresh(order)

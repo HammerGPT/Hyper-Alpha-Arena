@@ -257,11 +257,11 @@
     text-align: center;
     transform-style: preserve-3d;
     perspective: 300px;
-    transition: transform 0.6s cubic-bezier(0.4, 0.0, 0.2, 1);
+    transition: transform 0.9s cubic-bezier(0.4, 0.0, 0.2, 1);
   }
 
   .flip-digit.flipping {
-    animation: flip-digit 0.6s cubic-bezier(0.4, 0.0, 0.2, 1);
+    animation: flip-digit 0.9s cubic-bezier(0.4, 0.0, 0.2, 1);
   }
 
   /* Add slight shadow effect during flip */

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   ArenaAccountMeta,
@@ -17,6 +17,20 @@ interface ArenaAnalyticsFeedProps {
 }
 
 type FeedTab = 'leaderboard' | 'summary' | 'advanced'
+
+const CACHE_STALE_MS = 45_000
+
+type CacheKey = string
+
+interface AnalyticsCacheEntry {
+  accounts: ArenaAnalyticsAccount[]
+  summary: ArenaAnalyticsSummary | null
+  generatedAt: string | null
+  accountsMeta: ArenaAccountMeta[]
+  lastFetched: number
+}
+
+const ANALYTICS_CACHE = new Map<CacheKey, AnalyticsCacheEntry>()
 
 function formatCurrency(value?: number | null, minimumFractionDigits = 2) {
   if (value === undefined || value === null) return '—'
@@ -98,6 +112,8 @@ export default function ArenaAnalyticsFeed({
   const [manualRefreshKey, setManualRefreshKey] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const prevManualRefreshKey = useRef(manualRefreshKey)
+  const prevRefreshKey = useRef(refreshKey)
 
   useEffect(() => {
     if (selectedAccountProp !== undefined) {
@@ -106,13 +122,59 @@ export default function ArenaAnalyticsFeed({
   }, [selectedAccountProp])
 
   const activeAccount = selectedAccountProp ?? internalSelectedAccount
+  const cacheKey: CacheKey = activeAccount === 'all' ? 'all' : String(activeAccount)
+
+  const primeFromCache = useCallback(
+    (key: CacheKey) => {
+      const cached = ANALYTICS_CACHE.get(key)
+      if (!cached) return false
+      setAnalyticsAccounts(cached.accounts)
+      setSummary(cached.summary)
+      setGeneratedAt(cached.generatedAt)
+      setAccountsMeta(cached.accountsMeta)
+      setLoading(false)
+      return true
+    },
+    [],
+  )
+
+  const writeCache = useCallback(
+    (key: CacheKey, entry: Partial<AnalyticsCacheEntry>) => {
+      const existing = ANALYTICS_CACHE.get(key)
+      ANALYTICS_CACHE.set(key, {
+        accounts: entry.accounts ?? existing?.accounts ?? [],
+        summary: entry.summary ?? existing?.summary ?? null,
+        generatedAt: entry.generatedAt ?? existing?.generatedAt ?? null,
+        accountsMeta: entry.accountsMeta ?? existing?.accountsMeta ?? [],
+        lastFetched: entry.lastFetched ?? Date.now(),
+      })
+    },
+    [],
+  )
 
   useEffect(() => {
     let intervalId: NodeJS.Timeout | null = null
+    let isMounted = true
 
-    const fetchAnalytics = async () => {
+    const shouldForce =
+      manualRefreshKey !== prevManualRefreshKey.current ||
+      refreshKey !== prevRefreshKey.current
+
+    prevManualRefreshKey.current = manualRefreshKey
+    prevRefreshKey.current = refreshKey
+
+    const fetchAnalytics = async (forceReload: boolean) => {
       try {
-        setLoading(true)
+        const cached = ANALYTICS_CACHE.get(cacheKey)
+        const isFresh = cached ? Date.now() - cached.lastFetched < CACHE_STALE_MS : false
+        if (!forceReload && isFresh) {
+          setLoading(false)
+          return
+        }
+
+        if (!cached) {
+          setLoading(true)
+        }
         setError(null)
 
         const accountId = activeAccount === 'all' ? undefined : activeAccount
@@ -120,13 +182,19 @@ export default function ArenaAnalyticsFeed({
           accountId ? { account_id: accountId } : undefined,
         )
 
-        setAnalyticsAccounts(analyticsRes.accounts || [])
-        setSummary(analyticsRes.summary || null)
-        setGeneratedAt(analyticsRes.generated_at || null)
+        if (!isMounted) return
 
-        if (analyticsRes.accounts?.length) {
-          const incoming = buildAccountsMeta(analyticsRes.accounts)
-          setAccountsMeta((prev) => {
+        const nextAccounts = analyticsRes.accounts || []
+        const nextSummary = analyticsRes.summary || null
+        const nextGeneratedAt = analyticsRes.generated_at || null
+
+        const incoming = nextAccounts.length ? buildAccountsMeta(nextAccounts) : []
+        let mergedMeta: ArenaAccountMeta[] = []
+        setAccountsMeta((prev) => {
+          if (!incoming.length) {
+            mergedMeta = prev
+            return prev
+          }
             const metaMap = new Map<number, ArenaAccountMeta>()
             prev.forEach((meta) => {
               metaMap.set(meta.account_id, meta)
@@ -138,9 +206,21 @@ export default function ArenaAnalyticsFeed({
                 model: meta.model ?? null,
               })
             })
-            return Array.from(metaMap.values())
-          })
-        }
+            mergedMeta = Array.from(metaMap.values())
+            return mergedMeta
+        })
+
+        setAnalyticsAccounts(nextAccounts)
+        setSummary(nextSummary)
+        setGeneratedAt(nextGeneratedAt)
+
+        writeCache(cacheKey, {
+          accounts: nextAccounts,
+          summary: nextSummary,
+          generatedAt: nextGeneratedAt,
+          accountsMeta: mergedMeta,
+          lastFetched: Date.now(),
+        })
       } catch (err) {
         console.error('Failed to load Hyper Alpha Arena analytics:', err)
         const message = err instanceof Error ? err.message : 'Failed to load analytics data'
@@ -150,16 +230,30 @@ export default function ArenaAnalyticsFeed({
       }
     }
 
-    fetchAnalytics()
+    const hadCache = primeFromCache(cacheKey)
+    if (!hadCache) {
+      setLoading(true)
+    }
+
+    fetchAnalytics(shouldForce)
 
     if (autoRefreshInterval > 0) {
-      intervalId = setInterval(fetchAnalytics, autoRefreshInterval)
+      intervalId = setInterval(() => fetchAnalytics(false), autoRefreshInterval)
     }
 
     return () => {
       if (intervalId) clearInterval(intervalId)
+      isMounted = false
     }
-  }, [activeAccount, refreshKey, autoRefreshInterval, manualRefreshKey])
+  }, [
+    activeAccount,
+    refreshKey,
+    autoRefreshInterval,
+    manualRefreshKey,
+    cacheKey,
+    primeFromCache,
+    writeCache,
+  ])
 
   const accountOptions = useMemo(() => {
     const unique = new Map<number, ArenaAccountMeta>()

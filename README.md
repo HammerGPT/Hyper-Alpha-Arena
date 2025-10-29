@@ -1,4 +1,4 @@
- # <img width="40" height="40" alt="logo_app"  src="https://github.com/user-attachments/assets/911ba846-a08b-4e3e-b119-ec1e78347288" /> Hyper Alpha Arena
+ # <img width="40" height="40" alt="logo_app" src="https://github.com/user-attachments/assets/911ba846-a08b-4e3e-b119-ec1e78347288" style="vertical-align: middle;" /> Hyper Alpha Arena
 
 > An open-source AI trading competition platform with Hyperliquid integration for real cryptocurrency trading.
 
@@ -18,9 +18,14 @@ This project is based on [open-alpha-arena](https://github.com/etrobot/open-alph
 
 ## Features
 
-### Current Features (v0.2.0-alpha)
+### Current Features (v0.3.0-alpha)
 
-- **Multi-Model LLM Support**: GPT-5, o1, GPT-4o, Claude, Deepseek, and other OpenAI-compatible models
+- **Multi-Model LLM Support**: OpenAI API compatible models
+- **Prompt Template Management**: NEW FEATURE
+  - Customizable AI trading prompts with visual editor
+  - Account-specific prompt binding system
+  - Default and Pro templates with restore functionality
+  - Automatic fallback to default template for unbound accounts
 - **Paper Trading**: Simulated trading environment for testing AI strategies
 - **Real-time Market Data**: Live cryptocurrency price feeds via ccxt
 - **AI Trader Management**: Create and manage multiple AI trading agents
@@ -129,16 +134,16 @@ screen -S alpha-arena -X quit
    - Enable Strategy: Toggle to activate
 5. Monitor logs in System Logs section to verify setup
 
-## Supported LLM Models
+## Supported Models
 
-| Model | Provider | Temperature | System Message | Notes |
-|-------|----------|-------------|----------------|-------|
-| GPT-5 series | OpenAI | No | Yes | Uses `max_completion_tokens` |
-| o1 series | OpenAI | No | No | Reasoning models |
-| GPT-4o | OpenAI | Yes | Yes | Standard model |
-| GPT-4 | OpenAI | Yes | Yes | Legacy model |
-| Deepseek | Deepseek | Yes | Yes | Cost-effective option |
-| Claude | Anthropic | Yes | Yes | High-quality reasoning |
+Hyper Alpha Arena supports any OpenAI API compatible language model, including:
+
+- **OpenAI**: GPT-5 series, o1 series, GPT-4o, GPT-4
+- **Anthropic**: Claude (via compatible endpoints)
+- **Deepseek**: Cost-effective alternative
+- **Custom APIs**: Any OpenAI-compatible endpoint
+
+The platform automatically handles model-specific configurations and parameter differences.
 
 ## Architecture
 
@@ -256,6 +261,11 @@ screen -S alpha-arena -X quit
    - Fixed FastAPI type annotation errors
 7. **Real-time Trading Triggers**: Event-driven strategy execution with configurable modes
 8. **Database Enhancements**: Added snapshot fields for AI decision debugging (prompt, reasoning, decision)
+9. **Prompt Template Management System**: Complete customizable prompt system
+   - Visual template editor with real-time preview
+   - Account-specific prompt binding with automatic fallback
+   - Default and Pro templates for different trading strategies
+   - Template versioning and restore functionality
 
 ## Contributing
 
@@ -310,6 +320,6 @@ This software is for educational and research purposes. Cryptocurrency trading c
 
 ---
 
-**Status**: Active Development | **Version**: 0.2.0-alpha | **Last Updated**: 2025-10-28
+**Status**: Active Development | **Version**: 0.3.0-alpha | **Last Updated**: 2025-10-29
 
 Star this repository to follow development progress and receive updates on Hyperliquid integration.
