@@ -517,12 +517,20 @@ async def websocket_endpoint(websocket: WebSocket):
                     
                     # Send bootstrap confirmation with account info
                     try:
-                        await manager.send_to_account(account_id, {
-                            "type": "bootstrap_ok", 
-                            "user": {"id": user.id, "username": user.username},
-                            "account": {"id": account.id, "name": account.name, "user_id": account.user_id}
-                        })
-                        await _send_snapshot(db, account_id)
+                        if account:
+                            await manager.send_to_account(account_id, {
+                                "type": "bootstrap_ok",
+                                "user": {"id": user.id, "username": user.username},
+                                "account": {"id": account.id, "name": account.name, "user_id": account.user_id}
+                            })
+                            await _send_snapshot(db, account_id)
+                        else:
+                            # Send bootstrap with no account info
+                            await websocket.send_text(json.dumps({
+                                "type": "bootstrap_ok",
+                                "user": {"id": user.id, "username": user.username},
+                                "account": None
+                            }))
                     except Exception as e:
                         logging.error(f"Failed to send bootstrap response: {e}")
                         break
