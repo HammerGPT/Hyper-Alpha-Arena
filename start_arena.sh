@@ -5,25 +5,21 @@
 if [ "$1" = "stop" ]; then
     echo "=== Stopping Alpha Arena ==="
 
-    # Method 1: Kill by PID file
-    if [ -f "arena.pid" ]; then
-        PID=$(cat arena.pid)
-        if kill $PID 2>/dev/null; then
-            echo "Service stopped successfully (PID: $PID)"
-            rm arena.pid
-        else
-            echo "Process not found, removing stale PID file"
-            rm arena.pid
-        fi
-    fi
-
-    # Method 2: Kill by port (backup)
+    # Only kill by port 8802 (most precise)
     if command -v lsof &> /dev/null; then
         PID=$(lsof -t -i:8802 2>/dev/null)
         if [ ! -z "$PID" ]; then
             kill $PID
-            echo "Stopped remaining process on port 8802 (PID: $PID)"
+            echo "Service stopped successfully (PID: $PID)"
+            # Clean up PID file if exists
+            [ -f "arena.pid" ] && rm arena.pid
+        else
+            echo "No service running on port 8802"
+            # Clean up stale PID file
+            [ -f "arena.pid" ] && rm arena.pid
         fi
+    else
+        echo "lsof not available, cannot stop service"
     fi
 
 
