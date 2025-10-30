@@ -5,18 +5,13 @@ REM Check for stop parameter
 if "%1"=="stop" (
     echo === Stopping Alpha Arena ===
 
-    REM Kill processes by name
-    taskkill /f /im python.exe /fi "COMMANDLINE eq *uvicorn main:app*" >nul 2>&1
-    if errorlevel 1 (
-        echo No running service found or failed to stop
-    ) else (
-        echo Service stopped successfully
-    )
-
-    REM Kill by port as backup
+    REM Kill by port (more precise)
     for /f "tokens=5" %%a in ('netstat -aon ^| findstr :8802') do (
-        echo Killing process %%a on port 8802...
+        echo Stopping service on port 8802 (PID: %%a)...
         taskkill /f /pid %%a >nul 2>&1
+        if not errorlevel 1 (
+            echo Service stopped successfully
+        )
     )
 
     exit /b 0

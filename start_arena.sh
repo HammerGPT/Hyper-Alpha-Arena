@@ -5,21 +5,19 @@
 if [ "$1" = "stop" ]; then
     echo "=== Stopping Alpha Arena ==="
 
-    # Method 1: Kill by process name
-    if pkill -f "uvicorn main:app"; then
-        echo "Service stopped successfully"
-    else
-        echo "No running service found or failed to stop"
-    fi
-
-    # Method 2: Kill by port (backup)
+    # Method 1: Kill by port (more precise)
     if command -v lsof &> /dev/null; then
         PID=$(lsof -t -i:8802 2>/dev/null)
         if [ ! -z "$PID" ]; then
             kill $PID
-            echo "Killed process on port 8802: $PID"
+            echo "Service stopped successfully (PID: $PID)"
+        else
+            echo "No service running on port 8802"
         fi
+    else
+        echo "lsof not available, cannot stop service"
     fi
+
 
     exit 0
 fi
