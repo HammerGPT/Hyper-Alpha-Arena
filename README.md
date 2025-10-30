@@ -73,6 +73,8 @@ This project is based on [open-alpha-arena](https://github.com/etrobot/open-alph
 
 ### Prerequisites
 
+#### Linux/macOS
+
 ```bash
 # Install pnpm (Node.js package manager)
 npm install -g pnpm
@@ -82,7 +84,27 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 source $HOME/.local/bin/env
 ```
 
+#### Windows
+
+```powershell
+# Install pnpm (Node.js package manager)
+npm install -g pnpm
+
+# Install uv (Python package manager) - Run as Administrator
+PowerShell -ExecutionPolicy Bypass -File install_uv.ps1
+```
+
+**Alternative for Windows**: If you prefer using standard Python tools instead of uv:
+```cmd
+# Use standard Python virtual environment
+python -m venv backend\.venv
+backend\.venv\Scripts\activate
+pip install -e backend\
+```
+
 ### Installation
+
+#### Linux/macOS
 
 ```bash
 # 1. Clone the repository
@@ -100,11 +122,45 @@ pnpm run build:frontend
 cp -r frontend/dist/* backend/static/
 ```
 
+#### Windows
+
+```cmd
+# 1. Clone the repository
+git clone https://github.com/HammerGPT/Hyper-Alpha-Arena.git
+cd Hyper-Alpha-Arena
+
+# 2. Install frontend dependencies
+pnpm install
+
+# 3. Install backend dependencies (if using uv)
+cd backend && uv sync && cd ..
+
+# 3. Alternative: Install backend dependencies (using standard Python)
+cd backend
+python -m venv .venv
+.venv\Scripts\activate
+pip install -e .
+cd ..
+
+# 4. Build frontend (one-time setup)
+pnpm run build:frontend
+xcopy /E /I frontend\dist backend\static
+```
+
 ### Running the Application
+
+#### Linux/macOS
 
 ```bash
 # Start the server using the startup script
 ./start_arena.sh
+```
+
+#### Windows
+
+```cmd
+# Start the server using the Windows startup script
+start_arena.bat
 ```
 
 The startup script will:
@@ -116,9 +172,8 @@ The startup script will:
 **Access the application**: Open http://localhost:8802 in your browser
 
 **Stop the server**:
-```bash
-screen -S alpha-arena -X quit
-```
+- **Linux/macOS**: `screen -S alpha-arena -X quit`
+- **Windows**: Close the "Alpha Arena Backend" window or use Task Manager
 
 ### First-Time Setup
 
@@ -266,6 +321,50 @@ The platform automatically handles model-specific configurations and parameter d
    - Account-specific prompt binding with automatic fallback
    - Default and Pro templates for different trading strategies
    - Template versioning and restore functionality
+
+## Troubleshooting
+
+### Windows Issues
+
+**Problem**: `'sh' is not recognized as an internal or external command`
+**Solution**: Use the provided Windows scripts instead:
+- Use `install_uv.ps1` instead of the curl command
+- Use `start_arena.bat` instead of `./start_arena.sh`
+
+**Problem**: `'source' is not recognized as an internal or external command`
+**Solution**: Use Windows batch commands:
+- Replace `source .venv/bin/activate` with `.venv\Scripts\activate`
+
+**Problem**: `screen: command not found`
+**Solution**: The Windows startup script uses `start` command instead of `screen`
+
+**Problem**: Path not found errors
+**Solution**: Make sure you're running scripts from the project root directory
+
+### General Issues
+
+**Problem**: Port 8802 already in use
+**Solution**:
+- Linux/macOS: `screen -S alpha-arena -X quit`
+- Windows: Check Task Manager for python.exe processes
+
+**Problem**: Virtual environment not found
+**Solution**: Create the virtual environment manually:
+```bash
+# Linux/macOS
+cd backend && python -m venv .venv && source .venv/bin/activate && pip install -e .
+
+# Windows
+cd backend && python -m venv .venv && .venv\Scripts\activate && pip install -e .
+```
+
+**Problem**: Frontend build fails
+**Solution**: Clear cache and reinstall:
+```bash
+rm -rf node_modules package-lock.json  # Linux/macOS
+rmdir /s node_modules && del package-lock.json  # Windows
+pnpm install
+```
 
 ## Contributing
 

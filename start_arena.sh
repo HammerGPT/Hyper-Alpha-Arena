@@ -1,7 +1,21 @@
 #!/bin/bash
 # Alpha Arena Startup Script with System Logging
 
-cd /home/wwwroot/open-alpha-arena/backend
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKEND_DIR="$SCRIPT_DIR/backend"
+
+echo "Project directory: $SCRIPT_DIR"
+echo "Backend directory: $BACKEND_DIR"
+
+# Check if backend directory exists
+if [ ! -d "$BACKEND_DIR" ]; then
+    echo "ERROR: Backend directory not found at $BACKEND_DIR"
+    echo "Please make sure you're running this script from the project root directory."
+    exit 1
+fi
+
+cd "$BACKEND_DIR"
 
 echo "=== Alpha Arena Startup Script ==="
 echo "Starting backend service on port 8802..."
@@ -13,8 +27,29 @@ if screen -list | grep -q "alpha-arena"; then
     sleep 2
 fi
 
+# Check if virtual environment exists
+if [ ! -f ".venv/bin/python" ]; then
+    echo "ERROR: Python virtual environment not found."
+    echo "Please create the virtual environment first:"
+    echo "  python -m venv .venv"
+    echo "  source .venv/bin/activate"
+    echo "  pip install -e ."
+    exit 1
+fi
+
+# Check if uvicorn is available in virtual environment
+if ! .venv/bin/python -c "import uvicorn" 2>/dev/null; then
+    echo "ERROR: uvicorn not found in virtual environment."
+    echo "Installing required dependencies..."
+    .venv/bin/pip install -e .
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Failed to install dependencies."
+        exit 1
+    fi
+fi
+
 # Start new screen session with virtual environment
-screen -dmS alpha-arena bash -c "cd /home/wwwroot/open-alpha-arena/backend && .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8802"
+screen -dmS alpha-arena bash -c "cd '$BACKEND_DIR' && .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8802"
 
 # Wait for service to start
 echo "Waiting for service to start..."
