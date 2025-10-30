@@ -3,6 +3,16 @@ import ReactDOM from 'react-dom/client'
 import './index.css'
 import { Toaster, toast } from 'react-hot-toast'
 
+// Global error handler for debugging
+window.addEventListener('error', (event) => {
+  console.error('Global error caught:', event.error)
+  console.error('Error stack:', event.error?.stack)
+})
+
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('Unhandled promise rejection:', event.reason)
+})
+
 // Create a module-level WebSocket singleton to avoid duplicate connections in React StrictMode
 let __WS_SINGLETON__: WebSocket | null = null;
 
