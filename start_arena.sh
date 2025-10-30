@@ -104,13 +104,13 @@ build_frontend
 echo "=== Alpha Arena Startup Script ==="
 echo "Starting backend service on port 8802..."
 
-# Kill any existing process on port 8802
+# Check if port 8802 is already in use
 if command -v lsof &> /dev/null; then
     PID=$(lsof -t -i:8802 2>/dev/null)
     if [ ! -z "$PID" ]; then
-        kill $PID
-        echo "Stopped existing service on port 8802"
-        sleep 2
+        echo "Port 8802 is already in use by process $PID"
+        echo "Please stop the existing service first: ./start_arena.sh stop"
+        exit 1
     fi
 fi
 
