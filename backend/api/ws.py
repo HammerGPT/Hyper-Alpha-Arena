@@ -509,13 +509,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     )
 
                     if not account:
-                        await websocket.send_text(json.dumps({
-                            "type": "error",
-                            "message": "No accounts found. Please create an account first."
-                        }))
-                        continue
-
-                    account_id = account.id
+                        # Allow connection but with no account (frontend will handle this)
+                        account_id = None
+                    else:
+                        account_id = account.id
                     manager.register(account_id, websocket)
                     
                     # Send bootstrap confirmation with account info
