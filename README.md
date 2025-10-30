@@ -84,7 +84,8 @@ This project is based on [open-alpha-arena](https://github.com/etrobot/open-alph
 git clone https://github.com/HammerGPT/Hyper-Alpha-Arena.git
 cd Hyper-Alpha-Arena
 
-# Start the application (auto-setup everything)
+# Make script executable and start the application
+chmod +x start_arena.sh
 ./start_arena.sh
 ```
 
