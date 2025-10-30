@@ -570,7 +570,7 @@ export default function AlphaArenaFeed({
                           <span>{formatDate(entry.decision_time)}</span>
                         </div>
                         <div className="text-sm font-medium text-foreground">
-                          {entry.operation.toUpperCase()} {entry.symbol && (
+                          {(entry.operation || 'UNKNOWN').toUpperCase()} {entry.symbol && (
                             <span className="inline-flex items-center gap-1">
                               {symbolLogo && (
                                 <img
