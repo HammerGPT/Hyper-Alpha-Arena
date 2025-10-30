@@ -5,17 +5,25 @@
 if [ "$1" = "stop" ]; then
     echo "=== Stopping Alpha Arena ==="
 
-    # Method 1: Kill by port (more precise)
+    # Method 1: Kill by PID file
+    if [ -f "arena.pid" ]; then
+        PID=$(cat arena.pid)
+        if kill $PID 2>/dev/null; then
+            echo "Service stopped successfully (PID: $PID)"
+            rm arena.pid
+        else
+            echo "Process not found, removing stale PID file"
+            rm arena.pid
+        fi
+    fi
+
+    # Method 2: Kill by port (backup)
     if command -v lsof &> /dev/null; then
         PID=$(lsof -t -i:8802 2>/dev/null)
         if [ ! -z "$PID" ]; then
             kill $PID
-            echo "Service stopped successfully (PID: $PID)"
-        else
-            echo "No service running on port 8802"
+            echo "Stopped remaining process on port 8802 (PID: $PID)"
         fi
-    else
-        echo "lsof not available, cannot stop service"
     fi
 
 
@@ -100,11 +108,14 @@ build_frontend
 echo "=== Alpha Arena Startup Script ==="
 echo "Starting backend service on port 8802..."
 
-# Check if screen session exists
-if screen -list | grep -q "alpha-arena"; then
-    echo "Stopping existing alpha-arena session..."
-    screen -S alpha-arena -X quit
-    sleep 2
+# Kill any existing process on port 8802
+if command -v lsof &> /dev/null; then
+    PID=$(lsof -t -i:8802 2>/dev/null)
+    if [ ! -z "$PID" ]; then
+        kill $PID
+        echo "Stopped existing service on port 8802"
+        sleep 2
+    fi
 fi
 
 # Check if virtual environment exists, create if not
@@ -136,8 +147,9 @@ if ! .venv/bin/python -c "import uvicorn" 2>/dev/null; then
     fi
 fi
 
-# Start new screen session with virtual environment
-screen -dmS alpha-arena bash -c "cd '$BACKEND_DIR' && .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8802"
+# Start service in background
+nohup .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8802 > arena.log 2>&1 &
+echo $! > arena.pid
 
 # Wait for service to start
 echo "Waiting for service to start..."
@@ -155,11 +167,11 @@ if curl -s http://127.0.0.1:8802/api/health > /dev/null 2>&1; then
     echo "   - Get stats: GET /api/system-logs/stats"
     echo "   - Clear logs: DELETE /api/system-logs"
     echo ""
-    echo "View live logs: screen -r alpha-arena"
+    echo "View live logs: tail -f arena.log"
     echo "Stop service: ./start_arena.sh stop"
 else
     echo "❌ Service failed to start. Check logs:"
-    echo "   screen -r alpha-arena"
+    echo "   tail -f arena.log"
 fi
 
 echo ""
