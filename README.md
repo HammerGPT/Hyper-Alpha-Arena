@@ -79,19 +79,24 @@ This project is based on [open-alpha-arena](https://github.com/etrobot/open-alph
 ### Installation
 
 ```bash
-# 1. Clone and enter directory
 git clone https://github.com/HammerGPT/Hyper-Alpha-Arena.git
 cd Hyper-Alpha-Arena
 
-# 2. Install dependencies
+# Install Node.js dependencies
 npm install -g pnpm
 pnpm install
-cd backend && pip install -e . && cd ..
 
-# 3. Build and start
+# Setup Python backend
+cd backend
+python3 -m venv .venv                    # python -m venv .venv (Windows)
+source .venv/bin/activate                # .venv\Scripts\activate (Windows)
+pip install -e .
+cd ..
+
+# Build frontend
 pnpm run build:frontend
-cp -r frontend/dist/* backend/static/  # Linux/macOS
-# xcopy /E /I frontend\dist backend\static  # Windows
+mkdir -p backend/static                  # mkdir backend\static (Windows)
+cp -r frontend/dist/* backend/static/   # xcopy /E /I frontend\dist backend\static (Windows)
 ```
 
 ### Running the Application
