@@ -35,6 +35,49 @@ export default function TraderManagement() {
 
   const selectedAccount = accounts.find(acc => acc.id === selectedAccountId)
 
+  // Check if user only has default account
+  const hasOnlyDefaultAccount = accounts.length === 1 &&
+    accounts[0]?.name === "Default AI Trader" &&
+    accounts[0]?.api_key === "default-key-please-update-in-settings"
+
+  // Show welcome guide for new users
+  if (hasOnlyDefaultAccount) {
+    return (
+      <div className="h-full w-full overflow-hidden flex flex-col gap-4 p-6">
+        <div className="flex-shrink-0">
+          <h1 className="text-2xl font-bold">Welcome to Hyper Alpha Arena!</h1>
+          <p className="text-muted-foreground">Let's set up your first AI trader</p>
+        </div>
+
+        <div className="flex-1 flex items-center justify-center">
+          <Card className="max-w-md w-full">
+            <CardHeader>
+              <CardTitle>🤖 Setup Your AI Trader</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                We've created a default AI trader for you. To start trading, you need to:
+              </p>
+              <ol className="text-sm space-y-2 list-decimal list-inside">
+                <li>Configure your AI model and API key</li>
+                <li>Set up your trading strategy</li>
+                <li>Start automated trading</li>
+              </ol>
+              <div className="pt-4">
+                <SettingsDialog
+                  open={false}
+                  onOpenChange={() => {}}
+                  onAccountUpdated={handleAccountUpdated}
+                  embedded={false}
+                />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="h-full w-full overflow-hidden flex flex-col gap-4 p-6">
       <div className="flex-shrink-0">

@@ -56,14 +56,23 @@ def get_or_create_default_account(
     base_url: str = "https://api.openai.com/v1",
     api_key: str = "default-key-please-update-in-settings"
 ) -> Optional[Account]:
-    """Get existing account (no longer creates default account automatically)"""
+    """Get existing account or create default account for new users"""
     # Check if user has any accounts
     existing_accounts = get_accounts_by_user(db, user_id, active_only=True)
     if existing_accounts:
         return existing_accounts[0]  # Return first active account
 
-    # No longer auto-create default account
-    return None
+    # Create default account for new users
+    return create_account(
+        db=db,
+        user_id=user_id,
+        name=account_name,
+        account_type="AI",
+        initial_capital=initial_capital,
+        model=model,
+        base_url=base_url,
+        api_key=api_key
+    )
 
 
 def update_account(
