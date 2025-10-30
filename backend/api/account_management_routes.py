@@ -248,7 +248,10 @@ async def get_or_create_default(
     try:
         user_id = await get_current_user_id(session_token, db)
         account = get_or_create_default_account(db, user_id)
-        
+
+        if not account:
+            raise HTTPException(status_code=404, detail="No accounts found. Please create an account first.")
+
         return AccountOut(
             id=account.id,
             user_id=account.user_id,

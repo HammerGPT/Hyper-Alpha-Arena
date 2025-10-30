@@ -55,24 +55,15 @@ def get_or_create_default_account(
     model: str = "gpt-4-turbo",
     base_url: str = "https://api.openai.com/v1",
     api_key: str = "default-key-please-update-in-settings"
-) -> Account:
-    """Get existing account or create default AI account for user"""
+) -> Optional[Account]:
+    """Get existing account (no longer creates default account automatically)"""
     # Check if user has any accounts
     existing_accounts = get_accounts_by_user(db, user_id, active_only=True)
     if existing_accounts:
         return existing_accounts[0]  # Return first active account
-    
-    # Create default AI account
-    return create_account(
-        db=db,
-        user_id=user_id,
-        name=account_name,
-        account_type="AI",
-        initial_capital=initial_capital,
-        model=model,
-        base_url=base_url,
-        api_key=api_key
-    )
+
+    # No longer auto-create default account
+    return None
 
 
 def update_account(
