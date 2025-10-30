@@ -1,9 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import AssetCurveWithData from './AssetCurveWithData'
 import StrategyPanel from '@/components/portfolio/StrategyPanel'
-import { AIDecision } from '@/lib/api'
+import {
+  AIDecision,
+  ArenaPositionItem,
+  ArenaPositionsAccount,
+  getArenaPositions,
+} from '@/lib/api'
 import AlphaArenaFeed from './AlphaArenaFeed'
 import ArenaAnalyticsFeed from './ArenaAnalyticsFeed'
+import FlipNumber from './FlipNumber'
+import { getSymbolLogo } from './logoAssets'
 
 interface Account {
   id: number
@@ -81,6 +88,16 @@ interface AccountDataViewProps {
   loadingAccounts?: boolean
 }
 
+function formatCurrency(value?: number | null, fractionDigits = 2) {
+  if (value === undefined || value === null || Number.isNaN(value)) return '$0.00'
+  return `$${value.toLocaleString(undefined, {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: Math.max(2, fractionDigits),
+  })}`
+}
+
+const SUPPORTED_SYMBOLS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'DOGE'] as const
+
 export default function AccountDataView(props: AccountDataViewProps) {
   const {
     overview,
@@ -93,7 +110,74 @@ export default function AccountDataView(props: AccountDataViewProps) {
     showStrategyPanel = false,
   } = props
   const [selectedArenaAccount, setSelectedArenaAccount] = useState<number | 'all'>('all')
+  const [globalPositionSnapshots, setGlobalPositionSnapshots] = useState<ArenaPositionsAccount[]>([])
+  const [realtimeTotals, setRealtimeTotals] = useState<{
+    available_cash: number
+    frozen_cash: number
+    positions_value: number
+    total_assets: number
+  } | null>(null)
+  const [realtimeSymbolTotals, setRealtimeSymbolTotals] = useState<Record<string, number> | null>(null)
   const currentAccountId = overview?.account?.id ?? null
+
+  useEffect(() => {
+    let isMounted = true
+
+    const loadGlobalSnapshots = async () => {
+      try {
+        const response = await getArenaPositions()
+        if (isMounted) {
+          setGlobalPositionSnapshots(response.accounts ?? [])
+        }
+      } catch (err) {
+        console.error('Failed to load global arena positions for overview:', err)
+      }
+    }
+
+    loadGlobalSnapshots()
+    const intervalId = setInterval(loadGlobalSnapshots, 60_000)
+
+    return () => {
+      isMounted = false
+      clearInterval(intervalId)
+    }
+  }, [accountRefreshTrigger])
+
+  useEffect(() => {
+    if (!wsRef?.current) return
+
+    const handleMessage = (event: MessageEvent) => {
+      try {
+        const message = JSON.parse(event.data)
+        if (message?.type === 'arena_asset_update') {
+          if (message.totals) {
+            setRealtimeTotals({
+              available_cash: Number(message.totals.available_cash ?? 0),
+              frozen_cash: Number(message.totals.frozen_cash ?? 0),
+              positions_value: Number(message.totals.positions_value ?? 0),
+              total_assets: Number(message.totals.total_assets ?? 0),
+            })
+          }
+          if (message.symbols) {
+            const nextSymbols: Record<string, number> = {}
+            Object.entries(message.symbols).forEach(([key, value]) => {
+              nextSymbols[key.toUpperCase()] = Number(value ?? 0)
+            })
+            setRealtimeSymbolTotals(nextSymbols)
+          }
+        }
+      } catch {
+        // Ignore non-JSON messages
+      }
+    }
+
+    const ws = wsRef.current
+    ws.addEventListener('message', handleMessage)
+
+    return () => {
+      ws.removeEventListener('message', handleMessage)
+    }
+  }, [wsRef])
 
   useEffect(() => {
     if (!currentAccountId) return
@@ -126,6 +210,162 @@ export default function AccountDataView(props: AccountDataViewProps) {
     }))
   }, [props.accounts])
 
+  const accountPositionSummaries = useMemo(() => {
+    const accountId = overview?.account?.id ?? null
+    const aggregates = new Map<string, number>()
+
+    positions.forEach((position) => {
+      if (accountId && position.account_id && position.account_id !== accountId) {
+        return
+      }
+
+      const marketValue =
+        position.current_value ??
+        position.market_value ??
+        (position.last_price !== undefined && position.last_price !== null
+          ? position.last_price * position.quantity
+          : position.avg_cost * position.quantity)
+
+      const symbol = position.symbol?.toUpperCase()
+      if (!symbol || !SUPPORTED_SYMBOLS.includes(symbol as typeof SUPPORTED_SYMBOLS[number])) {
+        return
+      }
+
+      const existing = aggregates.get(symbol) ?? 0
+      aggregates.set(symbol, existing + (marketValue || 0))
+    })
+
+    return SUPPORTED_SYMBOLS.map((symbol) => ({
+      symbol,
+      marketValue: aggregates.get(symbol) ?? 0,
+    }))
+  }, [positions, overview?.account?.id])
+
+  const globalPositionSummaries = useMemo(() => {
+    if (!globalPositionSnapshots.length) {
+      return []
+    }
+
+    const aggregates = new Map<string, number>()
+
+    globalPositionSnapshots.forEach((snapshot) => {
+      snapshot.positions.forEach((position: ArenaPositionItem) => {
+        const symbol = position.symbol?.toUpperCase()
+        if (!symbol || !SUPPORTED_SYMBOLS.includes(symbol as typeof SUPPORTED_SYMBOLS[number])) {
+          return
+        }
+        const currentValue = Number(
+          position.current_value ??
+          position.notional ??
+          0,
+        )
+
+        const existing = aggregates.get(symbol) ?? 0
+        aggregates.set(symbol, existing + currentValue)
+      })
+    })
+
+    return SUPPORTED_SYMBOLS.map((symbol) => ({
+      symbol,
+      marketValue: aggregates.get(symbol) ?? 0,
+    }))
+  }, [globalPositionSnapshots])
+
+  const positionSummaries = useMemo(() => {
+    if (realtimeSymbolTotals) {
+      return SUPPORTED_SYMBOLS.map((symbol) => ({
+        symbol,
+        marketValue: realtimeSymbolTotals[symbol] ?? 0,
+      }))
+    }
+    if (globalPositionSummaries.length > 0) {
+      return globalPositionSummaries
+    }
+    return accountPositionSummaries
+  }, [realtimeSymbolTotals, globalPositionSummaries, accountPositionSummaries])
+
+  const accountPositionsValue = useMemo(() => {
+    if (overview?.positions_value !== undefined && overview.positions_value !== null) {
+      return overview.positions_value
+    }
+    return accountPositionSummaries.reduce((acc, position) => acc + position.marketValue, 0)
+  }, [overview?.positions_value, accountPositionSummaries])
+
+  const accountAvailableCash = overview?.account?.current_cash ?? 0
+  const accountFrozenCash = overview?.account?.frozen_cash ?? 0
+  const accountTotalAssets =
+    overview?.total_assets ?? accountAvailableCash + accountFrozenCash + accountPositionsValue
+
+  const aggregatedTotals = useMemo(() => {
+    if (realtimeTotals) {
+      return {
+        availableCash: realtimeTotals.available_cash,
+        frozenCash: realtimeTotals.frozen_cash,
+        positionsValue: realtimeTotals.positions_value,
+        totalAssets: realtimeTotals.total_assets,
+      }
+    }
+
+    const hasGlobalSnapshots = globalPositionSnapshots.length > 0
+    const accountsList = props.accounts ?? []
+    const hasAccountsList = accountsList.length > 0
+
+    const globalAvailableCash = hasGlobalSnapshots
+      ? globalPositionSnapshots.reduce(
+          (acc, snapshot) => acc + (snapshot.available_cash ?? 0),
+          0,
+        )
+      : 0
+
+    const globalPositionsValue = hasGlobalSnapshots
+      ? globalPositionSnapshots.reduce((acc, snapshot) => {
+          const snapshotTotal = snapshot.positions.reduce((sum, position: ArenaPositionItem) => {
+            const currentValue = Number(
+              position.current_value ?? position.notional ?? 0,
+            )
+            return sum + currentValue
+          }, 0)
+          return acc + snapshotTotal
+        }, 0)
+      : 0
+
+    const globalFrozenCash = hasAccountsList
+      ? accountsList.reduce(
+          (acc: number, account: any) => acc + Number(account.frozen_cash ?? 0),
+          0,
+        )
+      : 0
+
+    if (!hasGlobalSnapshots && !hasAccountsList) {
+      return {
+        availableCash: accountAvailableCash,
+        frozenCash: accountFrozenCash,
+        positionsValue: accountPositionsValue,
+        totalAssets: accountTotalAssets,
+      }
+    }
+
+    const availableCashTotal = hasGlobalSnapshots ? globalAvailableCash : accountAvailableCash
+    const positionsValueTotal = hasGlobalSnapshots ? globalPositionsValue : accountPositionsValue
+    const frozenCashTotal = hasAccountsList ? globalFrozenCash : (hasGlobalSnapshots ? 0 : accountFrozenCash)
+    const totalAssetsTotal = availableCashTotal + frozenCashTotal + positionsValueTotal
+
+    return {
+      availableCash: availableCashTotal,
+      frozenCash: frozenCashTotal,
+      positionsValue: positionsValueTotal,
+      totalAssets: totalAssetsTotal,
+    }
+  }, [
+    globalPositionSnapshots,
+    props.accounts,
+    accountAvailableCash,
+    accountFrozenCash,
+    accountPositionsValue,
+    accountTotalAssets,
+    realtimeTotals,
+  ])
+
   if (!overview) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -136,21 +376,99 @@ export default function AccountDataView(props: AccountDataViewProps) {
 
   return (
     <div className="h-full flex flex-col space-y-6 min-h-0">
-      {/* Main Content */}
-      <div className={`grid gap-6 overflow-hidden ${showAssetCurves ? 'grid-cols-5' : 'grid-cols-1'} h-full min-h-0`}>
-        {/* Asset Curves */}
-        {showAssetCurves && (
-          <div className="col-span-3 min-h-0">
-            <AssetCurveWithData
-              data={allAssetCurves}
-              wsRef={wsRef}
-              highlightAccountId={selectedArenaAccount}
-            />
+      <div className="border border-border rounded-lg bg-card shadow-sm px-4 py-3 flex flex-col gap-4">
+        <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-3 overflow-x-auto pb-1">
+              {positionSummaries.map((position) => {
+                const logo = getSymbolLogo(position.symbol)
+                return (
+                  <div
+                    key={position.symbol}
+                    className="flex items-center gap-3 rounded-md bg-muted/70 px-3 py-2 shadow-sm border border-border/70 min-w-[116px]"
+                  >
+                    {logo && (
+                      <img
+                        src={logo.src}
+                        alt={logo.alt}
+                        className="h-6 w-6 rounded-full object-contain bg-background"
+                        loading="lazy"
+                      />
+                    )}
+                    <div className="flex flex-col leading-tight">
+                      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        {position.symbol}
+                      </span>
+                      <FlipNumber
+                        value={position.marketValue}
+                        prefix="$"
+                        decimals={2}
+                        className="text-sm font-semibold text-primary"
+                      />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           </div>
-        )}
 
-        {/* Tabs and Strategy Panel */}
-        <div className={`${showAssetCurves ? 'col-span-2' : 'col-span-1'} overflow-hidden flex flex-col min-h-0`}>
+          <div className="flex flex-wrap items-center gap-4 text-xs uppercase tracking-wide text-muted-foreground">
+            <div className="flex flex-col leading-tight">
+              <span>Cash Available</span>
+              <FlipNumber
+                value={aggregatedTotals.availableCash}
+                prefix="$"
+                decimals={2}
+                className="text-base font-semibold text-foreground"
+              />
+            </div>
+            <div className="flex flex-col leading-tight">
+              <span>Frozen Cash</span>
+              <FlipNumber
+                value={aggregatedTotals.frozenCash}
+                prefix="$"
+                decimals={2}
+                className="text-base font-semibold text-foreground"
+              />
+            </div>
+            <div className="flex flex-col leading-tight">
+              <span>Positions Value</span>
+              <FlipNumber
+                value={aggregatedTotals.positionsValue}
+                prefix="$"
+                decimals={2}
+                className="text-base font-semibold text-foreground"
+              />
+            </div>
+            <div className="flex flex-col leading-tight">
+              <span>Total Assets</span>
+              <FlipNumber
+                value={aggregatedTotals.totalAssets}
+                prefix="$"
+                decimals={2}
+                className="text-base font-semibold text-primary"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 min-h-0">
+        <div className={`grid gap-6 overflow-hidden ${showAssetCurves ? 'grid-cols-5' : 'grid-cols-1'} h-full min-h-0`}>
+          {/* Asset Curves */}
+          {showAssetCurves && (
+            <div className="col-span-3 min-h-0">
+              <AssetCurveWithData
+                data={allAssetCurves}
+                wsRef={wsRef}
+                highlightAccountId={selectedArenaAccount}
+              />
+            </div>
+          )}
+
+          {/* Tabs and Strategy Panel */}
+          <div className={`${showAssetCurves ? 'col-span-2' : 'col-span-1'} overflow-hidden flex flex-col min-h-0`}>
           {/* Content Area */}
           <div className={`flex-1 h-0 overflow-hidden ${showStrategyPanel ? 'grid grid-cols-4 gap-4' : ''}`}>
             <div className={`${showStrategyPanel ? 'col-span-3' : 'col-span-1'} h-full overflow-hidden flex flex-col`}>
@@ -184,6 +502,7 @@ export default function AccountDataView(props: AccountDataViewProps) {
             )}
           </div>
         </div>
+      </div>
       </div>
     </div>
   )

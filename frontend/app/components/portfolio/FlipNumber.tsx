@@ -63,7 +63,7 @@ export default function FlipNumber({
       // Clear flipping state after animation completes
       setTimeout(() => {
         setFlippingIndices(new Set())
-      }, 600)
+      }, 900)
     } else {
       setDisplayValue(value)
     }

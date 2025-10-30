@@ -5,8 +5,10 @@ import logging
 import random
 import json
 import time
+import re
 from decimal import Decimal
 from typing import Any, Dict, Optional, List
+from datetime import datetime
 
 import requests
 from sqlalchemy.orm import Session
@@ -16,6 +18,7 @@ from services.asset_calculator import calc_positions_value
 from services.news_feed import fetch_latest_news
 from repositories.strategy_repo import set_last_trigger
 from services.system_logger import system_logger
+from repositories import prompt_repo
 
 
 logger = logging.getLogger(__name__)
@@ -36,6 +39,137 @@ SUPPORTED_SYMBOLS: Dict[str, str] = {
     "XRP": "Ripple",
     "BNB": "Binance Coin",
 }
+
+
+class SafeDict(dict):
+    def __missing__(self, key):  # type: ignore[override]
+        return "N/A"
+
+
+def _format_currency(value: Optional[float], precision: int = 2, default: str = "N/A") -> str:
+    try:
+        if value is None:
+            return default
+        return f"{float(value):,.{precision}f}"
+    except (TypeError, ValueError):
+        return default
+
+
+def _format_quantity(value: Optional[float], precision: int = 6, default: str = "0") -> str:
+    try:
+        if value is None:
+            return default
+        return f"{float(value):.{precision}f}"
+    except (TypeError, ValueError):
+        return default
+
+
+def _build_session_context(account: Account) -> str:
+    now = datetime.utcnow()
+    runtime_minutes = "N/A"
+
+    created_at = getattr(account, "created_at", None)
+    if isinstance(created_at, datetime):
+        created = created_at.replace(tzinfo=None) if created_at.tzinfo else created_at
+        runtime_minutes = str(max(0, int((now - created).total_seconds() // 60)))
+
+    lines = [
+        f"TRADER_ID: {account.name}",
+        f"MODEL: {account.model or 'N/A'}",
+        f"RUNTIME_MINUTES: {runtime_minutes}",
+        "INVOCATION_COUNT: N/A",
+        f"CURRENT_TIME_UTC: {now.isoformat()}",
+    ]
+    return "\n".join(lines)
+
+
+def _build_account_state(portfolio: Dict[str, Any]) -> str:
+    positions: Dict[str, Dict[str, Any]] = portfolio.get("positions", {})
+    lines = [
+        f"Available Cash (USD): {_format_currency(portfolio.get('cash'))}",
+        f"Frozen Cash (USD): {_format_currency(portfolio.get('frozen_cash'))}",
+        f"Total Assets (USD): {_format_currency(portfolio.get('total_assets'))}",
+        "",
+        "Open Positions:",
+    ]
+
+    if positions:
+        for symbol, data in positions.items():
+            lines.append(
+                f"- {symbol}: qty={_format_quantity(data.get('quantity'))}, "
+                f"avg_cost={_format_currency(data.get('avg_cost'))}, "
+                f"current_value={_format_currency(data.get('current_value'))}"
+            )
+    else:
+        lines.append("- None")
+
+    return "\n".join(lines)
+
+
+def _build_market_snapshot(prices: Dict[str, float], positions: Dict[str, Dict[str, Any]]) -> str:
+    lines: List[str] = []
+    for symbol in SUPPORTED_SYMBOLS.keys():
+        price = prices.get(symbol)
+        position = positions.get(symbol, {})
+
+        parts = [f"{symbol}: price={_format_currency(price, precision=4)}"]
+        if position:
+            parts.append(f"qty={_format_quantity(position.get('quantity'))}")
+            parts.append(f"avg_cost={_format_currency(position.get('avg_cost'), precision=4)}")
+            parts.append(f"position_value={_format_currency(position.get('current_value'))}")
+        else:
+            parts.append("position=flat")
+
+        lines.append(", ".join(parts))
+
+    return "\n".join(lines) if lines else "No market data available."
+
+
+OUTPUT_FORMAT_JSON = (
+    '{\n'
+    '  "operation": "buy" | "sell" | "hold" | "close",\n'
+    '  "symbol": "<BTC|ETH|SOL|BNB|XRP|DOGE>",\n'
+    '  "target_portion_of_balance": <float 0.0-1.0>,\n'
+    '  "reason": "<150 characters maximum>",\n'
+    '  "trading_strategy": "<2-3 sentences covering signals, risk, execution>"\n'
+    '}'
+)
+
+
+DECISION_TASK_TEXT = (
+    "You are a systematic trader operating on the Hyper Alpha Arena sandbox (no real funds at risk).\n"
+    "- Review every open position and decide: buy_to_enter, sell_to_enter, hold, or close_position.\n"
+    "- Avoid pyramiding or increasing size unless an exit plan explicitly allows it.\n"
+    "- Respect risk: keep new exposure within reasonable fractions of available cash (default ≤ 0.2).\n"
+    "- Close positions when invalidation conditions are met or risk is excessive.\n"
+    "- When data is missing (marked N/A), acknowledge uncertainty before deciding.\n"
+)
+
+
+def _build_prompt_context(
+    account: Account,
+    portfolio: Dict[str, Any],
+    prices: Dict[str, float],
+    news_section: str,
+) -> Dict[str, Any]:
+    positions = portfolio.get("positions", {})
+    account_state = _build_account_state(portfolio)
+    market_snapshot = _build_market_snapshot(prices, positions)
+    session_context = _build_session_context(account)
+
+    return {
+        "account_state": account_state,
+        "market_snapshot": market_snapshot,
+        "session_context": session_context,
+        "decision_task": DECISION_TASK_TEXT,
+        "output_format": OUTPUT_FORMAT_JSON,
+        "prices_json": json.dumps(prices, indent=2, sort_keys=True),
+        "portfolio_json": json.dumps(portfolio, indent=2, sort_keys=True),
+        "portfolio_positions_json": json.dumps(positions, indent=2, sort_keys=True),
+        "news_section": news_section,
+        "account_name": account.name,
+        "model_name": account.model or "",
+    }
 
 
 def _is_default_api_key(api_key: str) -> bool:
@@ -146,7 +280,12 @@ def _extract_text_from_message(content: Any) -> str:
     return ""
 
 
-def call_ai_for_decision(account: Account, portfolio: Dict, prices: Dict[str, float]) -> Optional[Dict]:
+def call_ai_for_decision(
+    db: Session,
+    account: Account,
+    portfolio: Dict,
+    prices: Dict[str, float],
+) -> Optional[Dict]:
     """Call AI model API to get trading decision"""
     # Check if this is a default API key
     if _is_default_api_key(account.api_key):
@@ -156,99 +295,85 @@ def call_ai_for_decision(account: Account, portfolio: Dict, prices: Dict[str, fl
     try:
         news_summary = fetch_latest_news()
         news_section = news_summary if news_summary else "No recent CoinJournal news available."
+    except Exception as err:  # pragma: no cover - defensive logging
+        logger.warning("Failed to fetch latest news: %s", err)
+        news_section = "No recent CoinJournal news available."
 
-        prompt = f"""You are a cryptocurrency trading AI. Based on the following portfolio and market data, decide on a trading action.
+    template = prompt_repo.get_prompt_for_account(db, account.id)
+    if not template:
+        try:
+            template = prompt_repo.ensure_default_prompt(db)
+        except ValueError as exc:
+            logger.error("Prompt template resolution failed: %s", exc)
+            return None
 
-Portfolio Data:
-- Cash Available: ${portfolio['cash']:.2f}
-- Frozen Cash: ${portfolio['frozen_cash']:.2f}
-- Total Assets: ${portfolio['total_assets']:.2f}
-- Current Positions: {json.dumps(portfolio['positions'], indent=2)}
+    context = _build_prompt_context(account, portfolio, prices, news_section)
 
-Current Market Prices:
-{json.dumps(prices, indent=2)}
+    try:
+        prompt = template.template_text.format_map(SafeDict(context))
+    except Exception as exc:  # pragma: no cover - fallback rendering
+        logger.error("Failed to render prompt template '%s': %s", template.key, exc)
+        prompt = template.template_text
 
-Latest Crypto News (CoinJournal):
-{news_section}
+    logger.debug("Using prompt template '%s' for account %s", template.key, account.id)
 
-Analyze the market and portfolio, then respond with ONLY a JSON object in this exact format:
-{{
-  "operation": "buy" or "sell" or "hold",
-  "symbol": "BTC" or "ETH" or "SOL" or "BNB" or "XRP" or "DOGE",
-  "target_portion_of_balance": 0.2,
-  "reason": "Brief explanation of your decision",
-  "trading_strategy": "Detailed trading strategy (2-3 paragraphs) covering key signals, risk factors, and execution plan"
-}}
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {account.api_key}",
+    }
 
-Rules:
-- operation must be "buy", "sell", or "hold"
-- For "buy": symbol is what to buy, target_portion_of_balance is % of cash to use (0.0-1.0)
-- For "sell": symbol is what to sell, target_portion_of_balance is % of position to sell (0.0-1.0)
-- For "hold": no action taken
-- Keep target_portion_of_balance between 0.1 and 0.3 for risk management
-- Only choose symbols you have data for
-- trading_strategy must be a rich, multi-sentence analysis describing signals, risk management, and trade execution"""
+    # Use OpenAI-compatible chat completions format
+    # Detect model type for appropriate parameter handling
+    model_lower = (account.model or "").lower()
 
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {account.api_key}"
-        }
-        
-        # Use OpenAI-compatible chat completions format
-        # Detect model type for appropriate parameter handling
-        model_lower = account.model.lower()
+    # Reasoning models that don't support temperature parameter
+    is_reasoning_model = any(
+        marker in model_lower for marker in ["gpt-5", "o1-preview", "o1-mini", "o1-", "o3-", "o4-"]
+    )
 
-        # Reasoning models that don't support temperature parameter
-        is_reasoning_model = any(x in model_lower for x in [
-            'gpt-5', 'o1-preview', 'o1-mini', 'o1-', 'o3-', 'o4-'
-        ])
+    # New models that use max_completion_tokens instead of max_tokens
+    is_new_model = is_reasoning_model or any(marker in model_lower for marker in ["gpt-4o"])
 
-        # o1 series specifically doesn't support system messages
-        is_o1_series = any(x in model_lower for x in ['o1-preview', 'o1-mini', 'o1-'])
+    payload = {
+        "model": account.model,
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        ],
+    }
 
-        # New models that use max_completion_tokens instead of max_tokens
-        is_new_model = is_reasoning_model or any(x in model_lower for x in ['gpt-4o'])
+    # Reasoning models (GPT-5, o1, o3, o4) don't support custom temperature
+    # Only add temperature parameter for non-reasoning models
+    if not is_reasoning_model:
+        payload["temperature"] = 0.7
 
-        payload = {
-            "model": account.model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ]
-        }
+    # Use max_completion_tokens for newer models
+    # Use max_tokens for older models (GPT-3.5, GPT-4, GPT-4-turbo, Deepseek)
+    # Modern models have large context windows, allocate generous token budgets
+    if is_new_model:
+        # Reasoning models (GPT-5/o1) need more tokens for internal reasoning
+        payload["max_completion_tokens"] = 3000
+    else:
+        # Regular models (GPT-4, Deepseek, Claude, etc.)
+        payload["max_tokens"] = 3000
 
-        # Reasoning models (GPT-5, o1, o3, o4) don't support custom temperature
-        # Only add temperature parameter for non-reasoning models
-        if not is_reasoning_model:
-            payload["temperature"] = 0.7
+    # For GPT-5 family set reasoning_effort to balance latency and quality
+    if "gpt-5" in model_lower:
+        payload["reasoning_effort"] = "low"
 
-        # Use max_completion_tokens for newer models
-        # Use max_tokens for older models (GPT-3.5, GPT-4, GPT-4-turbo, Deepseek)
-        # Modern models have large context windows, allocate generous token budgets
-        if is_new_model:
-            # Reasoning models (GPT-5/o1) need more tokens for internal reasoning
-            payload["max_completion_tokens"] = 3000
-        else:
-            # Regular models (GPT-4, Deepseek, Claude, etc.)
-            payload["max_tokens"] = 3000
-
-        # For GPT-5 series, set reasoning_effort for trading decisions
-        if 'gpt-5' in model_lower:
-            # Use "low" for trading to balance speed and quality
-            payload["reasoning_effort"] = "low"
-        
+    try:
         endpoints = build_chat_completion_endpoints(account.base_url, account.model)
         if not endpoints:
-            logger.error(f"No valid API endpoint built for account {account.name}")
+            logger.error("No valid API endpoint built for account %s", account.name)
             system_logger.log_error(
                 "API_ENDPOINT_BUILD_FAILED",
                 f"Failed to build API endpoint for {account.name} (model: {account.model})",
-                {"account": account.name, "model": account.model, "base_url": account.base_url}
+                {"account": account.name, "model": account.model, "base_url": account.base_url},
             )
             return None
-        
+
         # Retry logic for rate limiting
         max_retries = 3
         response = None
@@ -261,48 +386,68 @@ Rules:
                         headers=headers,
                         json=payload,
                         timeout=30,
-                        verify=False  # Disable SSL verification for custom AI endpoints
+                        verify=False,  # Disable SSL verification for custom AI endpoints
                     )
-                    
+
                     if response.status_code == 200:
                         success = True
                         break  # Success, exit retry loop
-                    elif response.status_code == 429:
+
+                    if response.status_code == 429:
                         # Rate limited, wait and retry
-                        wait_time = (2 ** attempt) + random.uniform(0, 1)  # Exponential backoff with jitter
+                        wait_time = (2**attempt) + random.uniform(0, 1)  # Exponential backoff with jitter
                         logger.warning(
-                            f"AI API rate limited for {account.name} (attempt {attempt + 1}/{max_retries}), waiting {wait_time:.1f}s..."
+                            "AI API rate limited for %s (attempt %s/%s), waiting %.1fs…",
+                            account.name,
+                            attempt + 1,
+                            max_retries,
+                            wait_time,
                         )
                         if attempt < max_retries - 1:
                             time.sleep(wait_time)
                             continue
-                        else:
-                            logger.error(
-                                f"AI API rate limited after {max_retries} attempts for endpoint {endpoint}: {response.text}"
-                            )
-                            break
-                    else:
-                        logger.warning(
-                            f"AI API returned status {response.status_code} for endpoint {endpoint}: {response.text}"
+
+                        logger.error(
+                            "AI API rate limited after %s attempts for endpoint %s: %s",
+                            max_retries,
+                            endpoint,
+                            response.text,
                         )
-                        break  # Try next endpoint if available
+                        break
+
+                    logger.warning(
+                        "AI API returned status %s for endpoint %s: %s",
+                        response.status_code,
+                        endpoint,
+                        response.text,
+                    )
+                    break  # Try next endpoint if available
                 except requests.RequestException as req_err:
                     if attempt < max_retries - 1:
-                        wait_time = (2 ** attempt) + random.uniform(0, 1)
+                        wait_time = (2**attempt) + random.uniform(0, 1)
                         logger.warning(
-                            f"AI API request failed for endpoint {endpoint} (attempt {attempt + 1}/{max_retries}), "
-                            f"retrying in {wait_time:.1f}s: {req_err}"
+                            "AI API request failed for endpoint %s (attempt %s/%s), retrying in %.1fs: %s",
+                            endpoint,
+                            attempt + 1,
+                            max_retries,
+                            wait_time,
+                            req_err,
                         )
                         time.sleep(wait_time)
                         continue
-                    else:
-                        logger.warning(f"AI API request failed after {max_retries} attempts for endpoint {endpoint}: {req_err}")
-                        break
+
+                    logger.warning(
+                        "AI API request failed after %s attempts for endpoint %s: %s",
+                        max_retries,
+                        endpoint,
+                        req_err,
+                    )
+                    break
             if success:
                 break
 
         if not success or not response:
-            logger.error(f"All API endpoints failed for account {account.name} ({account.model})")
+            logger.error("All API endpoints failed for account %s (%s)", account.name, account.model)
             system_logger.log_error(
                 "AI_API_ALL_ENDPOINTS_FAILED",
                 f"All API endpoints failed for {account.name}",
@@ -310,13 +455,13 @@ Rules:
                     "account": account.name,
                     "model": account.model,
                     "endpoints_tried": [str(ep) for ep in endpoints],
-                    "max_retries": max_retries
-                }
+                    "max_retries": max_retries,
+                },
             )
             return None
 
         result = response.json()
-        
+
         # Extract text from OpenAI-compatible response format
         if "choices" in result and len(result["choices"]) > 0:
             choice = result["choices"][0]
@@ -326,7 +471,7 @@ Rules:
 
             # Check if response was truncated due to length limit
             if finish_reason == "length":
-                logger.warning(f"AI response was truncated due to token limit. Consider increasing max_tokens.")
+                logger.warning("AI response was truncated due to token limit. Consider increasing max_tokens.")
                 # Try to get content from reasoning field if available (some models put partial content there)
                 raw_content = message.get("reasoning") or message.get("content")
             else:
@@ -334,10 +479,9 @@ Rules:
 
             text_content = _extract_text_from_message(raw_content)
 
-            if not text_content:
-                # Some providers (Anthropic) keep reasoning in separate field even on normal completion
-                if reasoning_text:
-                    text_content = reasoning_text
+            if not text_content and reasoning_text:
+                # Some providers keep reasoning separately even on normal completion
+                text_content = reasoning_text
 
             if not text_content:
                 logger.error(
@@ -359,54 +503,41 @@ Rules:
             try:
                 decision = json.loads(cleaned_content)
             except json.JSONDecodeError as parse_err:
-                # Try to fix common JSON issues
-                logger.warning(f"Initial JSON parse failed: {parse_err}")
-                logger.warning(f"Problematic content: {cleaned_content[:200]}...")
+                logger.warning("Initial JSON parse failed: %s", parse_err)
+                logger.warning("Problematic content: %s...", cleaned_content[:200])
 
-                # Try to clean up the text content
-                cleaned_content = cleaned_content
+                cleaned = (
+                    cleaned_content.replace("\n", " ")
+                    .replace("\r", " ")
+                    .replace("\t", " ")
+                )
+                cleaned = cleaned.replace("“", '"').replace("”", '"')
+                cleaned = cleaned.replace("‘", "'").replace("’", "'")
+                cleaned = cleaned.replace("–", "-").replace("—", "-").replace("‑", "-")
 
-                # Replace problematic characters that might break JSON
-                cleaned_content = cleaned_content.replace('\n', ' ')
-                cleaned_content = cleaned_content.replace('\r', ' ')
-                cleaned_content = cleaned_content.replace('\t', ' ')
-                
-                # Handle unescaped quotes in strings by escaping them
-                import re
-                # Try a simpler approach to fix common JSON issues
-                # Replace smart quotes and em-dashes with regular equivalents
-                cleaned_content = cleaned_content.replace('"', '"').replace('"', '"')
-                cleaned_content = cleaned_content.replace(''', "'").replace(''', "'")
-                cleaned_content = cleaned_content.replace('–', '-').replace('—', '-')
-                cleaned_content = cleaned_content.replace('‑', '-')  # Non-breaking hyphen
-                
-                # Try parsing again
                 try:
-                    decision = json.loads(cleaned_content)
-                    logger.info("Successfully parsed JSON after cleanup")
+                    decision = json.loads(cleaned)
+                    cleaned_content = cleaned
+                    logger.info("Successfully parsed AI decision after cleanup")
                 except json.JSONDecodeError:
-                    # If still failing, try to extract just the essential parts
-                    logger.error("JSON parsing failed even after cleanup, attempting manual extraction")
-                    try:
-                        # Extract operation, symbol, and target_portion manually
-                        operation_match = re.search(r'"operation":\s*"([^"]+)"', text_content)
-                        symbol_match = re.search(r'"symbol":\s*"([^"]+)"', text_content)
-                        portion_match = re.search(r'"target_portion_of_balance":\s*([0-9.]+)', text_content)
-                        reason_match = re.search(r'"reason":\s*"([^"]*)', text_content)
-                        
-                        if operation_match and symbol_match and portion_match:
-                            decision = {
-                                "operation": operation_match.group(1),
-                                "symbol": symbol_match.group(1),
-                                "target_portion_of_balance": float(portion_match.group(1)),
-                                "reason": reason_match.group(1) if reason_match else "AI response parsing issue"
-                            }
-                            logger.info("Successfully extracted AI decision manually")
-                            cleaned_content = json.dumps(decision)
-                        else:
-                            raise json.JSONDecodeError("Could not extract required fields", text_content, 0)
-                    except Exception:
-                        raise parse_err  # Re-raise original error
+                    logger.error("JSON parsing failed after cleanup, attempting manual extraction")
+                    operation_match = re.search(r'"operation"\s*:\s*"([^"]+)"', text_content, re.IGNORECASE)
+                    symbol_match = re.search(r'"symbol"\s*:\s*"([^"]+)"', text_content, re.IGNORECASE)
+                    portion_match = re.search(r'"target_portion_of_balance"\s*:\s*([0-9.]+)', text_content)
+                    reason_match = re.search(r'"reason"\s*:\s*"([^"]+)"', text_content)
+
+                    if operation_match and symbol_match and portion_match:
+                        decision = {
+                            "operation": operation_match.group(1),
+                            "symbol": symbol_match.group(1),
+                            "target_portion_of_balance": float(portion_match.group(1)),
+                            "reason": reason_match.group(1) if reason_match else "AI response parsing issue",
+                        }
+                        logger.info("Successfully recovered AI decision via manual extraction")
+                        cleaned_content = json.dumps(decision)
+                    else:
+                        logger.error("Unable to extract required fields from AI response")
+                        return None
 
             # Validate that decision is a dict with required structure
             if not isinstance(decision, dict):
@@ -427,7 +558,7 @@ Rules:
 
             logger.info(f"AI decision for {account.name}: {decision}")
             return decision
-        
+
         logger.error(f"Unexpected AI response format: {result}")
         return None
         

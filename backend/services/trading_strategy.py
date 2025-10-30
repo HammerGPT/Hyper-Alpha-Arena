@@ -28,6 +28,15 @@ MIN_REALTIME_INTERVAL = 1.0  # seconds
 STRATEGY_REFRESH_INTERVAL = 60.0  # seconds
 
 
+def _as_aware(dt: Optional[datetime]) -> Optional[datetime]:
+    """Ensure stored timestamps are timezone-aware UTC."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 @dataclass
 class StrategyState:
     account_id: int
@@ -133,7 +142,7 @@ class StrategyManager:
                     existing_state.interval_seconds = cfg.interval_seconds
                     existing_state.tick_batch_size = cfg.tick_batch_size
                     existing_state.enabled = enabled
-                    existing_state.last_trigger_at = cfg.last_trigger_at
+                    existing_state.last_trigger_at = _as_aware(cfg.last_trigger_at)
                     new_states[account.id] = existing_state
                 else:
                     # Create new state only if it doesn't exist
@@ -143,7 +152,7 @@ class StrategyManager:
                         interval_seconds=cfg.interval_seconds,
                         tick_batch_size=cfg.tick_batch_size,
                         enabled=enabled,
-                        last_trigger_at=cfg.last_trigger_at,
+                        last_trigger_at=_as_aware(cfg.last_trigger_at),
                     )
                     new_states[account.id] = state
 

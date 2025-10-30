@@ -192,6 +192,92 @@ export interface StrategyConfigUpdate {
   enabled: boolean
 }
 
+// Prompt templates & bindings
+export interface PromptTemplate {
+  id: number
+  key: string
+  name: string
+  description?: string | null
+  templateText: string
+  systemTemplateText: string
+  updatedBy?: string | null
+  updatedAt?: string | null
+}
+
+export interface PromptBinding {
+  id: number
+  accountId: number
+  accountName: string
+  accountModel?: string | null
+  promptTemplateId: number
+  promptKey: string
+  promptName: string
+  updatedBy?: string | null
+  updatedAt?: string | null
+}
+
+export interface PromptListResponse {
+  templates: PromptTemplate[]
+  bindings: PromptBinding[]
+}
+
+export interface PromptTemplateUpdateRequest {
+  templateText: string
+  description?: string
+  updatedBy?: string
+}
+
+export interface PromptBindingUpsertRequest {
+  id?: number
+  accountId: number
+  promptTemplateId: number
+  updatedBy?: string
+}
+
+export async function getPromptTemplates(): Promise<PromptListResponse> {
+  const response = await apiRequest('/prompts')
+  return response.json()
+}
+
+export async function updatePromptTemplate(
+  key: string,
+  payload: PromptTemplateUpdateRequest,
+): Promise<PromptTemplate> {
+  const response = await apiRequest(`/prompts/${encodeURIComponent(key)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+  return response.json()
+}
+
+export async function restorePromptTemplate(
+  key: string,
+  updatedBy?: string,
+): Promise<PromptTemplate> {
+  const body = updatedBy ? { updatedBy } : {}
+  const response = await apiRequest(`/prompts/${encodeURIComponent(key)}/restore`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+  return response.json()
+}
+
+export async function upsertPromptBinding(
+  payload: PromptBindingUpsertRequest,
+): Promise<PromptBinding> {
+  const response = await apiRequest('/prompts/bindings', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  return response.json()
+}
+
+export async function deletePromptBinding(bindingId: number): Promise<void> {
+  await apiRequest(`/prompts/bindings/${bindingId}`, {
+    method: 'DELETE',
+  })
+}
+
 
 export async function loginUser(username: string, password: string): Promise<UserAuthResponse> {
   const response = await apiRequest('/users/login', {

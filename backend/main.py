@@ -126,6 +126,14 @@ def on_startup():
     finally:
         db.close()
     
+    # Ensure prompt templates exist
+    db = SessionLocal()
+    try:
+        from services.prompt_initializer import seed_prompt_templates
+        seed_prompt_templates(db)
+    finally:
+        db.close()
+    
     # Initialize system log collector
     from services.system_logger import setup_system_logger
     setup_system_logger()
@@ -151,6 +159,7 @@ from api.ranking_routes import router as ranking_router
 from api.crypto_routes import router as crypto_router
 from api.arena_routes import router as arena_router
 from api.system_log_routes import router as system_log_router
+from api.prompt_routes import router as prompt_router
 # Removed: AI account routes merged into account_routes (unified AI trader accounts)
 
 app.include_router(market_data_router)
@@ -161,6 +170,7 @@ app.include_router(ranking_router)
 app.include_router(crypto_router)
 app.include_router(arena_router)
 app.include_router(system_log_router)
+app.include_router(prompt_router)
 # app.include_router(ai_account_router, prefix="/api")  # Removed - merged into account_router
 
 # WebSocket endpoint
