@@ -84,21 +84,13 @@ This project is based on [open-alpha-arena](https://github.com/etrobot/open-alph
 git clone https://github.com/HammerGPT/Hyper-Alpha-Arena.git
 cd Hyper-Alpha-Arena
 
-# Install Node.js dependencies (may need sudo on macOS)
-sudo npm install -g pnpm
-pnpm install
-
 # Setup Python backend
-cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
-cd ..
 
-# Build and copy frontend
-pnpm run build:frontend
-mkdir -p backend/static
-cp -r frontend/dist/* backend/static/
+# Start the application (auto-installs pnpm and builds frontend)
+./start_arena.sh
 ```
 
 #### 🪟 Windows
@@ -107,10 +99,6 @@ cp -r frontend/dist/* backend/static/
 git clone https://github.com/HammerGPT/Hyper-Alpha-Arena.git
 cd Hyper-Alpha-Arena
 
-# Install Node.js dependencies
-npm install -g pnpm
-pnpm install
-
 # Setup Python backend
 cd backend
 python -m venv .venv
@@ -118,35 +106,40 @@ python -m venv .venv
 pip install -e .
 cd ..
 
-# Build and copy frontend
-pnpm run build:frontend
-mkdir backend\static
-xcopy /E /I frontend\dist backend\static
+# Start the application (auto-installs pnpm and builds frontend)
+start_arena.bat
 ```
 
 ### Running the Application
 
+The startup script automatically handles all setup and runs on port 8802:
+
 #### 🍎 macOS/Linux
 ```bash
+# Start the application
 ./start_arena.sh
+
+# Stop the application
+./start_arena.sh stop
 ```
 
 #### 🪟 Windows
 ```cmd
-.\start_arena.bat
+# Start the application
+start_arena.bat
+
+# Stop the application
+start_arena.bat stop
 ```
 
 The startup script will:
+- Auto-install pnpm if not present (no sudo required)
+- Build and deploy frontend automatically
 - Start the backend service on port 8802
 - Initialize the trading strategy manager
-- Enable real-time price monitoring
-- Activate the system logging service
+- Enable real-time price monitoring and auto-rebuild
 
 **Access the application**: Open http://localhost:8802 in your browser
-
-**Stop the server**:
-- **Linux/macOS**: `screen -S alpha-arena -X quit`
-- **Windows**: Close the "Alpha Arena Backend" window or use Task Manager
 
 ### First-Time Setup
 
