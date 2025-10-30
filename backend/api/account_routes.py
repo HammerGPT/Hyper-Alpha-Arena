@@ -11,7 +11,8 @@ from decimal import Decimal
 import logging
 
 from database.connection import SessionLocal
-from database.models import Account, Position, Trade, CryptoPrice
+from database.models import Account, Position, Trade, CryptoPrice, AccountAssetSnapshot
+from services.asset_curve_calculator import invalidate_asset_curve_cache
 from services.ai_decision_service import build_chat_completion_endpoints, _extract_text_from_message
 from schemas.account import StrategyConfig, StrategyConfigUpdate
 from repositories.strategy_repo import get_strategy_by_account, upsert_strategy
@@ -310,6 +311,30 @@ async def create_new_account(payload: dict, db: Session = Depends(get_db)):
         db.add(new_account)
         db.commit()
         db.refresh(new_account)
+
+        # Record initial snapshot so asset curves start at the configured capital
+        try:
+            now_utc = datetime.now(timezone.utc)
+            initial_total = Decimal(str(new_account.initial_capital))
+            snapshot = AccountAssetSnapshot(
+                account_id=new_account.id,
+                total_assets=initial_total,
+                cash=Decimal(str(new_account.current_cash)),
+                positions_value=Decimal("0"),
+                event_time=now_utc,
+                trigger_symbol=None,
+                trigger_market="CRYPTO",
+            )
+            db.add(snapshot)
+            db.commit()
+            invalidate_asset_curve_cache()
+        except Exception as snapshot_err:
+            db.rollback()
+            logger.warning(
+                "Failed to create initial account snapshot for account %s: %s",
+                new_account.id,
+                snapshot_err,
+            )
 
         # Reset auto trading job after creating new account (async in background to avoid blocking response)
         import threading

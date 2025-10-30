@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -6,8 +8,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 import os
 
+from decimal import Decimal
+
 from database.connection import engine, Base, SessionLocal
-from database.models import TradingConfig, User, Account, SystemConfig
+from database.models import TradingConfig, User, Account, SystemConfig, AccountAssetSnapshot
+from services.asset_curve_calculator import invalidate_asset_curve_cache
 from config.settings import DEFAULT_TRADING_CONFIGS
 app = FastAPI(title="Crypto Paper Trading API")
 
@@ -104,25 +109,8 @@ def on_startup():
             db.commit()
             db.refresh(default_user)
         
-        # Ensure default user has at least one account
-        default_accounts = db.query(Account).filter(Account.user_id == default_user.id).all()
-        if len(default_accounts) == 0:
-            # Create default account
-            default_account = Account(
-                user_id=default_user.id,
-                version="v1",
-                name="GPT",
-                account_type="AI",
-                model="gpt-5-mini",
-                base_url="https://api.openai.com/v1",
-                api_key="default-key-please-update-in-settings",
-                initial_capital=10000.0,  # $10,000 starting capital for crypto trading
-                current_cash=10000.0,
-                frozen_cash=0.0,
-                is_active="true"
-            )
-            db.add(default_account)
-            db.commit()
+        # No default account creation - users must create their own accounts
+
     finally:
         db.close()
     

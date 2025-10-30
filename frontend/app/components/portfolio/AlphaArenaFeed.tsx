@@ -89,6 +89,7 @@ export default function AlphaArenaFeed({
   const [modelChat, setModelChat] = useState<ArenaModelChatEntry[]>([])
   const [positions, setPositions] = useState<ArenaPositionsAccount[]>([])
   const [accountsMeta, setAccountsMeta] = useState<ArenaAccountMeta[]>([])
+  const [allTraderOptions, setAllTraderOptions] = useState<ArenaAccountMeta[]>([])
   const [internalSelectedAccount, setInternalSelectedAccount] = useState<number | 'all'>(
     selectedAccountProp ?? 'all',
   )
@@ -295,6 +296,20 @@ export default function AlphaArenaFeed({
           return mergedMetas
         })
 
+        // Update allTraderOptions only when viewing 'all' to preserve complete list
+        if (activeAccount === 'all') {
+          setAllTraderOptions((prev) => {
+            const metaMap = new Map<number, ArenaAccountMeta>()
+            prev.forEach((meta) => {
+              metaMap.set(meta.account_id, meta)
+            })
+            mergedMetas.forEach((meta) => {
+              metaMap.set(meta.account_id, meta)
+            })
+            return Array.from(metaMap.values())
+          })
+        }
+
         writeCache(cacheKey, {
           trades: nextTrades,
           modelChat: nextModelChat,
@@ -339,12 +354,8 @@ export default function AlphaArenaFeed({
   ])
 
   const accountOptions = useMemo(() => {
-    const unique = new Map<number, ArenaAccountMeta>()
-    accountsMeta.forEach((meta) => {
-      unique.set(meta.account_id, meta)
-    })
-    return Array.from(unique.values()).sort((a, b) => a.name.localeCompare(b.name))
-  }, [accountsMeta])
+    return allTraderOptions.sort((a, b) => a.name.localeCompare(b.name))
+  }, [allTraderOptions])
 
   const handleRefreshClick = () => {
     setManualRefreshKey((key) => key + 1)

@@ -118,10 +118,8 @@ function App() {
               toast('Order placed, waiting for fill', { icon: '⏳' })
               ws!.send(JSON.stringify({ type: 'get_snapshot' }))
             } else if (msg.type === 'user_switched') {
-              toast.success(`Switched to ${msg.user.username}`)
               setUser(msg.user)
             } else if (msg.type === 'account_switched') {
-              toast.success(`Switched to ${msg.account.name}`)
               setAccount(msg.account)
               refreshAccounts()
             } else if (msg.type === 'trade_update') {
@@ -240,7 +238,6 @@ function App() {
     }
     try {
       wsRef.current.send(JSON.stringify({ type: 'switch_user', username }))
-      toast('Switching AI trader...', { icon: '🔄' })
     } catch (e) {
       console.error(e)
       toast.error('Failed to switch user')
@@ -255,7 +252,6 @@ function App() {
     }
     try {
       wsRef.current.send(JSON.stringify({ type: 'switch_account', account_id: accountId }))
-      toast('Switching AI trader...', { icon: '🔄' })
     } catch (e) {
       console.error(e)
       toast.error('Failed to switch AI trader')

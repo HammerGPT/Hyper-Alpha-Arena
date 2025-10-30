@@ -458,11 +458,12 @@ export default function AccountDataView(props: AccountDataViewProps) {
         <div className={`grid gap-6 overflow-hidden ${showAssetCurves ? 'grid-cols-5' : 'grid-cols-1'} h-full min-h-0`}>
           {/* Asset Curves */}
           {showAssetCurves && (
-            <div className="col-span-3 min-h-0">
+            <div className="col-span-3 min-h-0 border border-border rounded-lg bg-card shadow-sm px-4 py-3 flex flex-col gap-4">
               <AssetCurveWithData
                 data={allAssetCurves}
                 wsRef={wsRef}
                 highlightAccountId={selectedArenaAccount}
+                onHighlightAccountChange={handleArenaAccountChange}
               />
             </div>
           )}
@@ -471,7 +472,7 @@ export default function AccountDataView(props: AccountDataViewProps) {
           <div className={`${showAssetCurves ? 'col-span-2' : 'col-span-1'} overflow-hidden flex flex-col min-h-0`}>
           {/* Content Area */}
           <div className={`flex-1 h-0 overflow-hidden ${showStrategyPanel ? 'grid grid-cols-4 gap-4' : ''}`}>
-            <div className={`${showStrategyPanel ? 'col-span-3' : 'col-span-1'} h-full overflow-hidden flex flex-col`}>
+            <div className={`${showStrategyPanel ? 'col-span-3' : 'col-span-1'} h-full overflow-hidden flex flex-col border border-border rounded-lg bg-card shadow-sm px-4 py-3 gap-4`}>
               {showAssetCurves ? (
                 <AlphaArenaFeed
                   refreshKey={accountRefreshTrigger}

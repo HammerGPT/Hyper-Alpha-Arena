@@ -293,7 +293,7 @@ export default function PromptManager() {
           <CardHeader>
             <CardTitle className="text-base">Account Prompt Bindings</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col gap-6 h-full overflow-hidden">
+          <CardContent className="flex flex-col gap-6">
             {/* Bindings Table */}
             <div className="flex-1 overflow-auto">
               <table className="min-w-full text-sm">

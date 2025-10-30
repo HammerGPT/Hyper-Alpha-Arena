@@ -315,3 +315,7 @@ CLAUDE.md
 AGENTS.md
 .claude/
 .cursor/
+*.db
+*.ps1
+backend/.venv/
+frontend/node_modules/

@@ -106,6 +106,7 @@ export default function ArenaAnalyticsFeed({
   const [summary, setSummary] = useState<ArenaAnalyticsSummary | null>(null)
   const [generatedAt, setGeneratedAt] = useState<string | null>(null)
   const [accountsMeta, setAccountsMeta] = useState<ArenaAccountMeta[]>([])
+  const [allTraderOptions, setAllTraderOptions] = useState<ArenaAccountMeta[]>([])
   const [internalSelectedAccount, setInternalSelectedAccount] = useState<number | 'all'>(
     selectedAccountProp ?? 'all',
   )
@@ -210,6 +211,20 @@ export default function ArenaAnalyticsFeed({
             return mergedMeta
         })
 
+        // Update allTraderOptions only when viewing 'all' to preserve complete list
+        if (activeAccount === 'all') {
+          setAllTraderOptions((prev) => {
+            const metaMap = new Map<number, ArenaAccountMeta>()
+            prev.forEach((meta) => {
+              metaMap.set(meta.account_id, meta)
+            })
+            mergedMeta.forEach((meta) => {
+              metaMap.set(meta.account_id, meta)
+            })
+            return Array.from(metaMap.values())
+          })
+        }
+
         setAnalyticsAccounts(nextAccounts)
         setSummary(nextSummary)
         setGeneratedAt(nextGeneratedAt)
@@ -256,12 +271,8 @@ export default function ArenaAnalyticsFeed({
   ])
 
   const accountOptions = useMemo(() => {
-    const unique = new Map<number, ArenaAccountMeta>()
-    accountsMeta.forEach((meta) => {
-      unique.set(meta.account_id, meta)
-    })
-    return Array.from(unique.values()).sort((a, b) => a.name.localeCompare(b.name))
-  }, [accountsMeta])
+    return allTraderOptions.sort((a, b) => a.name.localeCompare(b.name))
+  }, [allTraderOptions])
 
   const memoisedAggregates = useMemo(() => {
     const totals = analyticsAccounts.reduce(

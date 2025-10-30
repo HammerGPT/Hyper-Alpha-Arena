@@ -28,7 +28,7 @@ export default function FlipNumber({
   const prevValueRef = useRef(value)
 
   useEffect(() => {
-    if (Math.abs(value - prevValueRef.current) < 0.001) {
+    if (Math.abs(value - prevValueRef.current) < 0.01) {
       return
     }
 

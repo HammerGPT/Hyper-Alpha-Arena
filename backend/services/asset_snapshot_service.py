@@ -13,12 +13,13 @@ from sqlalchemy.orm import Session
 
 from database.connection import SessionLocal
 from database.models import Account, AccountAssetSnapshot, Position
+from services.asset_curve_calculator import invalidate_asset_curve_cache
 from services.market_data import get_last_price
 from api.ws import broadcast_arena_asset_update, manager
 
 logger = logging.getLogger(__name__)
 
-SNAPSHOT_RETENTION_HOURS = 24
+SNAPSHOT_RETENTION_HOURS = 24 * 30  # Keep 30 days of asset snapshots
 
 
 def _get_active_accounts(db: Session) -> List[Account]:
@@ -122,6 +123,7 @@ def handle_price_update(event: Dict[str, Any]) -> None:
         if snapshots:
             session.bulk_save_objects(snapshots)
             session.commit()
+            invalidate_asset_curve_cache()
 
         if manager.has_connections():
             update_payload = {
