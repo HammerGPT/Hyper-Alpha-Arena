@@ -73,80 +73,25 @@ This project is based on [open-alpha-arena](https://github.com/etrobot/open-alph
 
 ### Prerequisites
 
-#### Linux/macOS
-
-```bash
-# Install pnpm (Node.js package manager)
-npm install -g pnpm
-
-# Install uv (Python package manager)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-source $HOME/.local/bin/env
-```
-
-#### Windows
-
-```powershell
-# Install pnpm (Node.js package manager)
-npm install -g pnpm
-
-# Install uv (Python package manager) - Run as Administrator
-PowerShell -ExecutionPolicy Bypass -File install_uv.ps1
-```
-
-**Alternative for Windows**: If you prefer using standard Python tools instead of uv:
-```cmd
-# Use standard Python virtual environment
-cd backend
-python -m venv .venv
-.venv\Scripts\activate
-pip install -e .
-cd ..
-```
+- **Node.js** 18+ ([Download](https://nodejs.org/))
+- **Python** 3.11+ ([Download](https://python.org/))
 
 ### Installation
 
-#### Linux/macOS
-
 ```bash
-# 1. Clone the repository
+# 1. Clone and enter directory
 git clone https://github.com/HammerGPT/Hyper-Alpha-Arena.git
 cd Hyper-Alpha-Arena
 
-# 2. Install frontend dependencies
+# 2. Install dependencies
+npm install -g pnpm
 pnpm install
+cd backend && pip install -e . && cd ..
 
-# 3. Install backend dependencies
-cd backend && uv sync && cd ..
-
-# 4. Build frontend (one-time setup)
+# 3. Build and start
 pnpm run build:frontend
-cp -r frontend/dist/* backend/static/
-```
-
-#### Windows
-
-```cmd
-# 1. Clone the repository
-git clone https://github.com/HammerGPT/Hyper-Alpha-Arena.git
-cd Hyper-Alpha-Arena
-
-# 2. Install frontend dependencies
-pnpm install
-
-# 3. Install backend dependencies (if using uv)
-cd backend && uv sync && cd ..
-
-# 3. Alternative: Install backend dependencies (using standard Python)
-cd backend
-python -m venv .venv
-.venv\Scripts\activate
-pip install -e .
-cd ..
-
-# 4. Build frontend (one-time setup)
-pnpm run build:frontend
-xcopy /E /I frontend\dist backend\static
+cp -r frontend/dist/* backend/static/  # Linux/macOS
+# xcopy /E /I frontend\dist backend\static  # Windows
 ```
 
 ### Running the Application
@@ -326,24 +271,7 @@ The platform automatically handles model-specific configurations and parameter d
 
 ## Troubleshooting
 
-### Windows Issues
-
-**Problem**: `'sh' is not recognized as an internal or external command`
-**Solution**: Use the provided Windows scripts instead:
-- Use `install_uv.ps1` instead of the curl command
-- Use `start_arena.bat` instead of `./start_arena.sh`
-
-**Problem**: `'source' is not recognized as an internal or external command`
-**Solution**: Use Windows batch commands:
-- Replace `source .venv/bin/activate` with `.venv\Scripts\activate`
-
-**Problem**: `screen: command not found`
-**Solution**: The Windows startup script uses `start` command instead of `screen`
-
-**Problem**: Path not found errors
-**Solution**: Make sure you're running scripts from the project root directory
-
-### General Issues
+### Common Issues
 
 **Problem**: Port 8802 already in use
 **Solution**:
