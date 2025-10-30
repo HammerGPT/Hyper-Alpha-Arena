@@ -95,8 +95,14 @@ cd ..
 
 # Build frontend
 pnpm run build:frontend
-mkdir -p backend/static                  # mkdir backend\static (Windows)
-cp -r frontend/dist/* backend/static/   # xcopy /E /I frontend\dist backend\static (Windows)
+
+# Copy files (macOS/Linux)
+mkdir -p backend/static
+cp -r frontend/dist/* backend/static/
+
+# Copy files (Windows - use this instead)
+# mkdir backend\static
+# xcopy /E /I frontend\dist backend\static
 ```
 
 ### Running the Application
