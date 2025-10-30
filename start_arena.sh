@@ -152,7 +152,7 @@ echo "Waiting for service to start..."
 sleep 5
 
 # Check if service is running
-if curl -s http://127.0.0.1:8802/api/health > /dev/null 2>&1; then
+if curl -s http://127.0.0.1:8802/ > /dev/null 2>&1; then
     echo "✅ Service started successfully!"
     echo "   - Backend API: http://localhost:8802"
     echo "   - Health Check: http://localhost:8802/api/health"
