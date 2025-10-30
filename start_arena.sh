@@ -147,9 +147,16 @@ fi
 nohup .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8802 > ../arena.log 2>&1 &
 echo $! > ../arena.pid
 
-# Wait for service to start
+# Wait for service to start with retry logic
 echo "Waiting for service to start..."
-sleep 8
+for i in {1..30}; do
+    if curl -s http://127.0.0.1:8802/api/health > /dev/null 2>&1; then
+        break
+    fi
+    echo -n "."
+    sleep 1
+done
+echo ""
 
 # Check if service is running
 if curl -s http://127.0.0.1:8802/api/health > /dev/null 2>&1; then
