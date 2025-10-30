@@ -78,7 +78,32 @@ This project is based on [open-alpha-arena](https://github.com/etrobot/open-alph
 
 ### Installation
 
+#### 🍎 macOS/Linux
+
 ```bash
+git clone https://github.com/HammerGPT/Hyper-Alpha-Arena.git
+cd Hyper-Alpha-Arena
+
+# Install Node.js dependencies (may need sudo on macOS)
+sudo npm install -g pnpm
+pnpm install
+
+# Setup Python backend
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+cd ..
+
+# Build and copy frontend
+pnpm run build:frontend
+mkdir -p backend/static
+cp -r frontend/dist/* backend/static/
+```
+
+#### 🪟 Windows
+
+```cmd
 git clone https://github.com/HammerGPT/Hyper-Alpha-Arena.git
 cd Hyper-Alpha-Arena
 
@@ -88,37 +113,27 @@ pnpm install
 
 # Setup Python backend
 cd backend
-python3 -m venv .venv                    # python -m venv .venv (Windows)
-source .venv/bin/activate                # .venv\Scripts\activate (Windows)
+python -m venv .venv
+.venv\Scripts\activate
 pip install -e .
 cd ..
 
-# Build frontend
+# Build and copy frontend
 pnpm run build:frontend
-
-# Copy files (macOS/Linux)
-mkdir -p backend/static
-cp -r frontend/dist/* backend/static/
-
-# Copy files (Windows - use this instead)
-# mkdir backend\static
-# xcopy /E /I frontend\dist backend\static
+mkdir backend\static
+xcopy /E /I frontend\dist backend\static
 ```
 
 ### Running the Application
 
-#### Linux/macOS
-
+#### 🍎 macOS/Linux
 ```bash
-# Start the server using the startup script
 ./start_arena.sh
 ```
 
-#### Windows
-
+#### 🪟 Windows
 ```cmd
-# Start the server using the Windows startup script
-start_arena.bat
+.\start_arena.bat
 ```
 
 The startup script will:
