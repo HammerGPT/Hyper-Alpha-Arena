@@ -70,11 +70,9 @@ build_frontend() {
     echo "Building frontend..."
     cd "$FRONTEND_DIR"
 
-    # Install frontend dependencies if needed
-    if [ ! -d "node_modules" ]; then
-        echo "Installing frontend dependencies..."
-        pnpm install
-    fi
+    # Always install/update frontend dependencies
+    echo "Installing frontend dependencies..."
+    pnpm install
 
     # Build frontend
     pnpm build

@@ -71,15 +71,13 @@ REM Function to build frontend
 echo Building frontend...
 cd /d "%FRONTEND_DIR%"
 
-REM Install frontend dependencies if needed
-if not exist "node_modules" (
-    echo Installing frontend dependencies...
-    pnpm install
-    if errorlevel 1 (
-        echo ERROR: Failed to install frontend dependencies
-        pause
-        exit /b 1
-    )
+REM Always install/update frontend dependencies
+echo Installing frontend dependencies...
+pnpm install
+if errorlevel 1 (
+    echo ERROR: Failed to install frontend dependencies
+    pause
+    exit /b 1
 )
 
 REM Build frontend
