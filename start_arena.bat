@@ -149,27 +149,43 @@ REM Start the backend service in a new window
 echo Starting backend service...
 start "Alpha Arena Backend" "%BACKEND_DIR%\.venv\Scripts\python.exe" -m uvicorn main:app --host 0.0.0.0 --port 8802
 
-REM Wait for service to start
+REM Wait for service to start with retry logic
 echo Waiting for service to start...
-timeout /t 8 /nobreak >nul
+set /a retry_count=0
+set /a max_retries=60
 
-REM Check if service is running with detailed error output
-echo Checking service health...
-powershell -Command "try { $response = Invoke-WebRequest -Uri 'http://127.0.0.1:8802/api/health' -TimeoutSec 10; Write-Host 'Health check successful'; exit 0 } catch { Write-Host 'Health check failed:' $_.Exception.Message; exit 1 }"
-if errorlevel 1 (
-    echo.
-    echo Service failed to start or health check failed.
-    echo.
-    echo Troubleshooting steps:
-    echo 1. Check if the "Alpha Arena Backend" window opened and shows any errors
-    echo 2. Try running manually: cd backend ^&^& .venv\Scripts\python -m uvicorn main:app --host 0.0.0.0 --port 8802
-    echo 3. Check if port 8802 is already in use: netstat -an ^| findstr :8802
-    echo 4. Check if Python virtual environment is working: .venv\Scripts\python --version
-    echo.
-    pause
-    exit /b 1
-)
+:health_check_loop
+set /a retry_count+=1
+echo Checking service health (attempt %retry_count%/%max_retries%)...
 
+powershell -Command "try { $response = Invoke-WebRequest -Uri 'http://127.0.0.1:8802/api/health' -TimeoutSec 5; Write-Host 'Health check successful'; exit 0 } catch { exit 1 }" >nul 2>&1
+if not errorlevel 1 goto health_check_success
+
+if %retry_count% geq %max_retries% goto health_check_failed
+
+echo .
+timeout /t 2 /nobreak >nul
+goto health_check_loop
+
+:health_check_success
+echo Service health check passed!
+goto continue_startup
+
+:health_check_failed
+echo Health check failed after %max_retries% attempts.
+echo.
+echo Service failed to start or health check failed.
+echo.
+echo Troubleshooting steps:
+echo 1. Check if the "Alpha Arena Backend" window opened and shows any errors
+echo 2. Try running manually: cd backend ^&^& .venv\Scripts\python -m uvicorn main:app --host 0.0.0.0 --port 8802
+echo 3. Check if port 8802 is already in use: netstat -an ^| findstr :8802
+echo 4. Check if Python virtual environment is working: .venv\Scripts\python --version
+echo.
+pause
+exit /b 1
+
+:continue_startup
 echo.
 echo Service started successfully!
 echo    - Backend API: http://localhost:8802
