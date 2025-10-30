@@ -83,6 +83,7 @@ build_frontend() {
 
     # Copy to backend static directory
     echo "Copying frontend build to backend/static..."
+    mkdir -p "$BACKEND_DIR/static"
     rm -rf "$BACKEND_DIR/static"/*
     cp -r dist/* "$BACKEND_DIR/static/"
 
