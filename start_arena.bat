@@ -112,17 +112,24 @@ call :build_frontend
 
 echo Starting backend service on port 8802...
 
-REM Check if virtual environment exists
+REM Check if virtual environment exists, create if not
 if not exist ".venv\Scripts\python.exe" (
-    echo ERROR: Python virtual environment not found.
-    echo Please run the setup script first to create the virtual environment.
-    echo.
-    echo To create virtual environment:
-    echo   python -m venv .venv
-    echo   .venv\Scripts\activate
-    echo   pip install -e .
-    pause
-    exit /b 1
+    echo Creating Python virtual environment...
+    python -m venv .venv
+    if errorlevel 1 (
+        echo ERROR: Failed to create virtual environment
+        pause
+        exit /b 1
+    )
+
+    echo Installing Python dependencies...
+    ".venv\Scripts\pip.exe" install -e .
+    if errorlevel 1 (
+        echo ERROR: Failed to install Python dependencies
+        pause
+        exit /b 1
+    )
+    echo Python environment setup completed
 )
 
 REM Check if uvicorn is available in virtual environment

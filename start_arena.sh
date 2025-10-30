@@ -110,14 +110,22 @@ if screen -list | grep -q "alpha-arena"; then
     sleep 2
 fi
 
-# Check if virtual environment exists
+# Check if virtual environment exists, create if not
 if [ ! -f ".venv/bin/python" ]; then
-    echo "ERROR: Python virtual environment not found."
-    echo "Please create the virtual environment first:"
-    echo "  python -m venv .venv"
-    echo "  source .venv/bin/activate"
-    echo "  pip install -e ."
-    exit 1
+    echo "Creating Python virtual environment..."
+    python3 -m venv .venv
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Failed to create virtual environment"
+        exit 1
+    fi
+
+    echo "Installing Python dependencies..."
+    .venv/bin/pip install -e .
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Failed to install Python dependencies"
+        exit 1
+    fi
+    echo "Python environment setup completed"
 fi
 
 # Check if uvicorn is available in virtual environment

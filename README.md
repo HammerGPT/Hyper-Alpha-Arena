@@ -84,12 +84,7 @@ This project is based on [open-alpha-arena](https://github.com/etrobot/open-alph
 git clone https://github.com/HammerGPT/Hyper-Alpha-Arena.git
 cd Hyper-Alpha-Arena
 
-# Setup Python backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-
-# Start the application (auto-installs pnpm and builds frontend)
+# Start the application (auto-setup everything)
 ./start_arena.sh
 ```
 
@@ -99,14 +94,7 @@ pip install -e .
 git clone https://github.com/HammerGPT/Hyper-Alpha-Arena.git
 cd Hyper-Alpha-Arena
 
-# Setup Python backend
-cd backend
-python -m venv .venv
-.venv\Scripts\activate
-pip install -e .
-cd ..
-
-# Start the application (auto-installs pnpm and builds frontend)
+# Start the application (auto-setup everything)
 start_arena.bat
 ```
 
@@ -133,6 +121,7 @@ start_arena.bat stop
 ```
 
 The startup script will:
+- Auto-create Python virtual environment and install dependencies
 - Auto-install pnpm if not present (no sudo required)
 - Build and deploy frontend automatically
 - Start the backend service on port 8802
