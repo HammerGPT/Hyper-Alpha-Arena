@@ -106,7 +106,7 @@ export default function CryptoSelector({ onSymbolSelect, selectedSymbol }: Crypt
                 <div>
                   <div className="font-medium">{symbol}</div>
                   <div className="text-xs text-gray-500">
-                    {symbol.split('/')[0]} / {symbol.split('/')[1]}
+                    {symbol.split('/')[0]} / {symbol.split('/')[1] || 'USD'}
                   </div>
                 </div>
               </div>
