@@ -19,6 +19,7 @@ import Portfolio from '@/components/portfolio/Portfolio'
 import ComprehensiveView from '@/components/portfolio/ComprehensiveView'
 import SystemLogs from '@/components/layout/SystemLogs'
 import PromptManager from '@/components/prompt/PromptManager'
+import TraderManagement from '@/components/trader/TraderManagement'
 import { AIDecision, getAccounts } from '@/lib/api'
 
 interface User {
@@ -54,6 +55,7 @@ const PAGE_TITLES: Record<string, string> = {
   comprehensive: 'Hyper Alpha Arena',
   'system-logs': 'System Logs',
   'prompt-management': 'Prompt Templates',
+  'trader-management': 'AI Trader Management',
 }
 
 function App() {
@@ -66,6 +68,14 @@ function App() {
   const [aiDecisions, setAiDecisions] = useState<AIDecision[]>([])
   const [allAssetCurves, setAllAssetCurves] = useState<any[]>([])
   const [currentPage, setCurrentPage] = useState<string>('comprehensive')
+
+  // Temporary: Check URL hash for page routing
+  useEffect(() => {
+    const hash = window.location.hash.slice(1)
+    if (hash && PAGE_TITLES[hash]) {
+      setCurrentPage(hash)
+    }
+  }, [])
   const [accountRefreshTrigger, setAccountRefreshTrigger] = useState<number>(0)
   const wsRef = useRef<WebSocket | null>(null)
   const [accounts, setAccounts] = useState<any[]>([])
@@ -311,6 +321,7 @@ function App() {
             accountRefreshTrigger={accountRefreshTrigger}
             accounts={accounts}
             loadingAccounts={accountsLoading}
+            onPageChange={setCurrentPage}
           />
         )}
 
@@ -320,6 +331,10 @@ function App() {
 
         {currentPage === 'prompt-management' && (
           <PromptManager />
+        )}
+
+        {currentPage === 'trader-management' && (
+          <TraderManagement />
         )}
       </main>
     )

@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import { PieChart, Settings, TrendingUp, BarChart3, FileText, NotebookPen } from 'lucide-react'
-import SettingsDialog from './SettingsDialog'
 
 interface SidebarProps {
   currentPage?: string
@@ -9,7 +8,6 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ currentPage = 'comprehensive', onPageChange, onAccountUpdated }: SidebarProps) {
-  const [settingsOpen, setSettingsOpen] = useState(false)
 
   return (
     <>
@@ -66,7 +64,7 @@ export default function Sidebar({ currentPage = 'comprehensive', onPageChange, o
 
           <button
             className="flex items-center justify-center w-10 h-10 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => onPageChange?.('trader-management')}
             title="Settings"
           >
             <Settings className="w-5 h-5" />
@@ -125,7 +123,7 @@ export default function Sidebar({ currentPage = 'comprehensive', onPageChange, o
           </button>
           <button
             className="flex flex-col items-center justify-center w-12 h-12 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => onPageChange?.('trader-management')}
             title="Settings"
           >
             <Settings className="w-5 h-5" />
@@ -134,12 +132,6 @@ export default function Sidebar({ currentPage = 'comprehensive', onPageChange, o
         </nav>
       </aside>
 
-      {/* Settings Dialog */}
-      <SettingsDialog
-        open={settingsOpen}
-        onOpenChange={setSettingsOpen}
-        onAccountUpdated={onAccountUpdated}
-      />
     </>
   )
 }

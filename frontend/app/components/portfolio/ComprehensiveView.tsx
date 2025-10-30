@@ -1,5 +1,8 @@
+import { useState, useEffect } from 'react'
 import AccountDataView from './AccountDataView'
 import { AIDecision } from '@/lib/api'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 
 interface Account {
   id: number
@@ -74,6 +77,7 @@ interface ComprehensiveViewProps {
   accountRefreshTrigger?: number
   accounts?: any[]
   loadingAccounts?: boolean
+  onPageChange?: (page: string) => void
 }
 
 export default function ComprehensiveView({
@@ -89,8 +93,51 @@ export default function ComprehensiveView({
   onRefreshData,
   accountRefreshTrigger,
   accounts,
-  loadingAccounts
+  loadingAccounts,
+  onPageChange
 }: ComprehensiveViewProps) {
+  const [showWelcome, setShowWelcome] = useState(false)
+
+  useEffect(() => {
+    // Check if there are no AI traders
+    if (accounts && accounts.length === 0 && !loadingAccounts) {
+      setShowWelcome(true)
+    } else {
+      setShowWelcome(false)
+    }
+  }, [accounts, loadingAccounts])
+
+  if (showWelcome) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <Card className="max-w-md">
+          <CardHeader>
+            <CardTitle>Welcome to Hyper Alpha Arena</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-muted-foreground">
+              Get started by creating your first AI trader to begin automated crypto trading.
+            </p>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => onPageChange?.('trader-management')}
+                className="flex-1"
+              >
+                Setup AI Trader
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setShowWelcome(false)}
+                className="flex-1"
+              >
+                Skip
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
 
   return (
     <AccountDataView

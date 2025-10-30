@@ -24,6 +24,7 @@ interface SettingsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onAccountUpdated?: () => void  // Add callback for when account is updated
+  embedded?: boolean  // Add embedded mode support
 }
 
 interface AIAccount extends TradingAccount {
@@ -38,7 +39,7 @@ interface AIAccountCreate extends TradingAccountCreate {
   api_key?: string
 }
 
-export default function SettingsDialog({ open, onOpenChange, onAccountUpdated }: SettingsDialogProps) {
+export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, embedded = false }: SettingsDialogProps) {
   const [accounts, setAccounts] = useState<AIAccount[]>([])
   const [loading, setLoading] = useState(false)
   const [toggleLoadingId, setToggleLoadingId] = useState<number | null>(null)
@@ -256,27 +257,27 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated }:
     }
   }
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[600px]">
+  const content = (
+    <>
+      {!embedded && (
         <DialogHeader>
           <DialogTitle>AI Trader Management</DialogTitle>
           <DialogDescription>
             Manage your AI traders and their configurations
           </DialogDescription>
         </DialogHeader>
+      )}
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded">
-            {error}
-          </div>
-        )}
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded">
+          {error}
+        </div>
+      )}
 
         <div className="space-y-6">
           {/* Existing Accounts */}
-          <div className="space-y-4">
+          <div className="space-y-4 flex-1 flex flex-col overflow-hidden">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-medium">AI Traders</h3>
               <Button
                 onClick={() => setShowAddForm(!showAddForm)}
                 size="sm"
@@ -290,7 +291,61 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated }:
             {loading && accounts.length === 0 ? (
               <div>Loading AI traders...</div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-3 overflow-y-auto" style={{maxHeight: 'calc(100vh - 300px)'}}>
+                {/* Add New Account Form */}
+                {showAddForm && (
+                  <div className="space-y-4 border rounded-lg p-4 bg-muted/50">
+                    <h3 className="text-lg font-medium">Add New AI Trader</h3>
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <Input
+                          placeholder="Trader name"
+                          value={newAccount.name || ''}
+                          onChange={(e) => setNewAccount({ ...newAccount, name: e.target.value })}
+                        />
+                        <Input
+                          placeholder="Model (e.g., gpt-4)"
+                          value={newAccount.model || ''}
+                          onChange={(e) => setNewAccount({ ...newAccount, model: e.target.value })}
+                        />
+                      </div>
+                      <Input
+                        placeholder="Base URL (e.g., https://api.openai.com/v1)"
+                        value={newAccount.base_url || ''}
+                        onChange={(e) => setNewAccount({ ...newAccount, base_url: e.target.value })}
+                      />
+                      <Input
+                        placeholder="API Key"
+                        type="password"
+                        value={newAccount.api_key || ''}
+                        onChange={(e) => setNewAccount({ ...newAccount, api_key: e.target.value })}
+                      />
+                      <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4"
+                          checked={newAccount.auto_trading_enabled ?? true}
+                          onChange={(e) => setNewAccount({ ...newAccount, auto_trading_enabled: e.target.checked })}
+                        />
+                        <span>Start Trading</span>
+                      </label>
+                      <div className="flex gap-2">
+                        <Button onClick={handleCreateAccount} disabled={loading}>
+                          Test and Create
+                        </Button>
+                        <Button variant="outline" onClick={() => setShowAddForm(false)}>
+                          Cancel
+                        </Button>
+                      </div>
+                      {testResult && (
+                        <div className="text-sm text-muted-foreground">
+                          {testResult}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {accounts.map((account) => (
                   <div key={account.id} className="border rounded-lg p-4">
                     {editingId === account.id ? (
@@ -395,59 +450,21 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated }:
             )}
           </div>
 
-          {/* Add New Account Form */}
-          {showAddForm && (
-            <div className="space-y-4 border-t pt-4">
-              <h3 className="text-lg font-medium">Add New AI Trader</h3>
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <Input
-                    placeholder="Trader name"
-                    value={newAccount.name || ''}
-                    onChange={(e) => setNewAccount({ ...newAccount, name: e.target.value })}
-                  />
-                  <Input
-                    placeholder="Model (e.g., gpt-4)"
-                    value={newAccount.model || ''}
-                    onChange={(e) => setNewAccount({ ...newAccount, model: e.target.value })}
-                  />
-                </div>
-                <Input
-                  placeholder="Base URL (e.g., https://api.openai.com/v1)"
-                  value={newAccount.base_url || ''}
-                  onChange={(e) => setNewAccount({ ...newAccount, base_url: e.target.value })}
-                />
-                <Input
-                  placeholder="API Key"
-                  type="password"
-                  value={newAccount.api_key || ''}
-                  onChange={(e) => setNewAccount({ ...newAccount, api_key: e.target.value })}
-                />
-                <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4"
-                    checked={newAccount.auto_trading_enabled ?? true}
-                    onChange={(e) => setNewAccount({ ...newAccount, auto_trading_enabled: e.target.checked })}
-                  />
-                  <span>Start Trading</span>
-                </label>
-                <div className="flex gap-2">
-                  <Button onClick={handleCreateAccount} disabled={loading}>
-                    Test and Create
-                  </Button>
-                  <Button 
-                    onClick={() => setShowAddForm(false)} 
-                    variant="outline"
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
+    </>
+  )
+
+  if (embedded) {
+    return content
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[600px]">
+        {content}
       </DialogContent>
     </Dialog>
   )
 }
+
+export { SettingsDialog }

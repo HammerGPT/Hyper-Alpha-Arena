@@ -104,7 +104,7 @@ export default function Portfolio({
       accounts={accounts}
       loadingAccounts={loadingAccounts}
       showAssetCurves={false}
-      showStrategyPanel={true}
+      showStrategyPanel={false}
     />
   )
 }
