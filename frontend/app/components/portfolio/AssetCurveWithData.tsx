@@ -534,7 +534,7 @@ export default function AssetCurve({
                     }}
                     formatter={(value: any, name: string) => [
                       `$${Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-                      name.replace('default_', '').toUpperCase()
+                      (name || 'NA').replace('default_', '').toUpperCase()
                     ]}
                     labelFormatter={(label: string) => label}
                   />
@@ -561,7 +561,7 @@ export default function AssetCurve({
                           dot={renderTerminalDot(username, color)}
                           activeDot={false}
                           connectNulls={false}
-                          name={username.replace('default_', '').toUpperCase()}
+                          name={(username || 'NA').replace('default_', '').toUpperCase()}
                           strokeOpacity={isHighlighted ? 1 : 0.3}
                           isAnimationActive={false}
                           onMouseEnter={() => accountId && setHoveredAccountId(accountId)}
@@ -608,12 +608,12 @@ export default function AssetCurve({
                   </div>
                 ) : (
                   <div className="h-10 w-10 rounded-full bg-background/60 flex items-center justify-center text-sm font-semibold text-secondary-foreground">
-                    {account.username.slice(0, 2).toUpperCase()}
+                    {(account.username || 'NA').slice(0, 2).toUpperCase()}
                   </div>
                 )}
                 <div className={`min-w-0 transition-opacity ${isMuted ? 'opacity-40' : ''}`}>
                   <div className="text-xs font-medium text-secondary-foreground">
-                    {account.username.replace('default_', '').toUpperCase()}
+                    {(account.username || 'NA').replace('default_', '').toUpperCase()}
                   </div>
                   <FlipNumber
                     value={account.assets}

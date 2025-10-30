@@ -107,11 +107,11 @@ function App() {
               }
               if (msg.account) {
                 setAccount(msg.account)
+                // Only request snapshot if we have an account
+                ws!.send(JSON.stringify({ type: 'get_snapshot' }))
               }
               // refresh accounts list once bootstrapped
               refreshAccounts()
-              // request initial snapshot
-              ws!.send(JSON.stringify({ type: 'get_snapshot' }))
             } else if (msg.type === 'snapshot') {
               setOverview(msg.overview)
               setPositions(msg.positions)

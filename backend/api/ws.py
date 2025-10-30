@@ -28,13 +28,14 @@ class ConnectionManager:
     async def connect(self, websocket: WebSocket):
         pass  # WebSocket is already accepted in the endpoint
 
-    def register(self, account_id: int, websocket: WebSocket):
-        self.active_connections.setdefault(account_id, set()).add(websocket)
-        # Add scheduled snapshot task for new account
-        add_account_snapshot_job(account_id, interval_seconds=10)
+    def register(self, account_id: Optional[int], websocket: WebSocket):
+        if account_id is not None:
+            self.active_connections.setdefault(account_id, set()).add(websocket)
+            # Add scheduled snapshot task for new account
+            add_account_snapshot_job(account_id, interval_seconds=10)
 
-    def unregister(self, account_id: int, websocket: WebSocket):
-        if account_id in self.active_connections:
+    def unregister(self, account_id: Optional[int], websocket: WebSocket):
+        if account_id is not None and account_id in self.active_connections:
             self.active_connections[account_id].discard(websocket)
             if not self.active_connections[account_id]:
                 del self.active_connections[account_id]
@@ -513,6 +514,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         account_id = None
                     else:
                         account_id = account.id
+
+                    # Register the connection (handles None account_id gracefully)
                     manager.register(account_id, websocket)
                     
                     # Send bootstrap confirmation with account info
