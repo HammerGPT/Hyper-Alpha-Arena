@@ -97,9 +97,11 @@ PowerShell -ExecutionPolicy Bypass -File install_uv.ps1
 **Alternative for Windows**: If you prefer using standard Python tools instead of uv:
 ```cmd
 # Use standard Python virtual environment
-python -m venv backend\.venv
-backend\.venv\Scripts\activate
-pip install -e backend\
+cd backend
+python -m venv .venv
+.venv\Scripts\activate
+pip install -e .
+cd ..
 ```
 
 ### Installation
