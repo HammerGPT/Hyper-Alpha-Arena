@@ -144,8 +144,8 @@ if ! .venv/bin/python -c "import uvicorn" 2>/dev/null; then
 fi
 
 # Start service in background
-nohup .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8802 > arena.log 2>&1 &
-echo $! > arena.pid
+nohup .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8802 > ../arena.log 2>&1 &
+echo $! > ../arena.pid
 
 # Wait for service to start
 echo "Waiting for service to start..."
