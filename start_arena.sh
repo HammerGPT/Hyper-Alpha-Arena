@@ -1,21 +1,104 @@
 #!/bin/bash
-# Alpha Arena Startup Script with System Logging
+# Alpha Arena Startup Script with Auto-Install and Frontend Build
+
+# Check for stop parameter
+if [ "$1" = "stop" ]; then
+    echo "=== Stopping Alpha Arena ==="
+
+    # Method 1: Kill by process name
+    if pkill -f "uvicorn main:app"; then
+        echo "Service stopped successfully"
+    else
+        echo "No running service found or failed to stop"
+    fi
+
+    # Method 2: Kill by port (backup)
+    if command -v lsof &> /dev/null; then
+        PID=$(lsof -t -i:8802 2>/dev/null)
+        if [ ! -z "$PID" ]; then
+            kill $PID
+            echo "Killed process on port 8802: $PID"
+        fi
+    fi
+
+    exit 0
+fi
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$SCRIPT_DIR/backend"
+FRONTEND_DIR="$SCRIPT_DIR/frontend"
 
+echo "=== Alpha Arena Startup Script ==="
 echo "Project directory: $SCRIPT_DIR"
 echo "Backend directory: $BACKEND_DIR"
+echo "Frontend directory: $FRONTEND_DIR"
 
-# Check if backend directory exists
+# Check if directories exist
 if [ ! -d "$BACKEND_DIR" ]; then
     echo "ERROR: Backend directory not found at $BACKEND_DIR"
-    echo "Please make sure you're running this script from the project root directory."
     exit 1
 fi
 
-cd "$BACKEND_DIR"
+if [ ! -d "$FRONTEND_DIR" ]; then
+    echo "ERROR: Frontend directory not found at $FRONTEND_DIR"
+    exit 1
+fi
+
+# Function to check and install pnpm
+install_pnpm() {
+    if ! command -v pnpm &> /dev/null; then
+        echo "Installing pnpm..."
+        if command -v npm &> /dev/null; then
+            npm install -g pnpm
+        else
+            echo "Installing pnpm via official installer..."
+            curl -fsSL https://get.pnpm.io/install.sh | sh -
+            export PATH="$HOME/.local/share/pnpm:$PATH"
+        fi
+
+        if ! command -v pnpm &> /dev/null; then
+            echo "ERROR: Failed to install pnpm"
+            exit 1
+        fi
+        echo "pnpm installed successfully"
+    else
+        echo "pnpm already installed"
+    fi
+}
+
+# Function to build frontend
+build_frontend() {
+    echo "Building frontend..."
+    cd "$FRONTEND_DIR"
+
+    # Install frontend dependencies if needed
+    if [ ! -d "node_modules" ]; then
+        echo "Installing frontend dependencies..."
+        pnpm install
+    fi
+
+    # Build frontend
+    pnpm build
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Frontend build failed"
+        exit 1
+    fi
+
+    # Copy to backend static directory
+    echo "Copying frontend build to backend/static..."
+    rm -rf "$BACKEND_DIR/static"/*
+    cp -r dist/* "$BACKEND_DIR/static/"
+
+    echo "Frontend built and deployed successfully"
+    cd "$BACKEND_DIR"
+}
+
+# Install pnpm if needed
+install_pnpm
+
+# Build frontend
+build_frontend
 
 echo "=== Alpha Arena Startup Script ==="
 echo "Starting backend service on port 8802..."
@@ -67,8 +150,8 @@ if curl -s http://127.0.0.1:8802/api/health > /dev/null 2>&1; then
     echo "   - Get stats: GET /api/system-logs/stats"
     echo "   - Clear logs: DELETE /api/system-logs"
     echo ""
-    echo "🔍 View live logs: screen -r alpha-arena"
-    echo "⏹️  Stop service: screen -S alpha-arena -X quit"
+    echo "View live logs: screen -r alpha-arena"
+    echo "Stop service: ./start_arena.sh stop"
 else
     echo "❌ Service failed to start. Check logs:"
     echo "   screen -r alpha-arena"

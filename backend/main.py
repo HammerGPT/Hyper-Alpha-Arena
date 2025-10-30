@@ -1,4 +1,8 @@
 from datetime import datetime, timezone
+import subprocess
+import threading
+import time
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,6 +25,16 @@ app = FastAPI(title="Crypto Paper Trading API")
 async def health_check():
     return {"status": "healthy", "message": "Trading API is running"}
 
+# Manual frontend rebuild endpoint
+@app.post("/api/rebuild-frontend")
+async def rebuild_frontend():
+    """Manually trigger frontend rebuild"""
+    try:
+        build_frontend()
+        return {"status": "success", "message": "Frontend rebuild triggered"}
+    except Exception as e:
+        return {"status": "error", "message": f"Frontend rebuild failed: {str(e)}"}
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allow all origins, or specify specific domains
@@ -38,8 +52,119 @@ if os.path.exists(static_dir):
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
 
+# Frontend file watcher
+frontend_watcher_thread = None
+last_build_time = 0
+
+def build_frontend():
+    """Build frontend and copy to static directory"""
+    global last_build_time
+    current_time = time.time()
+
+    # Prevent rapid rebuilds (minimum 5 seconds between builds)
+    if current_time - last_build_time < 5:
+        return
+
+    try:
+        print("Frontend files changed, rebuilding...")
+        frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend")
+        static_dir = os.path.join(os.path.dirname(__file__), "static")
+
+        # Build frontend
+        result = subprocess.run(
+            ["pnpm", "build"],
+            cwd=frontend_dir,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+
+        if result.returncode == 0:
+            # Copy to static directory
+            dist_dir = os.path.join(frontend_dir, "dist")
+            if os.path.exists(dist_dir):
+                # Clear static directory
+                if os.path.exists(static_dir):
+                    import shutil
+                    shutil.rmtree(static_dir)
+
+                # Copy dist to static
+                shutil.copytree(dist_dir, static_dir)
+                print("Frontend rebuilt and deployed successfully")
+                last_build_time = current_time
+            else:
+                print("ERROR: Frontend dist directory not found after build")
+        else:
+            print(f"ERROR: Frontend build failed: {result.stderr}")
+
+    except subprocess.TimeoutExpired:
+        print("ERROR: Frontend build timed out")
+    except Exception as e:
+        print(f"ERROR: Frontend build failed: {e}")
+
+def watch_frontend_files():
+    """Watch frontend files for changes"""
+    frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend")
+    if not os.path.exists(frontend_dir):
+        return
+
+    # Simple file watcher using modification times
+    file_times = {}
+    watch_extensions = {'.tsx', '.ts', '.jsx', '.js', '.css', '.html', '.json'}
+
+    def get_file_times():
+        times = {}
+        for root, dirs, files in os.walk(frontend_dir):
+            # Skip node_modules and dist directories
+            dirs[:] = [d for d in dirs if d not in ['node_modules', 'dist', '.git']]
+
+            for file in files:
+                if any(file.endswith(ext) for ext in watch_extensions):
+                    file_path = os.path.join(root, file)
+                    try:
+                        times[file_path] = os.path.getmtime(file_path)
+                    except OSError:
+                        pass
+        return times
+
+    file_times = get_file_times()
+
+    while True:
+        try:
+            time.sleep(2)  # Check every 2 seconds
+            current_times = get_file_times()
+
+            # Check for changes
+            changed = False
+            for file_path, mtime in current_times.items():
+                if file_path not in file_times or file_times[file_path] != mtime:
+                    changed = True
+                    break
+
+            # Check for deleted files
+            if not changed:
+                for file_path in file_times:
+                    if file_path not in current_times:
+                        changed = True
+                        break
+
+            if changed:
+                file_times = current_times
+                build_frontend()
+
+        except Exception as e:
+            print(f"Frontend watcher error: {e}")
+            time.sleep(5)
+
 @app.on_event("startup")
 def on_startup():
+    global frontend_watcher_thread
+
+    # Start frontend file watcher in background thread
+    frontend_watcher_thread = threading.Thread(target=watch_frontend_files, daemon=True)
+    frontend_watcher_thread.start()
+    print("Frontend file watcher started")
+
     # Create tables
     Base.metadata.create_all(bind=engine)
     # Seed trading configs if empty

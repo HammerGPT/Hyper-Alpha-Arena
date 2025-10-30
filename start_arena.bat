@@ -1,27 +1,116 @@
 @echo off
-REM Alpha Arena Windows Startup Script
-REM This script automatically detects the project directory and starts the backend service
+REM Alpha Arena Windows Startup Script with Auto-Install and Frontend Build
+
+REM Check for stop parameter
+if "%1"=="stop" (
+    echo === Stopping Alpha Arena ===
+
+    REM Kill processes by name
+    taskkill /f /im python.exe /fi "COMMANDLINE eq *uvicorn main:app*" >nul 2>&1
+    if errorlevel 1 (
+        echo No running service found or failed to stop
+    ) else (
+        echo Service stopped successfully
+    )
+
+    REM Kill by port as backup
+    for /f "tokens=5" %%a in ('netstat -aon ^| findstr :8802') do (
+        echo Killing process %%a on port 8802...
+        taskkill /f /pid %%a >nul 2>&1
+    )
+
+    exit /b 0
+)
 
 echo === Alpha Arena Windows Startup Script ===
-echo Starting backend service on port 8802...
 
 REM Get the directory where this script is located
 set SCRIPT_DIR=%~dp0
 set BACKEND_DIR=%SCRIPT_DIR%backend
+set FRONTEND_DIR=%SCRIPT_DIR%frontend
 
 echo Project directory: %SCRIPT_DIR%
 echo Backend directory: %BACKEND_DIR%
+echo Frontend directory: %FRONTEND_DIR%
 
-REM Check if backend directory exists
+REM Check if directories exist
 if not exist "%BACKEND_DIR%" (
     echo ERROR: Backend directory not found at %BACKEND_DIR%
-    echo Please make sure you're running this script from the project root directory.
     pause
     exit /b 1
 )
 
+if not exist "%FRONTEND_DIR%" (
+    echo ERROR: Frontend directory not found at %FRONTEND_DIR%
+    pause
+    exit /b 1
+)
+
+REM Function to check and install pnpm
+:install_pnpm
+where pnpm >nul 2>&1
+if errorlevel 1 (
+    echo Installing pnpm...
+    where npm >nul 2>&1
+    if not errorlevel 1 (
+        npm install -g pnpm
+    ) else (
+        echo ERROR: npm not found. Please install Node.js first.
+        pause
+        exit /b 1
+    )
+
+    where pnpm >nul 2>&1
+    if errorlevel 1 (
+        echo ERROR: Failed to install pnpm
+        pause
+        exit /b 1
+    )
+    echo pnpm installed successfully
+) else (
+    echo pnpm already installed
+)
+
+REM Function to build frontend
+:build_frontend
+echo Building frontend...
+cd /d "%FRONTEND_DIR%"
+
+REM Install frontend dependencies if needed
+if not exist "node_modules" (
+    echo Installing frontend dependencies...
+    pnpm install
+    if errorlevel 1 (
+        echo ERROR: Failed to install frontend dependencies
+        pause
+        exit /b 1
+    )
+)
+
+REM Build frontend
+pnpm build
+if errorlevel 1 (
+    echo ERROR: Frontend build failed
+    pause
+    exit /b 1
+)
+
+REM Copy to backend static directory
+echo Copying frontend build to backend/static...
+if exist "%BACKEND_DIR%\static" rmdir /s /q "%BACKEND_DIR%\static"
+mkdir "%BACKEND_DIR%\static"
+xcopy /e /i /y "dist\*" "%BACKEND_DIR%\static\"
+
+echo Frontend built and deployed successfully
+
 REM Change to backend directory
 cd /d "%BACKEND_DIR%"
+
+REM Call install_pnpm and build_frontend
+call :install_pnpm
+call :build_frontend
+
+echo Starting backend service on port 8802...
 
 REM Check if virtual environment exists
 if not exist ".venv\Scripts\python.exe" (
@@ -94,8 +183,7 @@ echo    - Clear logs: DELETE /api/system-logs
 echo.
 echo Open http://localhost:8802 in your browser to access the application
 echo.
-echo To stop the service: Close the "Alpha Arena Backend" window
-echo or run: taskkill /f /im python.exe /fi "WINDOWTITLE eq Alpha Arena Backend*"
+echo To stop the service: start_arena.bat stop
 echo.
 
 REM Open browser automatically

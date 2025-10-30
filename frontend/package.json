@@ -2,7 +2,7 @@
   "name": "hyper-alpha-arena-frontend",
   "private": true,
   "scripts": {
-    "dev": "vite --port 8802",
+    "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },
