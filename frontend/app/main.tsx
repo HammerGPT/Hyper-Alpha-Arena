@@ -222,6 +222,16 @@ function App() {
       setAccountsLoading(true)
       const list = await getAccounts()
       setAccounts(list)
+
+      // Check if user only has default account and redirect to setup
+      const hasOnlyDefaultAccount = list.length === 1 &&
+        list[0]?.name === "Default AI Trader" &&
+        list[0]?.api_key === "default-key-please-update-in-settings"
+
+      if (hasOnlyDefaultAccount && currentPage === 'comprehensive') {
+        setCurrentPage('trader-management')
+        window.location.hash = 'trader-management'
+      }
     } catch (e) {
       console.error('Failed to fetch accounts', e)
     } finally {

@@ -149,12 +149,12 @@ echo $! > ../arena.pid
 
 # Wait for service to start with retry logic
 echo "Waiting for service to start..."
-for i in {1..30}; do
+for i in {1..60}; do
     if curl -s http://127.0.0.1:8802/api/health > /dev/null 2>&1; then
         break
     fi
     echo -n "."
-    sleep 1
+    sleep 2
 done
 echo ""
 
