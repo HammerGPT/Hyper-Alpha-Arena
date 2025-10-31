@@ -682,11 +682,6 @@ export default function AssetCurve({
                     })}
                 </LineChart>
               </ResponsiveContainer>
-
-              {/* Data retention notice positioned at chart bottom-left */}
-              <div className="absolute bottom-2 left-5 text-xs text-muted-foreground opacity-60">
-                Data retained for 30 days
-              </div>
             </>
           )}
         </div>
@@ -697,7 +692,7 @@ export default function AssetCurve({
       <div className="mt-6">
         <div className="text-xs font-medium mb-3 text-secondary-foreground flex items-center gap-2">
           <span>AI Trader Asset Ranking</span>
-          <span className="text-[10px] text-muted-foreground">(Click to show/hide • All values in $)</span>
+          <span className="text-[10px] text-muted-foreground">(Click to show/hide)</span>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {rankedAccounts.map((account, index) => {
