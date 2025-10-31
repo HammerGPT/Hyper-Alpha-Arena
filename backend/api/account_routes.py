@@ -456,6 +456,50 @@ async def update_account_settings(account_id: int, payload: dict, db: Session = 
         raise HTTPException(status_code=500, detail=f"Failed to update account: {str(e)}")
 
 
+@router.delete("/{account_id}")
+async def delete_account(account_id: int, db: Session = Depends(get_db)):
+    """Delete (deactivate) account (for paper trading demo)"""
+    try:
+        logger.info(f"Deleting account {account_id}")
+        
+        account = db.query(Account).filter(
+            Account.id == account_id,
+            Account.is_active == "true"
+        ).first()
+        
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found")
+        
+        # Soft delete - set is_active to false
+        account.is_active = "false"
+        account.auto_trading_enabled = "false"
+        db.commit()
+        logger.info(f"Account {account_id} ({account.name}) deactivated successfully")
+
+        # Reset auto trading job after account deletion (async in background to avoid blocking response)
+        import threading
+        def reset_job_async():
+            try:
+                from services.scheduler import reset_auto_trading_job
+                reset_auto_trading_job()
+                logger.info("Auto trading job reset successfully after account deletion")
+            except Exception as e:
+                logger.warning(f"Failed to reset auto trading job: {e}")
+
+        # Run reset in background thread to not block API response
+        reset_thread = threading.Thread(target=reset_job_async, daemon=True)
+        reset_thread.start()
+        logger.info("Auto trading job reset initiated in background")
+        
+        return {"message": f"Account {account.name} deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete account: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete account: {str(e)}")
+
+
 @router.get("/asset-curve/timeframe")
 async def get_asset_curve_by_timeframe(
     timeframe: str = "1d",

@@ -90,7 +90,7 @@ async def shutdown_event():
     await shutdown_services()
 
 
-def schedule_auto_trading(interval_seconds: int = 300, max_ratio: float = 0.2, use_ai: bool = True) -> None:
+def schedule_auto_trading(interval_seconds: int = 180, max_ratio: float = 0.2, use_ai: bool = True) -> None:
     """Schedule automatic trading tasks
     
     Args:

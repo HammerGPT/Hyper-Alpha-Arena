@@ -9,7 +9,7 @@ import {
   ResponsiveContainer
 } from 'recharts'
 import { Card } from '@/components/ui/card'
-import { getModelLogo, getModelChartLogo, getModelColor } from './logoAssets'
+import { getModelChartLogo } from './logoAssets'
 import FlipNumber from './FlipNumber'
 
 interface AssetCurveData {
@@ -32,9 +32,11 @@ interface AssetCurveProps {
   onHighlightAccountChange?: (accountId: number | 'all') => void
 }
 
-type Timeframe = '5m' | '1h' | '1d'
+type Timeframe = '5m' | '1h' | '1d' | 'all'
 const DEFAULT_TIMEFRAME: Timeframe = '5m'
 const CACHE_STALE_MS = 45_000
+
+type DisplayMode = 'absolute' | 'percentage'
 
 interface TimeframeCacheEntry {
   data: AssetCurveData[]
@@ -48,7 +50,9 @@ export default function AssetCurve({
   highlightAccountId,
   onHighlightAccountChange
 }: AssetCurveProps) {
-  const timeframe: Timeframe = DEFAULT_TIMEFRAME
+  const [timeframe, setTimeframe] = useState<Timeframe>(DEFAULT_TIMEFRAME)
+  const [displayMode, setDisplayMode] = useState<DisplayMode>('absolute')
+  const [hiddenAccounts, setHiddenAccounts] = useState<Set<number>>(new Set())
   const [data, setData] = useState<AssetCurveData[]>(initialData || [])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -214,7 +218,7 @@ export default function AssetCurve({
       return dateA - dateB
     })
 
-    const chartData = timestamps.map((ts, index) => {
+    const chartData = timestamps.map((ts) => {
       const date = parseTimestamp(ts)
       const formattedTime = date.toLocaleString('en-US', {
         month: '2-digit',
@@ -224,14 +228,16 @@ export default function AssetCurve({
         hour12: false
       })
 
-      return {
+      const dataPoint: Record<string, any> = {
         timestamp: ts,
         formattedTime,
-        ...uniqueUsers.reduce((acc, username) => {
-          acc[username] = groupedData[ts][username] ?? null
-          return acc
-        }, {} as Record<string, number | null>)
       }
+      
+      uniqueUsers.forEach((username) => {
+        dataPoint[username] = groupedData[ts][username] ?? null
+      })
+
+      return dataPoint
     })
 
     const accountSummaries = uniqueUsers.map((username) => {
@@ -274,6 +280,34 @@ export default function AssetCurve({
       updatedChartData[updatedChartData.length - 1] = lastPoint
     }
 
+    // Calculate initial values for percentage mode
+    const initialValues = new Map<string, number>()
+    if (displayMode === 'percentage' && updatedChartData.length > 0) {
+      uniqueUsers.forEach(username => {
+        const firstValue = updatedChartData[0][username]
+        if (typeof firstValue === 'number' && firstValue > 0) {
+          initialValues.set(username, firstValue)
+        }
+      })
+    }
+
+    // Convert to percentage if needed
+    const displayChartData = displayMode === 'percentage' 
+      ? updatedChartData.map(point => {
+          const newPoint: any = { ...point }
+          uniqueUsers.forEach(username => {
+            const value = point[username]
+            const initial = initialValues.get(username)
+            if (typeof value === 'number' && initial && initial > 0) {
+              newPoint[username] = ((value - initial) / initial) * 100
+            } else if (typeof value === 'number' && initial) {
+              newPoint[username] = 0
+            }
+          })
+          return newPoint
+        })
+      : updatedChartData
+
     // Update account summaries with live data
     const updatedAccountSummaries = accountSummaries.map(account => {
       const liveOverride = account.accountId !== undefined ? liveAccountTotals.get(account.accountId) : undefined
@@ -286,12 +320,13 @@ export default function AssetCurve({
     const rankedAccounts = updatedAccountSummaries.slice().sort((a, b) => b.assets - a.assets)
 
     return {
-      chartData: updatedChartData,
+      chartData: displayChartData,
       accountSummaries: updatedAccountSummaries,
       uniqueUsers,
-      rankedAccounts
+      rankedAccounts,
+      initialValues
     }
-  }, [baseProcessedData, liveAccountTotals])
+  }, [baseProcessedData, liveAccountTotals, displayMode])
 
   const { chartData, accountSummaries, uniqueUsers, rankedAccounts } = processedData
 
@@ -305,6 +340,18 @@ export default function AssetCurve({
     }
   }, [onHighlightAccountChange, highlightAccountId])
 
+  const toggleAccountVisibility = useCallback((accountId: number) => {
+    setHiddenAccounts(prev => {
+      const next = new Set(prev)
+      if (next.has(accountId)) {
+        next.delete(accountId)
+      } else {
+        next.add(accountId)
+      }
+      return next
+    })
+  }, [])
+
   const handleChartClick = useCallback(() => {
     if (highlightAccountId && highlightAccountId !== 'all') {
       onHighlightAccountChange?.('all')
@@ -316,18 +363,21 @@ export default function AssetCurve({
 
   // Calculate Y-axis domain with single trader scaling
   const yAxisDomain = useMemo(() => {
-    if (!chartData.length) return [0, 100000]
+    if (!chartData.length) {
+      return displayMode === 'percentage' ? [-10, 10] : [0, 100000]
+    }
 
     let min = Infinity
     let max = -Infinity
 
-    // If single trader is selected, only consider that trader's data
-    const usersToConsider = activeLegendAccountId
-      ? uniqueUsers.filter(username => {
-          const account = accountSummaries.find(acc => acc.username === username)
-          return account?.accountId === activeLegendAccountId
-        })
-      : uniqueUsers
+    // Filter users based on hidden accounts and legend selection
+    const usersToConsider = uniqueUsers.filter(username => {
+      const account = accountSummaries.find(acc => acc.username === username)
+      if (!account?.accountId) return false
+      if (hiddenAccounts.has(account.accountId)) return false
+      if (activeLegendAccountId && account.accountId !== activeLegendAccountId) return false
+      return true
+    })
 
     chartData.forEach(point => {
       usersToConsider.forEach(username => {
@@ -339,18 +389,24 @@ export default function AssetCurve({
       })
     })
 
-    if (min === Infinity || max === -Infinity) return [0, 100000]
+    if (min === Infinity || max === -Infinity) {
+      return displayMode === 'percentage' ? [-10, 10] : [0, 100000]
+    }
 
     // Use different padding for single trader vs all traders view
     const range = max - min
     const paddingPercent = activeLegendAccountId ? 0.15 : 0.05 // 15% for single trader, 5% for all traders
-    const padding = Math.max(range * paddingPercent, 50)
+    const padding = displayMode === 'percentage' 
+      ? Math.max(range * paddingPercent, 1)
+      : Math.max(range * paddingPercent, 50)
 
-    const paddedMin = Math.max(0, min - padding)
+    const paddedMin = displayMode === 'percentage' 
+      ? min - padding 
+      : Math.max(0, min - padding)
     const paddedMax = max + padding
 
     return [paddedMin, paddedMax]
-  }, [chartData, uniqueUsers, activeLegendAccountId, accountSummaries, highlightAccountId])
+  }, [chartData, uniqueUsers, activeLegendAccountId, accountSummaries, highlightAccountId, hiddenAccounts, displayMode])
 
   const accountMeta = useMemo(() => {
     const meta = new Map<string, { accountId?: number; color: string; logo?: { src: string; alt: string; color?: string } }>()
@@ -375,13 +431,13 @@ export default function AssetCurve({
     return (props: { cx?: number; cy?: number; index?: number; value?: number }) => {
       const { cx, cy, index, value } = props
       if (cx == null || cy == null || index == null || index !== chartData.length - 1) {
-        return null
+        return <></>
       }
-      if (!meta || !logo) return null
+      if (!meta || !logo) return <></>
 
       // Single trader view: hide others completely
       if (activeLegendAccountId && accountId !== activeLegendAccountId) {
-        return null
+        return <></>
       }
 
       const isHovered = hoveredAccountId === accountId
@@ -490,6 +546,56 @@ export default function AssetCurve({
 
   return (
     <div className="p-6 h-full min-h-0 flex flex-col gap-6">
+      {/* Control Bar */}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        {/* Timeframe Selector */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground mr-2">Time Range:</span>
+          <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
+            {(['5m', '1h', '1d', 'all'] as const).map((tf) => (
+              <button
+                key={tf}
+                onClick={() => setTimeframe(tf)}
+                className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                  timeframe === tf
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {tf === 'all' ? 'All' : tf.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Display Mode Toggle */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground mr-2">Display:</span>
+          <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
+            <button
+              onClick={() => setDisplayMode('absolute')}
+              className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                displayMode === 'absolute'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              $ Absolute
+            </button>
+            <button
+              onClick={() => setDisplayMode('percentage')}
+              className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                displayMode === 'percentage'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              % Change
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div className="flex-1 min-h-0 flex flex-col gap-4">
         <div className="flex-1 relative min-h-[320px]">
           {loading ? (
@@ -518,11 +624,11 @@ export default function AssetCurve({
                     stroke="#333333"
                     fontSize={12}
                     domain={yAxisDomain}
-                    tickFormatter={(value) => `$${Number(value).toLocaleString('en-US')}`}
-                    animationDuration={0}
-                    style={{
-                      transition: 'all 0.6s cubic-bezier(0.4, 0.0, 0.2, 1)'
-                    }}
+                    tickFormatter={(value) => 
+                      displayMode === 'percentage' 
+                        ? `${Number(value).toFixed(1)}%`
+                        : `$${Number(value).toLocaleString('en-US')}`
+                    }
                   />
                   <Tooltip
                     contentStyle={{
@@ -533,16 +639,20 @@ export default function AssetCurve({
                       fontSize: '12px'
                     }}
                     formatter={(value: any, name: string) => [
-                      `$${Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                      displayMode === 'percentage'
+                        ? `${Number(value).toFixed(2)}%`
+                        : `$${Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
                       (name || 'NA').replace('default_', '').toUpperCase()
                     ]}
                     labelFormatter={(label: string) => label}
                   />
                   {uniqueUsers
                     .filter(username => {
-                      if (!activeLegendAccountId) return true
                       const account = accountSummaries.find(acc => acc.username === username)
-                      return account?.accountId === activeLegendAccountId
+                      if (!account?.accountId) return false
+                      if (hiddenAccounts.has(account.accountId)) return false
+                      if (activeLegendAccountId && account.accountId !== activeLegendAccountId) return false
+                      return true
                     })
                     .map((username) => {
                       const meta = accountMeta.get(username)
@@ -583,21 +693,40 @@ export default function AssetCurve({
       </div>
 
 
-      {/* AI Trader Asset Ranking */}
+      {/* AI Trader Asset Ranking - Interactive Legend */}
       <div className="mt-6">
-        <div className="text-xs font-medium mb-3 text-secondary-foreground">AI Trader Asset Ranking</div>
+        <div className="text-xs font-medium mb-3 text-secondary-foreground flex items-center gap-2">
+          <span>AI Trader Asset Ranking</span>
+          <span className="text-[10px] text-muted-foreground">(Click to show/hide • All values in $)</span>
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {rankedAccounts.map((account, index) => {
+            const isHidden = account.accountId ? hiddenAccounts.has(account.accountId) : false
             const isMuted = highlightAccountId && highlightAccountId !== 'all' && account.accountId !== highlightAccountId
+            const isActive = !isHidden && !isMuted
+            
             return (
               <div
                 key={account.username}
-                className="bg-white dark:bg-background border-2 border-gray-900 dark:border-gray-200 px-4 py-3 rounded-lg flex items-center gap-3 min-w-0"
+                onClick={() => account.accountId && toggleAccountVisibility(account.accountId)}
+                className={`
+                  relative bg-white dark:bg-background border-2 px-4 py-3 rounded-lg flex items-center gap-3 min-w-0
+                  cursor-pointer transition-all duration-200
+                  ${isHidden 
+                    ? 'border-gray-300 dark:border-gray-700 opacity-40 hover:opacity-60' 
+                    : 'border-gray-900 dark:border-gray-200 hover:shadow-md'
+                  }
+                  ${isActive ? 'ring-2 ring-primary/20' : ''}
+                `}
+                title={isHidden ? 'Click to show' : 'Click to hide'}
               >
                 {account.logo ? (
                   <div
-                    className="h-10 w-10 rounded-full flex items-center justify-center"
-                    style={{ backgroundColor: account.logo.color || '#656565' }}
+                    className="h-10 w-10 rounded-full flex items-center justify-center transition-opacity"
+                    style={{ 
+                      backgroundColor: account.logo.color || '#656565',
+                      opacity: isHidden ? 0.5 : 1
+                    }}
                   >
                     <img
                       src={account.logo.src}
@@ -607,11 +736,11 @@ export default function AssetCurve({
                     />
                   </div>
                 ) : (
-                  <div className="h-10 w-10 rounded-full bg-background/60 flex items-center justify-center text-sm font-semibold text-secondary-foreground">
+                  <div className={`h-10 w-10 rounded-full bg-background/60 flex items-center justify-center text-sm font-semibold text-secondary-foreground transition-opacity ${isHidden ? 'opacity-50' : ''}`}>
                     {(account.username || 'NA').slice(0, 2).toUpperCase()}
                   </div>
                 )}
-                <div className={`min-w-0 transition-opacity ${isMuted ? 'opacity-40' : ''}`}>
+                <div className={`min-w-0 transition-opacity ${isHidden || isMuted ? 'opacity-40' : ''}`}>
                   <div className="text-xs font-medium text-secondary-foreground">
                     {(account.username || 'NA').replace('default_', '').toUpperCase()}
                   </div>
@@ -621,9 +750,14 @@ export default function AssetCurve({
                     className="text-lg font-bold text-secondary-foreground inline-flex items-center"
                   />
                 </div>
-                <div className={`ml-auto text-xs font-semibold text-primary transition-opacity ${isMuted ? 'opacity-40' : ''}`}>
+                <div className={`ml-auto text-xs font-semibold text-primary transition-opacity ${isHidden || isMuted ? 'opacity-40' : ''}`}>
                   #{index + 1}
                 </div>
+                {isHidden && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-background/80 rounded-lg">
+                    <span className="text-xs font-medium text-muted-foreground">Hidden</span>
+                  </div>
+                )}
               </div>
             )
           })}

@@ -330,8 +330,8 @@ def reset_auto_trading_job():
         from services.auto_trader import AI_TRADE_JOB_ID
         from services.trading_commands import place_ai_driven_crypto_order
         
-        # Define interval (5 minutes)
-        AI_TRADE_INTERVAL_SECONDS = 300
+        # Define interval (3 minutes)
+        AI_TRADE_INTERVAL_SECONDS = 180
         
         # Ensure market data is ready before scheduling trading tasks
         _ensure_market_data_ready()

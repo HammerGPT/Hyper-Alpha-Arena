@@ -9,15 +9,16 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Trash2, Plus, Pencil } from 'lucide-react'
+import { Trash2, Plus, Pencil, Eye, EyeOff } from 'lucide-react'
+import { AlertDialog } from '@/components/ui/alert-dialog'
 import { 
   getAccounts as getAccounts,
   createAccount as createAccount,
   updateAccount as updateAccount,
+  deleteAccount as deleteAccount,
   testLLMConnection,
   type TradingAccount,
-  type TradingAccountCreate,
-  type TradingAccountUpdate
+  type TradingAccountCreate
 } from '@/lib/api'
 
 interface SettingsDialogProps {
@@ -48,6 +49,10 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
   const [error, setError] = useState<string | null>(null)
   const [testResult, setTestResult] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [accountToDelete, setAccountToDelete] = useState<AIAccount | null>(null)
+  const [showNewApiKey, setShowNewApiKey] = useState(false)
+  const [showEditApiKey, setShowEditApiKey] = useState(false)
   const [newAccount, setNewAccount] = useState<AIAccountCreate>({
     name: '',
     model: '',
@@ -83,6 +88,8 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
       setTestResult(null)
       setShowAddForm(false)
       setEditingId(null)
+      setShowNewApiKey(false)
+      setShowEditApiKey(false)
     }
   }, [open])
 
@@ -132,6 +139,7 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
       await createAccount(newAccount)
       setNewAccount({ name: '', model: '', base_url: '', api_key: 'default-key-please-update-in-settings', auto_trading_enabled: true })
       setShowAddForm(false)
+      setShowNewApiKey(false)
       await loadAccounts()
 
       toast.success('AI trader created successfully!')
@@ -202,6 +210,7 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
       await updateAccount(editingId, editAccount)
       setEditingId(null)
       setEditAccount({ name: '', model: '', base_url: '', api_key: '', auto_trading_enabled: true })
+      setShowEditApiKey(false)
       setTestResult(null)
       await loadAccounts()
       
@@ -235,6 +244,7 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
   const cancelEdit = () => {
     setEditingId(null)
     setEditAccount({ name: '', model: '', base_url: '', api_key: 'default-key-please-update-in-settings', auto_trading_enabled: true })
+    setShowEditApiKey(false)
     setTestResult(null)
     setError(null)
   }
@@ -254,6 +264,30 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
       toast.error(errorMessage)
     } finally {
       setToggleLoadingId(null)
+    }
+  }
+
+  const handleDeleteClick = (account: AIAccount) => {
+    setAccountToDelete(account)
+    setDeleteConfirmOpen(true)
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (!accountToDelete) return
+    
+    try {
+      setLoading(true)
+      await deleteAccount(accountToDelete.id)
+      await loadAccounts()
+      toast.success(`AI trader "${accountToDelete.name}" deleted successfully`)
+      onAccountUpdated?.()
+    } catch (error) {
+      console.error('Failed to delete account:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Failed to delete AI trader'
+      toast.error(errorMessage)
+    } finally {
+      setLoading(false)
+      setAccountToDelete(null)
     }
   }
 
@@ -314,12 +348,26 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
                         value={newAccount.base_url || ''}
                         onChange={(e) => setNewAccount({ ...newAccount, base_url: e.target.value })}
                       />
-                      <Input
-                        placeholder="API Key"
-                        type="password"
-                        value={newAccount.api_key || ''}
-                        onChange={(e) => setNewAccount({ ...newAccount, api_key: e.target.value })}
-                      />
+                      <div className="relative">
+                        <Input
+                          placeholder="API Key"
+                          type={showNewApiKey ? "text" : "password"}
+                          value={newAccount.api_key || ''}
+                          onChange={(e) => setNewAccount({ ...newAccount, api_key: e.target.value })}
+                          className="pr-10"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowNewApiKey(!showNewApiKey)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          {showNewApiKey ? (
+                            <EyeOff className="h-4 w-4" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                        </button>
+                      </div>
                       <label className="flex items-center gap-2 text-sm text-muted-foreground">
                         <input
                           type="checkbox"
@@ -367,12 +415,26 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
                           value={editAccount.base_url || ''}
                           onChange={(e) => setEditAccount({ ...editAccount, base_url: e.target.value })}
                         />
-                        <Input
-                          placeholder="API Key"
-                          type="password"
-                          value={editAccount.api_key || ''}
-                          onChange={(e) => setEditAccount({ ...editAccount, api_key: e.target.value })}
-                        />
+                        <div className="relative">
+                          <Input
+                            placeholder="API Key"
+                            type={showEditApiKey ? "text" : "password"}
+                            value={editAccount.api_key || ''}
+                            onChange={(e) => setEditAccount({ ...editAccount, api_key: e.target.value })}
+                            className="pr-10"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowEditApiKey(!showEditApiKey)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            {showEditApiKey ? (
+                              <EyeOff className="h-4 w-4" />
+                            ) : (
+                              <Eye className="h-4 w-4" />
+                            )}
+                          </button>
+                        </div>
                         <label className="flex items-center gap-2 text-sm text-muted-foreground">
                           <input
                             type="checkbox"
@@ -441,6 +503,14 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
                           >
                             <Pencil className="h-4 w-4" />
                           </Button>
+                          <Button
+                            onClick={() => handleDeleteClick(account)}
+                            variant="outline"
+                            size="sm"
+                            disabled={loading}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </div>
                       </div>
                     )}
@@ -455,15 +525,41 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
   )
 
   if (embedded) {
-    return content
+    return (
+      <>
+        {content}
+        <AlertDialog
+          open={deleteConfirmOpen}
+          onOpenChange={setDeleteConfirmOpen}
+          title="Delete AI Trader"
+          description={`Are you sure you want to delete "${accountToDelete?.name}"? This action cannot be undone. All trading history and positions will be preserved but the trader will be deactivated.`}
+          confirmText="Delete"
+          cancelText="Cancel"
+          variant="destructive"
+          onConfirm={handleDeleteConfirm}
+        />
+      </>
+    )
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[600px]">
-        {content}
-      </DialogContent>
-    </Dialog>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="sm:max-w-[600px]">
+          {content}
+        </DialogContent>
+      </Dialog>
+      <AlertDialog
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        title="Delete AI Trader"
+        description={`Are you sure you want to delete "${accountToDelete?.name}"? This action cannot be undone. All trading history and positions will be preserved but the trader will be deactivated.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="destructive"
+        onConfirm={handleDeleteConfirm}
+      />
+    </>
   )
 }
 

@@ -22,6 +22,7 @@ TIMEFRAME_BUCKET_MINUTES: Dict[str, int] = {
     "5m": 5,
     "1h": 60,
     "1d": 60 * 24,
+    "all": 0,  # 0 means no bucketing, return all snapshots
 }
 
 # Simple in-process cache keyed by timeframe
@@ -49,10 +50,25 @@ def _get_bucketed_snapshots(
     Query snapshots grouped by bucket using SQL aggregation.
 
     Returns tuples: (account_id, total_assets, cash, positions_value, event_time)
+    
+    If bucket_minutes is 0, returns all snapshots without bucketing.
     """
+    # If bucket_minutes is 0, return all snapshots without bucketing
+    if bucket_minutes == 0:
+        rows = (
+            db.query(
+                AccountAssetSnapshot.account_id,
+                AccountAssetSnapshot.total_assets,
+                AccountAssetSnapshot.cash,
+                AccountAssetSnapshot.positions_value,
+                AccountAssetSnapshot.event_time,
+            )
+            .order_by(AccountAssetSnapshot.event_time.asc(), AccountAssetSnapshot.account_id.asc())
+            .all()
+        )
+        return rows
+
     bucket_seconds = bucket_minutes * 60
-    if bucket_seconds <= 0:
-        bucket_seconds = TIMEFRAME_BUCKET_MINUTES["5m"] * 60
 
     time_seconds = cast(func.strftime("%s", AccountAssetSnapshot.event_time), Integer)
     bucket_index_expr = cast(func.floor(time_seconds / bucket_seconds), Integer)
@@ -92,8 +108,11 @@ def _get_bucketed_snapshots(
 def get_all_asset_curves_data_new(db: Session, timeframe: str = "1h") -> List[Dict]:
     """
     Build asset curve data for all active accounts using cached SQL aggregation.
+    
+    Args:
+        timeframe: Time period for the curve, options: "5m", "1h", "1d", "all"
     """
-    bucket_minutes = TIMEFRAME_BUCKET_MINUTES.get(timeframe, TIMEFRAME_BUCKET_MINUTES["5m"])
+    bucket_minutes = TIMEFRAME_BUCKET_MINUTES.get(timeframe, TIMEFRAME_BUCKET_MINUTES.get("5m", 5))
 
     current_max_snapshot_id: Optional[int] = db.query(func.max(AccountAssetSnapshot.id)).scalar()
     cache_key = timeframe

@@ -619,8 +619,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 elif kind == "get_asset_curve":
                     # Get asset curve data with specific timeframe
                     timeframe = msg.get("timeframe", "1h")
-                    if timeframe not in ["5m", "1h", "1d"]:
-                        await websocket.send_text(json.dumps({"type": "error", "message": "Invalid timeframe. Must be 5m, 1h, or 1d"}))
+                    if timeframe not in ["5m", "1h", "1d", "all"]:
+                        await websocket.send_text(json.dumps({"type": "error", "message": "Invalid timeframe. Must be 5m, 1h, 1d, or all"}))
                         continue
                     
                     asset_curves = get_all_asset_curves_data(db, timeframe)
