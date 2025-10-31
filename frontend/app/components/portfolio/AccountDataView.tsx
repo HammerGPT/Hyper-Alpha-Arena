@@ -11,6 +11,7 @@ import AlphaArenaFeed from './AlphaArenaFeed'
 import ArenaAnalyticsFeed from './ArenaAnalyticsFeed'
 import FlipNumber from './FlipNumber'
 import { getSymbolLogo } from './logoAssets'
+import RealtimePrice from './RealtimePrice'
 
 interface Account {
   id: number
@@ -385,7 +386,7 @@ export default function AccountDataView(props: AccountDataViewProps) {
                 return (
                   <div
                     key={position.symbol}
-                    className="flex items-center gap-3 rounded-md bg-muted/70 px-3 py-2 shadow-sm border border-border/70 min-w-[116px]"
+                    className="flex items-center gap-3 rounded-md bg-muted/70 px-3 py-2 shadow-sm border border-border/70 w-[160px]"
                   >
                     {logo && (
                       <img
@@ -404,6 +405,11 @@ export default function AccountDataView(props: AccountDataViewProps) {
                         prefix="$"
                         decimals={2}
                         className="text-sm font-semibold text-primary"
+                      />
+                      <RealtimePrice
+                        symbol={position.symbol}
+                        wsRef={wsRef}
+                        className="mt-0.5"
                       />
                     </div>
                   </div>

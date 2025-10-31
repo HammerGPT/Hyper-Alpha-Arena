@@ -5,7 +5,7 @@ Implements conditional execution logic for limit orders
 
 import uuid
 from decimal import Decimal
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 from sqlalchemy.orm import Session
 import logging
 
@@ -353,7 +353,7 @@ def _execute_order(db: Session, order: Order, account: Account, execution_price:
         return False
 
 
-def get_pending_orders(db: Session, account_id: Optional[int] = None) -> list[Order]:
+def get_pending_orders(db: Session, account_id: Optional[int] = None) -> List[Order]:
     """
     Get pending orders
 

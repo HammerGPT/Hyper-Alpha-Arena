@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { getCryptoSymbols, getPopularCryptos } from '../../lib/api'
+import PriceTicker from './PriceTicker'
 
 interface CryptoSelectorProps {
   onSymbolSelect: (symbol: string, name: string) => void
@@ -81,6 +82,19 @@ export default function CryptoSelector({ onSymbolSelect, selectedSymbol }: Crypt
 
   return (
     <div className="p-4">
+      {/* Price Ticker Display */}
+      <div className="mb-4">
+        <div className="flex items-center gap-3 overflow-x-auto pb-1">
+          {popularCryptos.slice(0, 6).map((crypto) => (
+            <PriceTicker
+              key={crypto.symbol}
+              symbol={crypto.symbol}
+              name={crypto.name}
+            />
+          ))}
+        </div>
+      </div>
+
       <div className="flex justify-between items-center mb-4">
         <h3 className="text-lg font-semibold">Cryptocurrencies</h3>
         <button
