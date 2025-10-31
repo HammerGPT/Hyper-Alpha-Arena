@@ -91,12 +91,16 @@ chmod +x start_arena.sh
 
 #### 🪟 Windows
 
-```cmd
+```powershell
 git clone https://github.com/HammerGPT/Hyper-Alpha-Arena.git
 cd Hyper-Alpha-Arena
 
-# Start the application (auto-setup everything)
-start_arena.bat
+.\start_arena.ps1
+```
+
+**Note**: If you encounter PowerShell execution policy issues, run:
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
 ### Running the Application
@@ -113,12 +117,12 @@ The startup script automatically handles all setup and runs on port 8802:
 ```
 
 #### 🪟 Windows
-```cmd
+```powershell
 # Start the application
-start_arena.bat
+.\start_arena.ps1
 
 # Stop the application
-start_arena.bat stop
+.\start_arena.ps1 stop
 ```
 
 The startup script will:
@@ -282,10 +286,22 @@ The platform automatically handles model-specific configurations and parameter d
 
 ### Common Issues
 
+**Problem**: Windows PowerShell execution policy error
+**Solution**:
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+**Problem**: "此时不应有 ..." error on Windows
+**Solution**: Ensure you're using PowerShell (not Command Prompt):
+```powershell
+.\start_arena.ps1
+```
+
 **Problem**: Port 8802 already in use
 **Solution**:
-- Linux/macOS: `screen -S alpha-arena -X quit`
-- Windows: Check Task Manager for python.exe processes
+- Linux/macOS: `./start_arena.sh stop`
+- Windows: `.\start_arena.ps1 stop` (run from project root)
 
 **Problem**: Virtual environment not found
 **Solution**: Create the virtual environment manually:
@@ -358,6 +374,6 @@ This software is for educational and research purposes. Cryptocurrency trading c
 
 ---
 
-**Status**: Active Development | **Version**: 0.3.0-alpha | **Last Updated**: 2025-10-29
+**Status**: Active Development | **Version**: 0.3.1-alpha | **Last Updated**: 2025-10-31
 
 Star this repository to follow development progress and receive updates on Hyperliquid integration.
