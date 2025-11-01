@@ -219,12 +219,12 @@ export default function PromptManager() {
     <div className="h-full w-full overflow-hidden flex flex-col gap-4">
       <div className="flex flex-col lg:flex-row gap-4 h-full overflow-hidden">
         {/* LEFT COLUMN - Template Selection + Edit Area */}
-        <div className="flex-1 flex flex-col gap-4 overflow-hidden">
-          <Card className="flex-1 overflow-hidden">
+        <div className="flex-1 flex flex-col h-full gap-4 overflow-hidden">
+          <Card className="flex-1 flex flex-col h-full overflow-hidden">
             <CardHeader>
               <CardTitle className="text-base">Prompt Template Editor</CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col gap-4 h-full overflow-hidden">
+            <CardContent className="flex flex-col gap-4 h-[100%] flex-1 overflow-hidden">
               {/* Template Selection Dropdown */}
               <div>
                 <label className="text-xs uppercase text-muted-foreground">Template</label>
@@ -272,7 +272,7 @@ export default function PromptManager() {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex justify-end gap-2">
+              <div className="flex justify-end mt-2 gap-2">
                 <Button
                   variant="outline"
                   onClick={handleRestoreTemplate}
@@ -289,11 +289,11 @@ export default function PromptManager() {
         </div>
 
         {/* RIGHT COLUMN - Binding Management */}
-        <Card className="w-full lg:w-[40rem] flex-shrink-0 overflow-hidden">
+        <Card className="flex flex-col w-full lg:w-[40rem] flex-shrink-0 overflow-hidden">
           <CardHeader>
             <CardTitle className="text-base">Account Prompt Bindings</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col gap-6">
+          <CardContent className="flex-1 flex flex-col gap-6">
             {/* Bindings Table */}
             <div className="flex-1 overflow-auto">
               <table className="min-w-full text-sm">
