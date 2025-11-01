@@ -31,6 +31,7 @@ import SystemLogs from '@/components/layout/SystemLogs'
 import PromptManager from '@/components/prompt/PromptManager'
 import TraderManagement from '@/components/trader/TraderManagement'
 import { AIDecision, getAccounts } from '@/lib/api'
+import { ArenaDataProvider } from '@/contexts/ArenaDataContext'
 
 interface User {
   id: number
@@ -385,7 +386,9 @@ function App() {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <Toaster position="top-right" />
-    <App />
+    <ArenaDataProvider>
+      <Toaster position="top-right" />
+      <App />
+    </ArenaDataProvider>
   </React.StrictMode>,
 )

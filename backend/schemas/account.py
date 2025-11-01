@@ -47,10 +47,11 @@ class AccountOverview(BaseModel):
 
 class StrategyConfigBase(BaseModel):
     """Base fields shared by strategy config schemas"""
-    trigger_mode: str
+    trigger_mode: str = "unified"
     interval_seconds: Optional[int] = None
     tick_batch_size: Optional[int] = None
     enabled: bool = True
+    price_threshold: Optional[float] = None
 
 
 class StrategyConfigUpdate(StrategyConfigBase):

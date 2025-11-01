@@ -55,11 +55,12 @@ def _serialize_strategy(account: Account, strategy) -> StrategyConfig:
         last_iso = None
 
     return StrategyConfig(
-        trigger_mode=strategy.trigger_mode or "realtime",
-        interval_seconds=strategy.interval_seconds,
-        tick_batch_size=strategy.tick_batch_size,
+        trigger_mode="unified",
+        interval_seconds=strategy.trigger_interval or 150,
+        tick_batch_size=1,
         enabled=(strategy.enabled == "true" and account.auto_trading_enabled == "true"),
         last_trigger_at=last_iso,
+        price_threshold=strategy.price_threshold or 1.0,
     )
 
 
@@ -160,12 +161,11 @@ async def get_account_strategy(account_id: int, db: Session = Depends(get_db)):
         strategy = upsert_strategy(
             db,
             account_id=account_id,
-            trigger_mode="realtime",
-            interval_seconds=1,
-            tick_batch_size=1,
+            price_threshold=1.0,
+            trigger_interval=150,
             enabled=(account.auto_trading_enabled == "true"),
         )
-        strategy_manager.refresh_strategies(force=True)
+        strategy_manager._load_strategies()
 
     return _serialize_strategy(account, strategy)
 
@@ -177,6 +177,7 @@ async def update_account_strategy(
     db: Session = Depends(get_db),
 ):
     """Update AI trading strategy configuration for an account."""
+    print(f"Backend received payload for account {account_id}: {payload}")
     account = (
         db.query(Account)
         .filter(Account.id == account_id, Account.is_active == "true")
@@ -185,41 +186,37 @@ async def update_account_strategy(
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    valid_modes = {"realtime", "interval", "tick_batch"}
-    if payload.trigger_mode not in valid_modes:
-        raise HTTPException(status_code=400, detail="Invalid trigger_mode")
-
-    if payload.trigger_mode == "interval":
-        if payload.interval_seconds is None or payload.interval_seconds <= 0:
+    # Validate price threshold
+    if hasattr(payload, 'price_threshold') and payload.price_threshold is not None:
+        if payload.price_threshold <= 0 or payload.price_threshold > 10:
             raise HTTPException(
                 status_code=400,
-                detail="interval_seconds must be > 0 for interval mode",
+                detail="price_threshold must be between 0.1 and 10.0",
             )
+        price_threshold = payload.price_threshold
     else:
-        interval_seconds = None
+        price_threshold = 1.0
 
-    if payload.trigger_mode == "tick_batch":
-        if payload.tick_batch_size is None or payload.tick_batch_size <= 0:
+    # Validate trigger interval
+    if hasattr(payload, 'interval_seconds') and payload.interval_seconds is not None:
+        if payload.interval_seconds < 30:
             raise HTTPException(
                 status_code=400,
-                detail="tick_batch_size must be > 0 for tick_batch mode",
+                detail="trigger_interval must be >= 30 seconds",
             )
+        trigger_interval = payload.interval_seconds
     else:
-        tick_batch_size = None
-
-    interval_seconds = payload.interval_seconds if payload.trigger_mode == "interval" else None
-    tick_batch_size = payload.tick_batch_size if payload.trigger_mode == "tick_batch" else None
+        trigger_interval = 150
 
     strategy = upsert_strategy(
         db,
         account_id=account_id,
-        trigger_mode=payload.trigger_mode,
-        interval_seconds=interval_seconds,
-        tick_batch_size=tick_batch_size,
+        price_threshold=price_threshold,
+        trigger_interval=trigger_interval,
         enabled=payload.enabled,
     )
 
-    strategy_manager.refresh_strategies(force=True)
+    strategy_manager._load_strategies()
     return _serialize_strategy(account, strategy)
 
 

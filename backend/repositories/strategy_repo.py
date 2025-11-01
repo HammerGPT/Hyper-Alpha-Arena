@@ -20,20 +20,25 @@ def list_strategies(db: Session) -> List[AccountStrategyConfig]:
 def upsert_strategy(
     db: Session,
     account_id: int,
-    trigger_mode: str,
+    trigger_mode: str = "unified",
     interval_seconds: Optional[int] = None,
     tick_batch_size: Optional[int] = None,
     enabled: bool = True,
+    price_threshold: Optional[float] = None,
+    trigger_interval: Optional[int] = None,
 ) -> AccountStrategyConfig:
+    print(f"upsert_strategy called with: account_id={account_id}, interval_seconds={interval_seconds}, trigger_interval={trigger_interval}")
     strategy = get_strategy_by_account(db, account_id)
     if strategy is None:
         strategy = AccountStrategyConfig(account_id=account_id)
         db.add(strategy)
 
     strategy.trigger_mode = trigger_mode
-    strategy.interval_seconds = interval_seconds
+    strategy.trigger_interval = trigger_interval or interval_seconds
     strategy.tick_batch_size = tick_batch_size
     strategy.enabled = "true" if enabled else "false"
+    if price_threshold is not None:
+        strategy.price_threshold = price_threshold
 
     db.commit()
     db.refresh(strategy)

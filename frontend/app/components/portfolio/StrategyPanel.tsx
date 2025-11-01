@@ -3,7 +3,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { StrategyConfig, StrategyConfigUpdate, StrategyTriggerMode, getAccountStrategy, updateAccountStrategy } from '@/lib/api'
+
+interface StrategyConfig {
+  price_threshold: number
+  interval_seconds: number
+  enabled: boolean
+  last_trigger_at?: string | null
+}
+
+interface GlobalSamplingConfig {
+  sampling_interval: number
+}
 
 interface StrategyPanelProps {
   accountId: number
@@ -13,12 +23,6 @@ interface StrategyPanelProps {
   onAccountChange?: (accountId: number) => void
   accountsLoading?: boolean
 }
-
-const MODE_OPTIONS: Array<{ value: StrategyTriggerMode; label: string; helper: string }> = [
-  { value: 'realtime', label: 'Real-time Trigger', helper: 'Execute on every market update.' },
-  { value: 'interval', label: 'Fixed Interval', helper: 'Execute decisions on a timed interval.' },
-  { value: 'tick_batch', label: 'Tick Batch', helper: 'Execute after a set number of price updates.' },
-]
 
 function formatTimestamp(value?: string | null): string {
   if (!value) return 'No executions yet'
@@ -47,48 +51,51 @@ export default function StrategyPanel({
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
-  const [triggerMode, setTriggerMode] = useState<StrategyTriggerMode>('realtime')
-  const [intervalSeconds, setIntervalSeconds] = useState<string>('60')
-  const [tickBatchSize, setTickBatchSize] = useState<string>('3')
+  // Trader-specific settings
+  const [priceThreshold, setPriceThreshold] = useState<string>('1.0')
+  const [triggerInterval, setTriggerInterval] = useState<string>('150')
   const [enabled, setEnabled] = useState<boolean>(true)
   const [lastTriggerAt, setLastTriggerAt] = useState<string | null>(null)
+
+  // Global settings
+  const [samplingInterval, setSamplingInterval] = useState<string>('18')
 
   const resetMessages = useCallback(() => {
     setError(null)
     setSuccess(null)
   }, [])
 
-  const applyStrategy = useCallback((strategy: StrategyConfig) => {
-    setTriggerMode(strategy.trigger_mode)
-    setIntervalSeconds(strategy.interval_seconds?.toString() ?? '60')
-    setTickBatchSize(strategy.tick_batch_size?.toString() ?? '3')
-    setEnabled(strategy.enabled)
-    setLastTriggerAt(strategy.last_trigger_at ?? null)
-  }, [])
-
   const fetchStrategy = useCallback(async () => {
     setLoading(true)
     resetMessages()
     try {
-      const strategy = await getAccountStrategy(accountId)
-      applyStrategy(strategy)
+      // Fetch trader-specific config
+      const strategyResponse = await fetch(`/api/account/${accountId}/strategy`)
+      if (strategyResponse.ok) {
+        const strategy: StrategyConfig = await strategyResponse.json()
+        setPriceThreshold((strategy.price_threshold ?? 1.0).toString())
+        setTriggerInterval((strategy.interval_seconds ?? 150).toString())
+        setEnabled(strategy.enabled)
+        setLastTriggerAt(strategy.last_trigger_at ?? null)
+      }
+
+      // Fetch global sampling config
+      const globalResponse = await fetch('/api/config/global-sampling')
+      if (globalResponse.ok) {
+        const globalConfig: GlobalSamplingConfig = await globalResponse.json()
+        setSamplingInterval((globalConfig.sampling_interval ?? 18).toString())
+      }
     } catch (err) {
       console.error('Failed to load strategy config', err)
-      if (err instanceof Error && /50[02]/.test(err.message)) {
-        setError('Strategy service unavailable. Please ensure the backend is running and try again shortly.')
-      } else {
-        setError(err instanceof Error ? err.message : 'Unable to load strategy configuration.')
-      }
+      setError(err instanceof Error ? err.message : 'Unable to load strategy configuration.')
     } finally {
       setLoading(false)
     }
-  }, [accountId, applyStrategy, resetMessages])
+  }, [accountId, resetMessages])
 
   useEffect(() => {
     fetchStrategy()
   }, [fetchStrategy, refreshKey])
-
-  const modeDetails = useMemo(() => MODE_OPTIONS.find((option) => option.value === triggerMode), [triggerMode])
 
   const accountOptions = useMemo(() => {
     if (!accounts || accounts.length === 0) return []
@@ -107,74 +114,107 @@ export default function StrategyPanel({
     resetMessages()
   }, [accountId, resetMessages])
 
-  const buildPayload = useCallback((): StrategyConfigUpdate | null => {
-    if (triggerMode === 'interval') {
-      const value = Number(intervalSeconds)
-      if (!Number.isFinite(value) || value <= 0) {
-        setError('Interval must be a positive number of seconds.')
-        return null
-      }
-      return {
-        trigger_mode: triggerMode,
-        interval_seconds: Math.round(value),
-        enabled,
-      }
-    }
-
-    if (triggerMode === 'tick_batch') {
-      const value = Number(tickBatchSize)
-      if (!Number.isInteger(value) || value <= 0) {
-        setError('Batch size must be a positive integer.')
-        return null
-      }
-      return {
-        trigger_mode: triggerMode,
-        tick_batch_size: value,
-        enabled,
-      }
-    }
-
-    return {
-      trigger_mode: triggerMode,
-      enabled,
-    }
-  }, [triggerMode, intervalSeconds, tickBatchSize, enabled])
-
-  const handleSave = useCallback(async () => {
+  const handleSaveTrader = useCallback(async () => {
     resetMessages()
-    const payload = buildPayload()
-    if (!payload) return
+
+    const threshold = parseFloat(priceThreshold)
+    const interval = parseInt(triggerInterval)
+
+    if (!Number.isFinite(threshold) || threshold <= 0) {
+      setError('Price threshold must be a positive number.')
+      return
+    }
+
+    if (!Number.isInteger(interval) || interval <= 0) {
+      setError('Trigger interval must be a positive integer.')
+      return
+    }
 
     try {
       setSaving(true)
-      const result = await updateAccountStrategy(accountId, payload)
-      applyStrategy(result)
-      setSuccess('Strategy saved. It will take effect on the next market update.')
-    } catch (err) {
-      console.error('Failed to update strategy config', err)
-      if (err instanceof Error && /50[02]/.test(err.message)) {
-        setError('Save failed: strategy service unavailable. Please confirm the backend has been restarted.')
-      } else {
-        setError(err instanceof Error ? err.message : 'Failed to save strategy. Please retry shortly.')
+      const payload = {
+        price_threshold: threshold,
+        interval_seconds: interval,
+        enabled: enabled,
+        trigger_mode: "unified",
+        tick_batch_size: 1
       }
+      console.log('Frontend saving payload:', payload)
+      const response = await fetch(`/api/account/${accountId}/strategy`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to save trader configuration')
+      }
+
+      const result: StrategyConfig = await response.json()
+      setPriceThreshold((result.price_threshold ?? 1.0).toString())
+      setTriggerInterval((result.interval_seconds ?? 150).toString())
+      setEnabled(result.enabled)
+      setLastTriggerAt(result.last_trigger_at ?? null)
+
+      setSuccess('Trader configuration saved successfully.')
+    } catch (err) {
+      console.error('Failed to update trader config', err)
+      setError(err instanceof Error ? err.message : 'Failed to save trader configuration.')
     } finally {
       setSaving(false)
     }
-  }, [accountId, applyStrategy, buildPayload, resetMessages])
+  }, [accountId, priceThreshold, triggerInterval, enabled, resetMessages])
+
+  const handleSaveGlobal = useCallback(async () => {
+    resetMessages()
+
+    const interval = parseInt(samplingInterval)
+
+    if (!Number.isInteger(interval) || interval <= 0) {
+      setError('Sampling interval must be a positive integer.')
+      return
+    }
+
+    try {
+      setSaving(true)
+      const response = await fetch('/api/config/global-sampling', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sampling_interval: interval,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to save global configuration')
+      }
+
+      const result: GlobalSamplingConfig = await response.json()
+      setSamplingInterval((result.sampling_interval ?? 18).toString())
+
+      setSuccess('Global configuration saved successfully.')
+    } catch (err) {
+      console.error('Failed to update global config', err)
+      setError(err instanceof Error ? err.message : 'Failed to save global configuration.')
+    } finally {
+      setSaving(false)
+    }
+  }, [samplingInterval, resetMessages])
 
   return (
     <Card className="h-full flex flex-col">
       <CardHeader>
         <CardTitle>AI Strategy Settings</CardTitle>
-        <CardDescription>Trigger configuration for {selectedAccountLabel}</CardDescription>
+        <CardDescription>Configure trigger parameters for AI traders</CardDescription>
       </CardHeader>
-      <CardContent className="flex-1 overflow-y-auto space-y-5">
+      <CardContent className="flex-1 overflow-y-auto space-y-6">
         {loading ? (
           <div className="text-sm text-muted-foreground">Loading strategy…</div>
         ) : (
           <>
+            {/* Trader Selection */}
             <section className="space-y-2">
-              <div className="text-xs text-muted-foreground uppercase tracking-wide">AI Trader</div>
+              <div className="text-xs text-muted-foreground uppercase tracking-wide">Select Trader</div>
               {accountOptions.length > 0 ? (
                 <Select
                   value={accountId.toString()}
@@ -204,93 +244,114 @@ export default function StrategyPanel({
               )}
             </section>
 
-            <section className="space-y-2">
-              <div className="text-xs text-muted-foreground uppercase tracking-wide">Trigger Mode</div>
-              <Select value={triggerMode} onValueChange={(value) => { setTriggerMode(value as StrategyTriggerMode); resetMessages() }}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select trigger mode" />
-                </SelectTrigger>
-                <SelectContent>
-                  {MODE_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {modeDetails && (
-                <p className="text-xs text-muted-foreground leading-relaxed">{modeDetails.helper}</p>
-              )}
-            </section>
-
-            {triggerMode === 'interval' && (
-              <section className="space-y-2">
-                <div className="text-xs text-muted-foreground uppercase tracking-wide">Interval (seconds)</div>
-                <Input
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={intervalSeconds}
-                  onChange={(event) => {
-                    setIntervalSeconds(event.target.value)
-                    resetMessages()
-                  }}
-                />
-              </section>
-            )}
-
-            {triggerMode === 'tick_batch' && (
-              <section className="space-y-2">
-                <div className="text-xs text-muted-foreground uppercase tracking-wide">Batch Size (updates)</div>
-                <Input
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={tickBatchSize}
-                  onChange={(event) => {
-                    setTickBatchSize(event.target.value)
-                    resetMessages()
-                  }}
-                />
-                <p className="text-xs text-muted-foreground">Execute once this many price updates occur, then reset the counter.</p>
-              </section>
-            )}
-
-            <section className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-xs text-muted-foreground uppercase tracking-wide">Strategy Status</div>
-                  <p className="text-sm text-muted-foreground">{enabled ? 'Enabled: strategy reacts to price events.' : 'Disabled: strategy will not auto-trade.'}</p>
+            {/* Trader Configuration */}
+            <Card className="border-muted">
+              <CardHeader className="pb-3">
+                <div className="flex justify-between items-start">
+                  <div className="flex flex-col space-y-1.5">
+                    <CardTitle className="text-base">Trader Configuration</CardTitle>
+                    <CardDescription className="text-xs">Settings for {selectedAccountLabel}</CardDescription>
+                  </div>
+                  <div className="flex flex-col space-y-1">
+                    {error && <div className="text-sm text-destructive">{error}</div>}
+                    {success && <div className="text-sm text-green-500">{success}</div>}
+                  </div>
                 </div>
-                <label className="inline-flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={enabled}
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <section className="space-y-2">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wide">Price Threshold (%)</div>
+                  <Input
+                    type="number"
+                    min={0.1}
+                    max={10.0}
+                    step={0.1}
+                    value={priceThreshold}
                     onChange={(event) => {
-                      setEnabled(event.target.checked)
+                      setPriceThreshold(event.target.value)
                       resetMessages()
                     }}
-                    className="h-4 w-4"
                   />
-                  {enabled ? 'Enabled' : 'Disabled'}
-                </label>
-              </div>
-            </section>
+                  <p className="text-xs text-muted-foreground">Trigger when price changes by this percentage</p>
+                </section>
 
-            <section className="space-y-1 text-sm">
-              <div className="text-xs text-muted-foreground uppercase tracking-wide">Last Trigger</div>
-              <div>{formatTimestamp(lastTriggerAt)}</div>
-            </section>
+                <section className="space-y-2">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wide">Trigger Interval (seconds)</div>
+                  <Input
+                    type="number"
+                    min={30}
+                    step={30}
+                    value={triggerInterval}
+                    onChange={(event) => {
+                      setTriggerInterval(event.target.value)
+                      resetMessages()
+                    }}
+                  />
+                  <p className="text-xs text-muted-foreground">Maximum time between triggers (default: 150s)</p>
+                </section>
 
-            {error && <div className="text-sm text-destructive">{error}</div>}
-            {success && <div className="text-sm text-green-500">{success}</div>}
+                <section className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-xs text-muted-foreground uppercase tracking-wide">Strategy Status</div>
+                      <p className="text-xs text-muted-foreground">{enabled ? 'Enabled: strategy reacts to price events.' : 'Disabled: strategy will not auto-trade.'}</p>
+                    </div>
+                    <label className="inline-flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={enabled}
+                        onChange={(event) => {
+                          setEnabled(event.target.checked)
+                          resetMessages()
+                        }}
+                        className="h-4 w-4"
+                      />
+                      {enabled ? 'Enabled' : 'Disabled'}
+                    </label>
+                  </div>
+                </section>
 
-            <div className="pt-2">
-              <Button onClick={handleSave} disabled={saving} className="w-full">
-                {saving ? 'Saving…' : 'Save Strategy'}
-              </Button>
-            </div>
-          </>
+                <section className="space-y-1 text-sm">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wide">Last Trigger</div>
+                  <div className="text-xs">{formatTimestamp(lastTriggerAt)}</div>
+                </section>
+
+                <Button onClick={handleSaveTrader} disabled={saving} className="w-full">
+                  {saving ? 'Saving…' : 'Save Trader Config'}
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Global Configuration */}
+            <Card className="border-muted">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Global Configuration</CardTitle>
+                <CardDescription className="text-xs">Settings that affect all traders</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <section className="space-y-2">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wide">Sampling Interval (seconds)</div>
+                  <Input
+                    type="number"
+                    min={5}
+                    max={60}
+                    step={1}
+                    value={samplingInterval}
+                    onChange={(event) => {
+                      setSamplingInterval(event.target.value)
+                      resetMessages()
+                    }}
+                  />
+                  <p className="text-xs text-muted-foreground">How often to collect price samples (default: 18s)</p>
+                </section>
+
+                <Button onClick={handleSaveGlobal} disabled={saving} className="w-full">
+                  {saving ? 'Saving…' : 'Save Global Settings'}
+                </Button>
+              </CardContent>
+            </Card>
+
+                      </>
         )}
       </CardContent>
     </Card>

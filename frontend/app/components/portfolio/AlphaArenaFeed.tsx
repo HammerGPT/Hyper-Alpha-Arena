@@ -9,6 +9,7 @@ import {
   getArenaPositions,
   getArenaTrades,
 } from '@/lib/api'
+import { useArenaData } from '@/contexts/ArenaDataContext'
 import { Button } from '@/components/ui/button'
 import { getModelLogo, getSymbolLogo } from './logoAssets'
 import FlipNumber from './FlipNumber'
@@ -26,19 +27,9 @@ type FeedTab = 'trades' | 'model-chat' | 'positions'
 
 const DEFAULT_LIMIT = 100
 const MODEL_CHAT_LIMIT = 60
-const CACHE_STALE_MS = 45_000
+const CACHE_STALE_MS = 60_000
 
 type CacheKey = string
-
-interface FeedCacheEntry {
-  trades: ArenaTrade[]
-  modelChat: ArenaModelChatEntry[]
-  positions: ArenaPositionsAccount[]
-  accountsMeta: ArenaAccountMeta[]
-  lastFetched: number
-}
-
-const FEED_CACHE = new Map<CacheKey, FeedCacheEntry>()
 
 function formatCurrency(value: number, minimumFractionDigits = 2) {
   return value.toLocaleString(undefined, {
@@ -84,11 +75,8 @@ export default function AlphaArenaFeed({
   selectedAccount: selectedAccountProp,
   onSelectedAccountChange,
 }: AlphaArenaFeedProps) {
+  const { getData, updateData } = useArenaData()
   const [activeTab, setActiveTab] = useState<FeedTab>('trades')
-  const [trades, setTrades] = useState<ArenaTrade[]>([])
-  const [modelChat, setModelChat] = useState<ArenaModelChatEntry[]>([])
-  const [positions, setPositions] = useState<ArenaPositionsAccount[]>([])
-  const [accountsMeta, setAccountsMeta] = useState<ArenaAccountMeta[]>([])
   const [allTraderOptions, setAllTraderOptions] = useState<ArenaAccountMeta[]>([])
   const [internalSelectedAccount, setInternalSelectedAccount] = useState<number | 'all'>(
     selectedAccountProp ?? 'all',
@@ -96,8 +84,32 @@ export default function AlphaArenaFeed({
   const [expandedChat, setExpandedChat] = useState<number | null>(null)
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
   const [manualRefreshKey, setManualRefreshKey] = useState(0)
-  const [loading, setLoading] = useState(false)
+  const [loadingTrades, setLoadingTrades] = useState(false)
+  const [loadingModelChat, setLoadingModelChat] = useState(false)
+  const [loadingPositions, setLoadingPositions] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const activeAccount = selectedAccountProp ?? internalSelectedAccount
+  const cacheKey = activeAccount === 'all' ? 'all' : String(activeAccount)
+
+  const [trades, setTrades] = useState<ArenaTrade[]>([])
+  const [modelChat, setModelChat] = useState<ArenaModelChatEntry[]>([])
+  const [positions, setPositions] = useState<ArenaPositionsAccount[]>([])
+  const [accountsMeta, setAccountsMeta] = useState<ArenaAccountMeta[]>([])
+
+  // Initialize from global state on mount or account change
+  useEffect(() => {
+    const globalData = getData(cacheKey)
+    if (globalData) {
+      setTrades(globalData.trades)
+      setModelChat(globalData.modelChat)
+      setPositions(globalData.positions)
+      setAccountsMeta(globalData.accountsMeta)
+      setLoadingTrades(false)
+      setLoadingModelChat(false)
+      setLoadingPositions(false)
+    }
+  }, [cacheKey, getData])
 
   // Track seen items for highlight animation
   const seenTradeIds = useRef<Set<number>>(new Set())
@@ -116,30 +128,18 @@ export default function AlphaArenaFeed({
 
   const primeFromCache = useCallback(
     (key: CacheKey) => {
-      const cached = FEED_CACHE.get(key)
+      const cached = getData(key)
       if (!cached) return false
       setTrades(cached.trades)
       setModelChat(cached.modelChat)
       setPositions(cached.positions)
       setAccountsMeta(cached.accountsMeta)
-      setLoading(false)
+      setLoadingTrades(false)
+      setLoadingModelChat(false)
+      setLoadingPositions(false)
       return true
     },
-    [],
-  )
-
-  const writeCache = useCallback(
-    (key: CacheKey, entry: Partial<FeedCacheEntry>) => {
-      const existing = FEED_CACHE.get(key)
-      FEED_CACHE.set(key, {
-        trades: entry.trades ?? existing?.trades ?? [],
-        modelChat: entry.modelChat ?? existing?.modelChat ?? [],
-        positions: entry.positions ?? existing?.positions ?? [],
-        accountsMeta: entry.accountsMeta ?? existing?.accountsMeta ?? [],
-        lastFetched: entry.lastFetched ?? Date.now(),
-      })
-    },
-    [],
+    [getData],
   )
 
   // Listen for real-time WebSocket updates
@@ -236,49 +236,102 @@ export default function AlphaArenaFeed({
 
     const fetchData = async (forceReload: boolean) => {
       try {
-        const cached = FEED_CACHE.get(cacheKey)
+        const cached = getData(cacheKey)
         const isFresh = cached ? Date.now() - cached.lastFetched < CACHE_STALE_MS : false
         if (!forceReload && isFresh) {
-          setLoading(false)
           return
         }
 
+        // Only show loading if we don't have cached data
         if (!cached) {
-          setLoading(true)
+          setLoadingTrades(true)
+          setLoadingModelChat(true)
+          setLoadingPositions(true)
         }
         setError(null)
 
         const accountId = activeAccount === 'all' ? undefined : activeAccount
 
-        const [tradeRes, chatRes, positionRes] = await Promise.all([
-          getArenaTrades({ limit: DEFAULT_LIMIT, account_id: accountId }),
-          getArenaModelChat({ limit: MODEL_CHAT_LIMIT, account_id: accountId }),
-          getArenaPositions({ account_id: accountId }),
+        // Load each data type independently
+        const loadTrades = async () => {
+          try {
+            const tradeRes = await getArenaTrades({ limit: DEFAULT_LIMIT, account_id: accountId })
+            if (!isMounted) return
+            const newTrades = tradeRes.trades || []
+            setTrades(newTrades)
+            updateData(cacheKey, { trades: newTrades })
+            setLoadingTrades(false)
+            return tradeRes
+          } catch (err) {
+            setLoadingTrades(false)
+            throw err
+          }
+        }
+
+        const loadModelChat = async () => {
+          try {
+            const chatRes = await getArenaModelChat({ limit: MODEL_CHAT_LIMIT, account_id: accountId })
+            if (!isMounted) return
+            const newModelChat = chatRes.entries || []
+            setModelChat(newModelChat)
+            updateData(cacheKey, { modelChat: newModelChat })
+            setLoadingModelChat(false)
+            return chatRes
+          } catch (err) {
+            setLoadingModelChat(false)
+            throw err
+          }
+        }
+
+        const loadPositions = async () => {
+          try {
+            const positionRes = await getArenaPositions({ account_id: accountId })
+            if (!isMounted) return
+            const newPositions = positionRes.accounts || []
+            setPositions(newPositions)
+            updateData(cacheKey, { positions: newPositions })
+            setLoadingPositions(false)
+            return positionRes
+          } catch (err) {
+            setLoadingPositions(false)
+            throw err
+          }
+        }
+
+        const [tradeRes, chatRes, positionRes] = await Promise.allSettled([
+          loadTrades(),
+          loadModelChat(),
+          loadPositions(),
+        ]).then(results => [
+          results[0].status === 'fulfilled' ? results[0].value : null,
+          results[1].status === 'fulfilled' ? results[1].value : null,
+          results[2].status === 'fulfilled' ? results[2].value : null,
         ])
 
         if (!isMounted) return
 
-        const nextTrades = tradeRes.trades || []
-        const nextModelChat = chatRes.entries || []
-        const nextPositions = positionRes.accounts || []
+        // Collect metadata from successful responses
+        const candidateMetas: ArenaAccountMeta[] = []
 
-        const candidateMetas: ArenaAccountMeta[] = [
-          ...(tradeRes.accounts || []),
-          ...(positionRes.accounts || []).map((account) => ({
+        if (tradeRes?.accounts) {
+          candidateMetas.push(...tradeRes.accounts)
+        }
+
+        if (positionRes?.accounts) {
+          candidateMetas.push(...positionRes.accounts.map((account) => ({
             account_id: account.account_id,
             name: account.account_name,
             model: account.model ?? null,
-          })),
-          ...(chatRes.entries || []).map((entry) => ({
+          })))
+        }
+
+        if (chatRes?.entries) {
+          candidateMetas.push(...chatRes.entries.map((entry) => ({
             account_id: entry.account_id,
             name: entry.account_name,
             model: entry.model ?? null,
-          })),
-        ]
-
-        setTrades(nextTrades)
-        setModelChat(nextModelChat)
-        setPositions(nextPositions)
+          })))
+        }
         let mergedMetas: ArenaAccountMeta[] = []
         setAccountsMeta((prev) => {
           const metaMap = new Map<number, ArenaAccountMeta>()
@@ -310,25 +363,24 @@ export default function AlphaArenaFeed({
           })
         }
 
-        writeCache(cacheKey, {
-          trades: nextTrades,
-          modelChat: nextModelChat,
-          positions: nextPositions,
-          accountsMeta: mergedMetas,
-          lastFetched: Date.now(),
-        })
+        // Update accountsMeta in global state
+        updateData(cacheKey, { accountsMeta: mergedMetas })
       } catch (err) {
         console.error('Failed to load Hyper Alpha Arena feed:', err)
         const message = err instanceof Error ? err.message : 'Failed to load Hyper Alpha Arena data'
         setError(message)
       } finally {
-        setLoading(false)
+        setLoadingTrades(false)
+        setLoadingModelChat(false)
+        setLoadingPositions(false)
       }
     }
 
     const hadCache = primeFromCache(cacheKey)
     if (!hadCache) {
-      setLoading(true)
+      setLoadingTrades(true)
+      setLoadingModelChat(true)
+      setLoadingPositions(true)
     }
 
     fetchData(shouldForce)
@@ -404,7 +456,7 @@ export default function AlphaArenaFeed({
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span>Showing last {DEFAULT_LIMIT} trades</span>
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleRefreshClick} disabled={loading}>
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleRefreshClick} disabled={loadingTrades || loadingModelChat || loadingPositions}>
             Refresh
           </Button>
         </div>
@@ -437,7 +489,7 @@ export default function AlphaArenaFeed({
           {!error && (
             <>
               <TabsContent value="trades" className="flex-1 h-0 overflow-y-auto mt-0 p-4 space-y-4">
-                {loading && trades.length === 0 ? (
+                {loadingTrades && trades.length === 0 ? (
                   <div className="text-xs text-muted-foreground">Loading trades...</div>
                 ) : trades.length === 0 ? (
                   <div className="text-xs text-muted-foreground">No recent trades found.</div>
@@ -518,7 +570,7 @@ export default function AlphaArenaFeed({
               </TabsContent>
 
               <TabsContent value="model-chat" className="flex-1 h-0 overflow-y-auto mt-0 p-4 space-y-3">
-                {loading && modelChat.length === 0 ? (
+                {loadingModelChat && modelChat.length === 0 ? (
                   <div className="text-xs text-muted-foreground">Loading model chat…</div>
                 ) : modelChat.length === 0 ? (
                   <div className="text-xs text-muted-foreground">No recent AI commentary.</div>
@@ -665,7 +717,7 @@ export default function AlphaArenaFeed({
               </TabsContent>
 
               <TabsContent value="positions" className="flex-1 h-0 overflow-y-auto mt-0 p-4 space-y-4">
-                {loading && positions.length === 0 ? (
+                {loadingPositions && positions.length === 0 ? (
                   <div className="text-xs text-muted-foreground">Loading positions…</div>
                 ) : positions.length === 0 ? (
                   <div className="text-xs text-muted-foreground">No active positions currently.</div>

@@ -15,6 +15,7 @@ from database.models import CryptoPriceTick
 from services.hyperliquid_market_data import hyperliquid_client
 from services.price_cache import record_price_update
 from services.market_events import publish_price_update
+from services.trading_strategy import handle_price_update
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,9 @@ class MarketDataStream:
                 "timestamp": timestamp,
             }
         )
+
+        # Handle strategy triggers and sampling
+        handle_price_update(symbol, float(ticker_price), event_time)
 
     def _persist_tick(self, symbol: str, price: float, event_time: datetime) -> None:
         """Persist tick data and prune old entries beyond retention window."""

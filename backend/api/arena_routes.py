@@ -312,7 +312,7 @@ def get_model_chat(
         strategy_enabled = None
 
         if strategy:
-            trigger_mode = strategy.trigger_mode
+            trigger_mode = "unified"
             strategy_enabled = strategy.enabled == "true"
             if strategy.last_trigger_at:
                 last_dt = strategy.last_trigger_at

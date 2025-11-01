@@ -33,8 +33,14 @@ PRO_PROMPT_TEMPLATE = """=== SESSION CONTEXT ===
 === MARKET SNAPSHOT ===
 {market_snapshot}
 
+=== SAMPLING POOL DATA ===
+{sampling_data}
+
 === ACCOUNT STATE ===
 {account_state}
+
+=== LATEST CRYPTO NEWS SNIPPET ===
+{news_section}
 
 === DECISION TASK ===
 {decision_task}

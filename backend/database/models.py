@@ -247,9 +247,8 @@ class AccountStrategyConfig(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False, unique=True)
-    trigger_mode = Column(String(20), nullable=False, default="realtime")  # realtime / interval / tick_batch
-    interval_seconds = Column(Integer, nullable=True)  # for interval mode
-    tick_batch_size = Column(Integer, nullable=True)  # for tick_batch mode
+    price_threshold = Column(Float, nullable=False, default=1.0)  # Price change threshold (%)
+    trigger_interval = Column(Integer, nullable=False, default=150)  # Trigger interval (seconds)
     enabled = Column(String(10), nullable=False, default="true")
     last_trigger_at = Column(TIMESTAMP, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
@@ -258,6 +257,17 @@ class AccountStrategyConfig(Base):
     )
 
     account = relationship("Account")
+
+
+class GlobalSamplingConfig(Base):
+    __tablename__ = "global_sampling_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sampling_interval = Column(Integer, nullable=False, default=18)  # Sampling interval (seconds)
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at = Column(
+        TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
+    )
 
 
 class AIDecisionLog(Base):

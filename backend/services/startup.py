@@ -14,7 +14,7 @@ from services.market_stream import start_market_stream, stop_market_stream
 from services.market_events import subscribe_price_updates, unsubscribe_price_updates
 from services.asset_snapshot_service import handle_price_update
 from services.trading_commands import AI_TRADING_SYMBOLS
-from services.trading_strategy import start_trading_strategy_manager, stop_trading_strategy_manager
+from services.trading_strategy import start_strategy_manager, stop_strategy_manager
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ def initialize_services():
         logger.info("Price snapshot logger started (60-second interval)")
 
         # Start AI trading strategy manager
-        start_trading_strategy_manager()
+        start_strategy_manager()
 
         # Start asset curve broadcast task (every 60 seconds)
         from services.scheduler import start_asset_curve_broadcast

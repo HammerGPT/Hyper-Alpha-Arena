@@ -1,5 +1,5 @@
 """
-AI trading strategy trigger management.
+AI trading strategy trigger management with simplified logic.
 """
 
 from __future__ import annotations
@@ -8,23 +8,21 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Dict, Optional, Any, List
 
 from database.connection import SessionLocal
-from database.models import Account, AccountStrategyConfig
+from database.models import Account, AccountStrategyConfig, GlobalSamplingConfig
 from repositories.strategy_repo import (
     get_strategy_by_account,
     list_strategies,
     upsert_strategy,
 )
-from services.market_events import subscribe_price_updates, unsubscribe_price_updates
-from services.market_stream import start_market_stream
+from services.sampling_pool import sampling_pool
 from services.trading_commands import place_ai_driven_crypto_order, AI_TRADING_SYMBOLS
 
 logger = logging.getLogger(__name__)
 
-MIN_REALTIME_INTERVAL = 1.0  # seconds
 STRATEGY_REFRESH_INTERVAL = 60.0  # seconds
 
 
@@ -40,250 +38,204 @@ def _as_aware(dt: Optional[datetime]) -> Optional[datetime]:
 @dataclass
 class StrategyState:
     account_id: int
-    trigger_mode: str
-    interval_seconds: Optional[int]
-    tick_batch_size: Optional[int]
+    price_threshold: float  # Price change threshold (%)
+    trigger_interval: int   # Trigger interval (seconds)
     enabled: bool
     last_trigger_at: Optional[datetime]
-    tick_counter: int = 0
     running: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
 
-    def should_trigger(self, event_time: datetime) -> bool:
+    def should_trigger(self, symbol: str, event_time: datetime) -> bool:
+        """Check if strategy should trigger based on price threshold or time interval"""
         if not self.enabled:
             return False
 
         now_ts = event_time.timestamp()
-        last_ts = self.last_trigger_at.timestamp() if self.last_trigger_at else None
+        last_ts = self.last_trigger_at.timestamp() if self.last_trigger_at else 0
 
-        if self.trigger_mode == "realtime":
-            if last_ts is None:
-                return True
-            return (now_ts - last_ts) >= MIN_REALTIME_INTERVAL
+        # Check time interval trigger
+        time_trigger = (now_ts - last_ts) >= self.trigger_interval
 
-        if self.trigger_mode == "interval":
-            if not self.interval_seconds or self.interval_seconds <= 0:
-                return True
-            if last_ts is None:
-                return True
-            return (now_ts - last_ts) >= self.interval_seconds
+        # Check price threshold trigger
+        price_change = sampling_pool.get_price_change_percent(symbol)
+        price_trigger = (price_change is not None and
+                        abs(price_change) >= self.price_threshold)
 
-        if self.trigger_mode == "tick_batch":
-            if not self.tick_batch_size or self.tick_batch_size <= 1:
-                return True
-            return self.tick_counter + 1 >= self.tick_batch_size
-
-        # Fallback: treat as realtime
-        if last_ts is None:
-            return True
-        return (now_ts - last_ts) >= MIN_REALTIME_INTERVAL
-
-    def update_after_trigger(self, event_time: datetime) -> None:
-        self.last_trigger_at = event_time
-        self.tick_counter = 0
-
-    def increment_tick(self) -> None:
-        self.tick_counter += 1
+        return time_trigger or price_trigger
 
 
 class StrategyManager:
-    def __init__(self) -> None:
-        self._states: Dict[int, StrategyState] = {}
-        self._lock = threading.Lock()
-        self._last_refresh = 0.0
+    def __init__(self):
+        self.strategies: Dict[int, StrategyState] = {}
+        self.lock = threading.Lock()
+        self.running = False
+        self.refresh_thread: Optional[threading.Thread] = None
 
-    def start(self) -> None:
-        self.refresh_strategies(force=True)
-        subscribe_price_updates(self.handle_price_update)
-        logger.info("Trading strategy manager subscribed to price updates")
+    def start(self):
+        """Start the strategy manager"""
+        with self.lock:
+            if self.running:
+                logger.warning("Strategy manager already running")
+                return
 
-    def stop(self) -> None:
-        unsubscribe_price_updates(self.handle_price_update)
-        logger.info("Trading strategy manager unsubscribed from price updates")
+            self.running = True
+            self._load_strategies()
 
-    def refresh_strategies(self, force: bool = False) -> None:
-        now = time.time()
-        if not force and (now - self._last_refresh) < STRATEGY_REFRESH_INTERVAL:
-            return
+            # Start refresh thread
+            self.refresh_thread = threading.Thread(
+                target=self._refresh_strategies_loop,
+                daemon=True
+            )
+            self.refresh_thread.start()
 
-        session = SessionLocal()
+            logger.info("Strategy manager started")
+
+    def stop(self):
+        """Stop the strategy manager"""
+        with self.lock:
+            if not self.running:
+                return
+
+            self.running = False
+
+        if self.refresh_thread:
+            self.refresh_thread.join(timeout=5.0)
+
+        logger.info("Strategy manager stopped")
+
+    def _load_strategies(self):
+        """Load strategies from database"""
         try:
-            accounts = (
-                session.query(Account)
-                .filter(
-                    Account.is_active == "true",
-                    Account.account_type == "AI",
-                )
-                .all()
-            )
+            with SessionLocal() as db:
+                strategies = list_strategies(db)
 
-            configs = list_strategies(session)
-            config_map = {cfg.account_id: cfg for cfg in configs}
-
-            new_states: Dict[int, StrategyState] = {}
-            for account in accounts:
-                cfg = config_map.get(account.id)
-                if cfg is None:
-                    cfg = upsert_strategy(
-                        session,
-                        account_id=account.id,
-                        trigger_mode="realtime",
-                        interval_seconds=1,
-                        tick_batch_size=1,
-                        enabled=(account.auto_trading_enabled == "true"),
-                    )
-                enabled = cfg.enabled == "true" and account.auto_trading_enabled == "true"
-                existing_state = self._states.get(account.id)
-
-                # If state exists, update in-place instead of replacing
-                # This prevents race conditions with running threads
-                if existing_state:
-                    existing_state.trigger_mode = cfg.trigger_mode or "realtime"
-                    existing_state.interval_seconds = cfg.interval_seconds
-                    existing_state.tick_batch_size = cfg.tick_batch_size
-                    existing_state.enabled = enabled
-                    existing_state.last_trigger_at = _as_aware(cfg.last_trigger_at)
-                    new_states[account.id] = existing_state
-                else:
-                    # Create new state only if it doesn't exist
+                for strategy in strategies:
                     state = StrategyState(
-                        account_id=account.id,
-                        trigger_mode=cfg.trigger_mode or "realtime",
-                        interval_seconds=cfg.interval_seconds,
-                        tick_batch_size=cfg.tick_batch_size,
-                        enabled=enabled,
-                        last_trigger_at=_as_aware(cfg.last_trigger_at),
+                        account_id=strategy.account_id,
+                        price_threshold=strategy.price_threshold,
+                        trigger_interval=strategy.trigger_interval,
+                        enabled=strategy.enabled == "true",
+                        last_trigger_at=_as_aware(strategy.last_trigger_at),
                     )
-                    new_states[account.id] = state
+                    self.strategies[strategy.account_id] = state
 
-            with self._lock:
-                self._states = new_states
-                self._last_refresh = now
+                logger.info(f"Loaded {len(self.strategies)} strategies")
 
-        except Exception as err:
-            logger.error("Failed to refresh strategy configs: %s", err)
-        finally:
-            session.close()
+        except Exception as e:
+            logger.error(f"Failed to load strategies: {e}")
 
-    def handle_price_update(self, event: Dict[str, Any]) -> None:
-        from services.system_logger import system_logger
-
-        symbol = event.get("symbol", "UNKNOWN")
-        price = event.get("price", 0)
-
-        # Log every price update event
-        system_logger.add_log(
-            level="INFO",
-            category="price_update",
-            message=f"Market stream event: {symbol}=${price:.4f}",
-            details={"symbol": symbol, "price": price, "source": "market_stream"}
-        )
-
-        self.refresh_strategies()
-        event_time: datetime = event.get("event_time") or datetime.now(tz=timezone.utc)
-        if event_time.tzinfo is None:
-            event_time = event_time.replace(tzinfo=timezone.utc)
-
-        states_snapshot: List[StrategyState]
-        with self._lock:
-            states_snapshot = list(self._states.values())
-
-        for state in states_snapshot:
-            if state.trigger_mode == "tick_batch":
-                state.increment_tick()
-            else:
-                state.tick_counter = 0
-
-            should_trigger = state.should_trigger(event_time)
-
-            # Log trigger decision
-            if state.enabled:
-                system_logger.add_log(
-                    level="INFO",
-                    category="ai_decision",
-                    message=f"Strategy check for account {state.account_id}: should_trigger={should_trigger}, enabled={state.enabled}, running={state.running}",
-                    details={
-                        "account_id": state.account_id,
-                        "trigger_mode": state.trigger_mode,
-                        "should_trigger": should_trigger,
-                        "enabled": state.enabled,
-                        "running": state.running,
-                        "last_trigger_at": state.last_trigger_at.isoformat() if state.last_trigger_at else None
-                    }
-                )
-
-            if not should_trigger:
-                continue
-            self._trigger_account(state, event_time)
-
-    def _trigger_account(self, state: StrategyState, event_time: datetime) -> None:
-        from services.system_logger import system_logger
-
-        if not state.enabled:
-            state.tick_counter = 0
-            return
-
-        if state.running:
-            system_logger.add_log(
-                level="WARNING",
-                category="ai_decision",
-                message=f"Account {state.account_id} trading still running, skipping trigger",
-                details={"account_id": state.account_id, "running": state.running}
-            )
-            return
-
-        def runner():
-            with state.lock:
-                if state.running:
-                    return
-                state.running = True
-
-            system_logger.add_log(
-                level="INFO",
-                category="ai_decision",
-                message=f"Starting AI trading thread for account {state.account_id}",
-                details={"account_id": state.account_id}
-            )
-
+    def _refresh_strategies_loop(self):
+        """Periodically refresh strategies from database"""
+        while self.running:
             try:
-                place_ai_driven_crypto_order(account_ids=[state.account_id])
-                state.update_after_trigger(event_time)
-                system_logger.add_log(
-                    level="INFO",
-                    category="ai_decision",
-                    message=f"AI trading completed successfully for account {state.account_id}",
-                    details={"account_id": state.account_id}
-                )
-            except Exception as err:
-                logger.error("Strategy trigger failed for account %s: %s", state.account_id, err)
-                system_logger.add_log(
-                    level="ERROR",
-                    category="ai_decision",
-                    message=f"AI trading failed for account {state.account_id}: {str(err)[:200]}",
-                    details={"account_id": state.account_id, "error": str(err)}
-                )
-            finally:
-                with state.lock:
-                    state.running = False
-                    state.tick_counter = 0
-                system_logger.add_log(
-                    level="INFO",
-                    category="ai_decision",
-                    message=f"AI trading thread finished for account {state.account_id}, set running=False",
-                    details={"account_id": state.account_id, "running": False}
-                )
+                time.sleep(STRATEGY_REFRESH_INTERVAL)
+                if self.running:
+                    self._load_strategies()
+            except Exception as e:
+                logger.error(f"Error in strategy refresh loop: {e}")
 
-        threading.Thread(target=runner, name=f"strategy-trigger-{state.account_id}", daemon=True).start()
+    def handle_price_update(self, symbol: str, price: float, event_time: datetime):
+        """Handle price update and check for strategy triggers"""
+        try:
+            # Add to sampling pool if needed
+            with SessionLocal() as db:
+                global_config = db.query(GlobalSamplingConfig).first()
+                sampling_interval = global_config.sampling_interval if global_config else 18
+
+            if sampling_pool.should_sample(symbol, sampling_interval):
+                sampling_pool.add_sample(symbol, price, event_time.timestamp())
+
+            # Check each strategy for triggers
+            for account_id, state in self.strategies.items():
+                if state.should_trigger(symbol, event_time):
+                    self._execute_strategy(account_id, symbol, event_time)
+
+        except Exception as e:
+            logger.error(f"Error handling price update for {symbol}: {e}")
+
+    def _execute_strategy(self, account_id: int, symbol: str, event_time: datetime):
+        """Execute strategy for account"""
+        state = self.strategies.get(account_id)
+        if not state:
+            return
+
+        with state.lock:
+            if state.running:
+                logger.debug(f"Strategy for account {account_id} already running, skipping")
+                return
+
+            state.running = True
+
+        try:
+            logger.info(f"Executing strategy for account {account_id}, symbol {symbol}")
+
+            # Get sampling data for AI decision
+            samples = sampling_pool.get_samples(symbol)
+
+            # Execute AI trading decision
+            place_ai_driven_crypto_order(
+                account_id=account_id,
+                symbol=symbol,
+                samples=samples
+            )
+
+            # Update last trigger time
+            state.last_trigger_at = event_time
+
+            # Update database
+            with SessionLocal() as db:
+                strategy = get_strategy_by_account(db, account_id)
+                if strategy:
+                    strategy.last_trigger_at = event_time
+                    db.commit()
+
+        except Exception as e:
+            logger.error(f"Error executing strategy for account {account_id}: {e}")
+        finally:
+            state.running = False
+
+    def get_strategy_status(self) -> Dict[str, Any]:
+        """Get status of all strategies"""
+        status = {
+            "running": self.running,
+            "strategy_count": len(self.strategies),
+            "strategies": {}
+        }
+
+        for account_id, state in self.strategies.items():
+            status["strategies"][account_id] = {
+                "enabled": state.enabled,
+                "running": state.running,
+                "price_threshold": state.price_threshold,
+                "trigger_interval": state.trigger_interval,
+                "last_trigger_at": state.last_trigger_at.isoformat() if state.last_trigger_at else None
+            }
+
+        return status
 
 
+# Global strategy manager instance
 strategy_manager = StrategyManager()
 
 
-def start_trading_strategy_manager() -> None:
+def start_strategy_manager():
+    """Start the global strategy manager"""
     strategy_manager.start()
-    # Ensure market stream covers relevant symbols
-    start_market_stream(AI_TRADING_SYMBOLS, interval_seconds=1.5)
 
 
-def stop_trading_strategy_manager() -> None:
+def stop_strategy_manager():
+    """Stop the global strategy manager"""
     strategy_manager.stop()
+
+
+def handle_price_update(symbol: str, price: float, event_time: Optional[datetime] = None):
+    """Handle price update from market data"""
+    if event_time is None:
+        event_time = datetime.now(timezone.utc)
+
+    strategy_manager.handle_price_update(symbol, price, event_time)
+
+
+def get_strategy_status() -> Dict[str, Any]:
+    """Get strategy manager status"""
+    return strategy_manager.get_strategy_status()

@@ -106,6 +106,48 @@ def _build_account_state(portfolio: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _build_sampling_data(samples: Optional[List], target_symbol: Optional[str]) -> str:
+    """Build sampling pool data section for Alpha Arena style prompts"""
+    if not samples or not target_symbol:
+        return "No sampling data available."
+
+    lines = [
+        f"Multi-timeframe price data for {target_symbol} (18-second intervals, oldest to newest):",
+        f"Total samples: {len(samples)}",
+        ""
+    ]
+
+    # Format samples in Alpha Arena style - chronological order (oldest to newest)
+    for i, sample in enumerate(samples):
+        timestamp = sample.get('datetime', 'N/A')
+        price = sample.get('price', 0)
+        # Format timestamp to be more readable
+        if timestamp != 'N/A':
+            try:
+                from datetime import datetime
+                dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                time_str = dt.strftime('%H:%M:%S')
+            except:
+                time_str = timestamp
+        else:
+            time_str = 'N/A'
+
+        lines.append(f"T-{len(samples)-i-1}: ${price:.6f} ({time_str})")
+
+    # Calculate price momentum and trend
+    if len(samples) >= 2:
+        first_price = samples[0].get('price', 0)
+        last_price = samples[-1].get('price', 0)
+        if first_price > 0:
+            change_pct = ((last_price - first_price) / first_price) * 100
+            trend = "BULLISH" if change_pct > 0 else "BEARISH" if change_pct < 0 else "NEUTRAL"
+            lines.append("")
+            lines.append(f"Price momentum: {change_pct:+.3f}% ({trend})")
+            lines.append(f"Range: ${first_price:.6f} → ${last_price:.6f}")
+
+    return "\n".join(lines)
+
+
 def _build_market_snapshot(prices: Dict[str, float], positions: Dict[str, Dict[str, Any]]) -> str:
     lines: List[str] = []
     for symbol in SUPPORTED_SYMBOLS.keys():
@@ -151,16 +193,20 @@ def _build_prompt_context(
     portfolio: Dict[str, Any],
     prices: Dict[str, float],
     news_section: str,
+    samples: Optional[List] = None,
+    target_symbol: Optional[str] = None,
 ) -> Dict[str, Any]:
     positions = portfolio.get("positions", {})
     account_state = _build_account_state(portfolio)
     market_snapshot = _build_market_snapshot(prices, positions)
     session_context = _build_session_context(account)
+    sampling_data = _build_sampling_data(samples, target_symbol)
 
     return {
         "account_state": account_state,
         "market_snapshot": market_snapshot,
         "session_context": session_context,
+        "sampling_data": sampling_data,
         "decision_task": DECISION_TASK_TEXT,
         "output_format": OUTPUT_FORMAT_JSON,
         "prices_json": json.dumps(prices, indent=2, sort_keys=True),
@@ -285,6 +331,8 @@ def call_ai_for_decision(
     account: Account,
     portfolio: Dict,
     prices: Dict[str, float],
+    samples: Optional[List] = None,
+    target_symbol: Optional[str] = None,
 ) -> Optional[Dict]:
     """Call AI model API to get trading decision"""
     # Check if this is a default API key
@@ -307,7 +355,7 @@ def call_ai_for_decision(
             logger.error("Prompt template resolution failed: %s", exc)
             return None
 
-    context = _build_prompt_context(account, portfolio, prices, news_section)
+    context = _build_prompt_context(account, portfolio, prices, news_section, samples, target_symbol)
 
     try:
         prompt = template.template_text.format_map(SafeDict(context))

@@ -273,6 +273,7 @@ from api.crypto_routes import router as crypto_router
 from api.arena_routes import router as arena_router
 from api.system_log_routes import router as system_log_router
 from api.prompt_routes import router as prompt_router
+from api.sampling_routes import router as sampling_router
 # Removed: AI account routes merged into account_routes (unified AI trader accounts)
 
 app.include_router(market_data_router)
@@ -284,7 +285,38 @@ app.include_router(crypto_router)
 app.include_router(arena_router)
 app.include_router(system_log_router)
 app.include_router(prompt_router)
+app.include_router(sampling_router)
 # app.include_router(ai_account_router, prefix="/api")  # Removed - merged into account_router
+
+# Strategy route aliases for frontend compatibility
+from fastapi import HTTPException, Depends
+from sqlalchemy.orm import Session
+from database.connection import SessionLocal
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+@app.get("/api/accounts/{account_id}/strategy")
+async def get_account_strategy_alias(account_id: int, db: Session = Depends(get_db)):
+    """Alias for strategy config endpoint"""
+    from api.account_routes import get_account_strategy
+    return await get_account_strategy(account_id, db)
+
+@app.put("/api/accounts/{account_id}/strategy")
+async def update_account_strategy_alias(account_id: int, payload: dict, db: Session = Depends(get_db)):
+    """Alias for strategy config endpoint"""
+    from api.account_routes import update_account_strategy
+    from schemas.account import StrategyConfigUpdate
+    from pydantic import ValidationError
+    try:
+        strategy_update = StrategyConfigUpdate(**payload)
+        return await update_account_strategy(account_id, strategy_update, db)
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 # WebSocket endpoint
 from api.ws import websocket_endpoint
@@ -297,9 +329,16 @@ async def serve_root():
     """Serve the frontend index.html for root route"""
     static_dir = os.path.join(os.path.dirname(__file__), "static")
     index_path = os.path.join(static_dir, "index.html")
-    
+
     if os.path.exists(index_path):
-        return FileResponse(index_path)
+        return FileResponse(
+            index_path,
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
+            }
+        )
     else:
         return {"message": "Frontend not built yet"}
 
@@ -316,6 +355,13 @@ async def serve_spa(full_path: str):
     index_path = os.path.join(static_dir, "index.html")
     
     if os.path.exists(index_path):
-        return FileResponse(index_path)
+        return FileResponse(
+            index_path,
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
+            }
+        )
     else:
         return {"message": "Frontend not built yet"}
