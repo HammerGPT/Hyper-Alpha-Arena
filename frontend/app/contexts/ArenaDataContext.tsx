@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react'
+import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react'
 import { ArenaTrade, ArenaModelChatEntry, ArenaPositionsAccount, ArenaAccountMeta } from '@/lib/api'
 
 interface ArenaDataState {
@@ -20,24 +20,30 @@ const ArenaDataContext = createContext<ArenaDataContextType | undefined>(undefin
 export function ArenaDataProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<Record<string, ArenaDataState>>({})
 
-  const updateData = (accountKey: string, newData: Partial<ArenaDataState>) => {
-    setData(prev => ({
-      ...prev,
-      [accountKey]: {
+  const updateData = useCallback((accountKey: string, newData: Partial<ArenaDataState>) => {
+    setData(prev => {
+      const existing = prev[accountKey] || {
         trades: [],
         modelChat: [],
         positions: [],
         accountsMeta: [],
-        ...prev[accountKey],
-        ...newData,
-        lastFetched: newData.lastFetched ?? Date.now()
+        lastFetched: 0
       }
-    }))
-  }
 
-  const getData = (accountKey: string) => {
+      return {
+        ...prev,
+        [accountKey]: {
+          ...existing,
+          ...newData,
+          lastFetched: newData.lastFetched ?? Date.now()
+        }
+      }
+    })
+  }, [])
+
+  const getData = useCallback((accountKey: string) => {
     return data[accountKey] || null
-  }
+  }, [data])
 
   return (
     <ArenaDataContext.Provider value={{ data, updateData, getData }}>

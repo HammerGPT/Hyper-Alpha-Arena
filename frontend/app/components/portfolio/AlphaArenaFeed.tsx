@@ -125,22 +125,6 @@ export default function AlphaArenaFeed({
     }
   }, [cacheKey, getData])
 
-  const primeFromCache = useCallback(
-    (key: CacheKey) => {
-      const cached = getData(key)
-      if (!cached) return false
-      setTrades(cached.trades)
-      setModelChat(cached.modelChat)
-      setPositions(cached.positions)
-      setAccountsMeta(cached.accountsMeta)
-      setLoadingTrades(false)
-      setLoadingModelChat(false)
-      setLoadingPositions(false)
-      return true
-    },
-    [getData],
-  )
-
   const writeCache = useCallback(
     (key: CacheKey, data: Partial<{ trades: ArenaTrade[]; modelChat: ArenaModelChatEntry[]; positions: ArenaPositionsAccount[] }>) => {
       updateData(key, data)
@@ -229,187 +213,179 @@ export default function AlphaArenaFeed({
     }
   }, [wsRef, activeAccount, cacheKey, writeCache])
 
-  useEffect(() => {
-    let intervalId: NodeJS.Timeout | null = null
-    let isMounted = true
+  // Individual loaders for each data type
+  const loadTradesData = useCallback(async () => {
+    try {
+      setLoadingTrades(true)
+      const accountId = activeAccount === 'all' ? undefined : activeAccount
+      const tradeRes = await getArenaTrades({ limit: DEFAULT_LIMIT, account_id: accountId })
+      const newTrades = tradeRes.trades || []
+      setTrades(newTrades)
+      updateData(cacheKey, { trades: newTrades })
 
+      // Extract metadata from trades
+      if (tradeRes.accounts) {
+        const metas = tradeRes.accounts
+        setAccountsMeta(prev => {
+          const metaMap = new Map(prev.map(m => [m.account_id, m]))
+          metas.forEach(m => metaMap.set(m.account_id, m))
+          return Array.from(metaMap.values())
+        })
+        updateData(cacheKey, { accountsMeta: Array.from(new Map(tradeRes.accounts.map(m => [m.account_id, m])).values()) })
+      }
+
+      setLoadingTrades(false)
+      return tradeRes
+    } catch (err) {
+      console.error('[AlphaArenaFeed] Failed to load trades:', err)
+      setLoadingTrades(false)
+      return null
+    }
+  }, [activeAccount, cacheKey, updateData])
+
+  const loadModelChatData = useCallback(async () => {
+    try {
+      setLoadingModelChat(true)
+      const accountId = activeAccount === 'all' ? undefined : activeAccount
+      const chatRes = await getArenaModelChat({ limit: MODEL_CHAT_LIMIT, account_id: accountId })
+      const newModelChat = chatRes.entries || []
+      setModelChat(newModelChat)
+      updateData(cacheKey, { modelChat: newModelChat })
+
+      // Extract metadata from modelchat
+      if (chatRes.entries && chatRes.entries.length > 0) {
+        const metas = chatRes.entries.map(entry => ({
+          account_id: entry.account_id,
+          name: entry.account_name,
+          model: entry.model ?? null,
+        }))
+        setAccountsMeta(prev => {
+          const metaMap = new Map(prev.map(m => [m.account_id, m]))
+          metas.forEach(m => metaMap.set(m.account_id, m))
+          return Array.from(metaMap.values())
+        })
+      }
+
+      setLoadingModelChat(false)
+      return chatRes
+    } catch (err) {
+      console.error('[AlphaArenaFeed] Failed to load model chat:', err)
+      setLoadingModelChat(false)
+      return null
+    }
+  }, [activeAccount, cacheKey, updateData])
+
+  const loadPositionsData = useCallback(async () => {
+    try {
+      setLoadingPositions(true)
+      const accountId = activeAccount === 'all' ? undefined : activeAccount
+      const positionRes = await getArenaPositions({ account_id: accountId })
+      const newPositions = positionRes.accounts || []
+      setPositions(newPositions)
+      updateData(cacheKey, { positions: newPositions })
+
+      // Extract metadata from positions
+      if (positionRes.accounts) {
+        const metas = positionRes.accounts.map(account => ({
+          account_id: account.account_id,
+          name: account.account_name,
+          model: account.model ?? null,
+        }))
+        setAccountsMeta(prev => {
+          const metaMap = new Map(prev.map(m => [m.account_id, m]))
+          metas.forEach(m => metaMap.set(m.account_id, m))
+          const merged = Array.from(metaMap.values())
+
+          // Update allTraderOptions when viewing 'all'
+          if (activeAccount === 'all') {
+            setAllTraderOptions(merged)
+          }
+
+          return merged
+        })
+        updateData(cacheKey, { accountsMeta: Array.from(new Map(metas.map(m => [m.account_id, m])).values()) })
+      }
+
+      setLoadingPositions(false)
+      return positionRes
+    } catch (err) {
+      console.error('[AlphaArenaFeed] Failed to load positions:', err)
+      setLoadingPositions(false)
+      return null
+    }
+  }, [activeAccount, cacheKey, updateData])
+
+  // Lazy load data when tab becomes active
+  useEffect(() => {
+    const cached = getData(cacheKey)
+
+    if (activeTab === 'trades' && trades.length === 0 && !loadingTrades) {
+      if (cached?.trades && cached.trades.length > 0) {
+        // Use cached data
+        setTrades(cached.trades)
+      } else {
+        // Load fresh data
+        loadTradesData()
+      }
+    }
+
+    if (activeTab === 'model-chat' && modelChat.length === 0 && !loadingModelChat) {
+      if (cached?.modelChat && cached.modelChat.length > 0) {
+        // Use cached data
+        setModelChat(cached.modelChat)
+      } else {
+        // Load fresh data
+        loadModelChatData()
+      }
+    }
+
+    if (activeTab === 'positions' && positions.length === 0 && !loadingPositions) {
+      if (cached?.positions && cached.positions.length > 0) {
+        // Use cached data
+        setPositions(cached.positions)
+      } else {
+        // Load fresh data
+        loadPositionsData()
+      }
+    }
+  }, [activeTab, cacheKey, getData, trades.length, modelChat.length, positions.length, loadingTrades, loadingModelChat, loadingPositions, loadTradesData, loadModelChatData, loadPositionsData])
+
+  // Background polling - refresh all data regardless of active tab
+  useEffect(() => {
+    if (autoRefreshInterval <= 0) return
+
+    const pollAllData = async () => {
+      // Load all three APIs in background, independent of active tab
+      await Promise.allSettled([
+        loadTradesData(),
+        loadModelChatData(),
+        loadPositionsData()
+      ])
+    }
+
+    const intervalId = setInterval(pollAllData, autoRefreshInterval)
+
+    return () => clearInterval(intervalId)
+  }, [autoRefreshInterval, loadTradesData, loadModelChatData, loadPositionsData])
+
+  // Manual refresh trigger
+  useEffect(() => {
     const shouldForce =
       manualRefreshKey !== prevManualRefreshKey.current ||
       refreshKey !== prevRefreshKey.current
 
-    prevManualRefreshKey.current = manualRefreshKey
-    prevRefreshKey.current = refreshKey
+    if (shouldForce) {
+      prevManualRefreshKey.current = manualRefreshKey
+      prevRefreshKey.current = refreshKey
 
-    const fetchData = async (forceReload: boolean) => {
-      try {
-        const cached = getData(cacheKey)
-        const isFresh = cached ? Date.now() - cached.lastFetched < CACHE_STALE_MS : false
-        if (!forceReload && isFresh) {
-          return
-        }
-
-        // Only show loading if we don't have cached data
-        if (!cached) {
-          setLoadingTrades(true)
-          setLoadingModelChat(true)
-          setLoadingPositions(true)
-        }
-        setError(null)
-
-        const accountId = activeAccount === 'all' ? undefined : activeAccount
-
-        // Load each data type independently
-        const loadTrades = async () => {
-          try {
-            const tradeRes = await getArenaTrades({ limit: DEFAULT_LIMIT, account_id: accountId })
-            if (!isMounted) return
-            const newTrades = tradeRes.trades || []
-            setTrades(newTrades)
-            updateData(cacheKey, { trades: newTrades })
-            setLoadingTrades(false)
-            return tradeRes
-          } catch (err) {
-            setLoadingTrades(false)
-            throw err
-          }
-        }
-
-        const loadModelChat = async () => {
-          try {
-            const chatRes = await getArenaModelChat({ limit: MODEL_CHAT_LIMIT, account_id: accountId })
-            if (!isMounted) return
-            const newModelChat = chatRes.entries || []
-            setModelChat(newModelChat)
-            updateData(cacheKey, { modelChat: newModelChat })
-            setLoadingModelChat(false)
-            return chatRes
-          } catch (err) {
-            setLoadingModelChat(false)
-            throw err
-          }
-        }
-
-        const loadPositions = async () => {
-          try {
-            const positionRes = await getArenaPositions({ account_id: accountId })
-            if (!isMounted) return
-            const newPositions = positionRes.accounts || []
-            setPositions(newPositions)
-            updateData(cacheKey, { positions: newPositions })
-            setLoadingPositions(false)
-            return positionRes
-          } catch (err) {
-            setLoadingPositions(false)
-            throw err
-          }
-        }
-
-        const [tradeRes, chatRes, positionRes] = await Promise.allSettled([
-          loadTrades(),
-          loadModelChat(),
-          loadPositions(),
-        ]).then(results => [
-          results[0].status === 'fulfilled' ? results[0].value : null,
-          results[1].status === 'fulfilled' ? results[1].value : null,
-          results[2].status === 'fulfilled' ? results[2].value : null,
-        ])
-
-        if (!isMounted) return
-
-        // Collect metadata from successful responses
-        const candidateMetas: ArenaAccountMeta[] = []
-
-        if (tradeRes?.accounts) {
-          candidateMetas.push(...tradeRes.accounts)
-        }
-
-        if (positionRes?.accounts) {
-          candidateMetas.push(...positionRes.accounts.map((account) => ({
-            account_id: account.account_id,
-            name: account.account_name,
-            model: account.model ?? null,
-          })))
-        }
-
-        if (chatRes?.entries) {
-          candidateMetas.push(...chatRes.entries.map((entry) => ({
-            account_id: entry.account_id,
-            name: entry.account_name,
-            model: entry.model ?? null,
-          })))
-        }
-        let mergedMetas: ArenaAccountMeta[] = []
-        setAccountsMeta((prev) => {
-          const metaMap = new Map<number, ArenaAccountMeta>()
-          prev.forEach((meta) => {
-            metaMap.set(meta.account_id, meta)
-          })
-          candidateMetas.forEach((meta) => {
-            metaMap.set(meta.account_id, {
-              account_id: meta.account_id,
-              name: meta.name,
-              model: meta.model ?? null,
-            })
-          })
-          mergedMetas = Array.from(metaMap.values())
-          return mergedMetas
-        })
-
-        // Update allTraderOptions only when viewing 'all' to preserve complete list
-        if (activeAccount === 'all') {
-          setAllTraderOptions((prev) => {
-            const metaMap = new Map<number, ArenaAccountMeta>()
-            prev.forEach((meta) => {
-              metaMap.set(meta.account_id, meta)
-            })
-            mergedMetas.forEach((meta) => {
-              metaMap.set(meta.account_id, meta)
-            })
-            return Array.from(metaMap.values())
-          })
-        }
-
-        // Update accountsMeta in global state
-        updateData(cacheKey, { accountsMeta: mergedMetas })
-      } catch (err) {
-        console.error('Failed to load Hyper Alpha Arena feed:', err)
-        const message = err instanceof Error ? err.message : 'Failed to load Hyper Alpha Arena data'
-        setError(message)
-      } finally {
-        setLoadingTrades(false)
-        setLoadingModelChat(false)
-        setLoadingPositions(false)
-      }
+      // Force refresh all data
+      Promise.allSettled([
+        loadTradesData(),
+        loadModelChatData(),
+        loadPositionsData()
+      ])
     }
-
-    const hadCache = primeFromCache(cacheKey)
-    if (!hadCache) {
-      setLoadingTrades(true)
-      setLoadingModelChat(true)
-      setLoadingPositions(true)
-    }
-
-    fetchData(shouldForce)
-
-    if (autoRefreshInterval > 0) {
-      intervalId = setInterval(() => fetchData(false), autoRefreshInterval)
-    }
-
-    return () => {
-      if (intervalId) {
-        clearInterval(intervalId)
-      }
-      isMounted = false
-    }
-  }, [
-    activeAccount,
-    refreshKey,
-    autoRefreshInterval,
-    manualRefreshKey,
-    cacheKey,
-    primeFromCache,
-    writeCache,
-  ])
+  }, [manualRefreshKey, refreshKey, loadTradesData, loadModelChatData, loadPositionsData])
 
   const accountOptions = useMemo(() => {
     return allTraderOptions.sort((a, b) => a.name.localeCompare(b.name))
