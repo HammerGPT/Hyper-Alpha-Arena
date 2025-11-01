@@ -89,13 +89,27 @@ export default function AlphaArenaFeed({
   const [loadingPositions, setLoadingPositions] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const activeAccount = selectedAccountProp ?? internalSelectedAccount
-  const cacheKey = activeAccount === 'all' ? 'all' : String(activeAccount)
-
   const [trades, setTrades] = useState<ArenaTrade[]>([])
   const [modelChat, setModelChat] = useState<ArenaModelChatEntry[]>([])
   const [positions, setPositions] = useState<ArenaPositionsAccount[]>([])
   const [accountsMeta, setAccountsMeta] = useState<ArenaAccountMeta[]>([])
+
+  // Track seen items for highlight animation
+  const seenTradeIds = useRef<Set<number>>(new Set())
+  const seenDecisionIds = useRef<Set<number>>(new Set())
+  const prevManualRefreshKey = useRef(manualRefreshKey)
+  const prevRefreshKey = useRef(refreshKey)
+
+  // Sync external account selection with internal state
+  useEffect(() => {
+    if (selectedAccountProp !== undefined) {
+      setInternalSelectedAccount(selectedAccountProp)
+    }
+  }, [selectedAccountProp])
+
+  // Compute active account and cache key
+  const activeAccount = useMemo(() => selectedAccountProp ?? internalSelectedAccount, [selectedAccountProp, internalSelectedAccount])
+  const cacheKey: CacheKey = useMemo(() => activeAccount === 'all' ? 'all' : String(activeAccount), [activeAccount])
 
   // Initialize from global state on mount or account change
   useEffect(() => {
@@ -111,21 +125,6 @@ export default function AlphaArenaFeed({
     }
   }, [cacheKey, getData])
 
-  // Track seen items for highlight animation
-  const seenTradeIds = useRef<Set<number>>(new Set())
-  const seenDecisionIds = useRef<Set<number>>(new Set())
-  const prevManualRefreshKey = useRef(manualRefreshKey)
-  const prevRefreshKey = useRef(refreshKey)
-
-  useEffect(() => {
-    if (selectedAccountProp !== undefined) {
-      setInternalSelectedAccount(selectedAccountProp)
-    }
-  }, [selectedAccountProp])
-
-  const activeAccount = selectedAccountProp ?? internalSelectedAccount
-  const cacheKey: CacheKey = activeAccount === 'all' ? 'all' : String(activeAccount)
-
   const primeFromCache = useCallback(
     (key: CacheKey) => {
       const cached = getData(key)
@@ -140,6 +139,13 @@ export default function AlphaArenaFeed({
       return true
     },
     [getData],
+  )
+
+  const writeCache = useCallback(
+    (key: CacheKey, data: Partial<{ trades: ArenaTrade[]; modelChat: ArenaModelChatEntry[]; positions: ArenaPositionsAccount[] }>) => {
+      updateData(key, data)
+    },
+    [updateData],
   )
 
   // Listen for real-time WebSocket updates

@@ -28,10 +28,9 @@ export function ArenaDataProvider({ children }: { children: ReactNode }) {
         modelChat: [],
         positions: [],
         accountsMeta: [],
-        lastFetched: 0,
         ...prev[accountKey],
         ...newData,
-        lastFetched: Date.now()
+        lastFetched: newData.lastFetched ?? Date.now()
       }
     }))
   }
