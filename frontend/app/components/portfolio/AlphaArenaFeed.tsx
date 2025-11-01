@@ -27,7 +27,6 @@ type FeedTab = 'trades' | 'model-chat' | 'positions'
 
 const DEFAULT_LIMIT = 100
 const MODEL_CHAT_LIMIT = 60
-const CACHE_STALE_MS = 60_000
 
 type CacheKey = string
 
