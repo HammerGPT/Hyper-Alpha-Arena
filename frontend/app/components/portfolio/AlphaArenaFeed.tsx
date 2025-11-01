@@ -54,18 +54,6 @@ function formatPercent(value?: number | null) {
   return `${(value * 100).toFixed(2)}%`
 }
 
-function formatTriggerMode(mode?: string | null) {
-  switch (mode) {
-    case 'realtime':
-      return 'Real-time Trigger'
-    case 'interval':
-      return 'Fixed Interval'
-    case 'tick_batch':
-      return 'Tick Batch'
-    default:
-      return 'Unknown Trigger Mode'
-  }
-}
 
 export default function AlphaArenaFeed({
   refreshKey,
@@ -502,7 +490,15 @@ export default function AlphaArenaFeed({
                         <div className="text-sm text-foreground flex flex-wrap items-center gap-2">
                           <span className="font-semibold">{trade.account_name}</span>
                           <span>completed a</span>
-                          <span className="uppercase text-primary font-semibold">{trade.direction.toLowerCase()}</span>
+                          <span className={`px-2 py-1 rounded text-xs font-bold ${
+                            trade.side === 'BUY'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : trade.side === 'CLOSE'
+                              ? 'bg-orange-100 text-orange-800'
+                              : 'bg-red-100 text-red-800'
+                          }`}>
+                            {trade.side}
+                          </span>
                           <span>trade on</span>
                           <span className="flex items-center gap-2 font-semibold">
                             {symbolLogo && (
@@ -616,10 +612,6 @@ export default function AlphaArenaFeed({
                               {entry.symbol}
                             </span>
                           )}
-                        </div>
-                        <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground uppercase tracking-wide">
-                          <span>{formatTriggerMode(entry.trigger_mode)}</span>
-                          <span>{entry.strategy_enabled ? 'Strategy Enabled' : 'Strategy Disabled'}</span>
                         </div>
                         <div className="text-xs text-muted-foreground">
                           {isExpanded ? entry.reason : `${entry.reason.slice(0, 160)}${entry.reason.length > 160 ? '…' : ''}`}

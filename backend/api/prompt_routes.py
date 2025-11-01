@@ -154,3 +154,119 @@ def delete_prompt_binding(binding_id: int, db: Session = Depends(get_db)) -> dic
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"message": "Binding deleted"}
+
+
+@router.post("/preview")
+def preview_prompt(
+    payload: dict,
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Preview filled prompt for selected accounts and symbols.
+
+    Payload:
+    {
+        "promptTemplateKey": "pro",
+        "accountIds": [1, 2],
+        "symbols": ["BTC", "ETH"]
+    }
+
+    Returns:
+    {
+        "previews": [
+            {
+                "accountId": 1,
+                "accountName": "Trader-A",
+                "symbol": "BTC",
+                "filledPrompt": "..."
+            },
+            ...
+        ]
+    }
+    """
+    from services.ai_decision_service import (
+        _get_portfolio_data,
+        _build_prompt_context,
+        SafeDict,
+    )
+    from services.market_data import get_last_price
+    from services.news_feed import fetch_latest_news
+    from services.sampling_pool import sampling_pool
+    from database.models import Account
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    prompt_key = payload.get("promptTemplateKey", "default")
+    account_ids = payload.get("accountIds", [])
+    symbols = payload.get("symbols", [])
+
+    if not account_ids:
+        raise HTTPException(status_code=400, detail="At least one account must be selected")
+
+    # Get template
+    template = prompt_repo.get_template_by_key(db, prompt_key)
+    if not template:
+        raise HTTPException(status_code=404, detail=f"Prompt template '{prompt_key}' not found")
+
+    # Get news
+    try:
+        news_summary = fetch_latest_news()
+        news_section = news_summary if news_summary else "No recent CoinJournal news available."
+    except Exception as err:
+        logger.warning(f"Failed to fetch news: {err}")
+        news_section = "No recent CoinJournal news available."
+
+    # Get current prices
+    prices = {}
+    supported_symbols = ["BTC", "ETH", "SOL", "DOGE", "XRP", "BNB"]
+    for sym in supported_symbols:
+        try:
+            price = get_last_price(sym, "CRYPTO")
+            prices[sym] = price
+        except Exception as err:
+            logger.warning(f"Failed to get price for {sym}: {err}")
+            prices[sym] = 0.0
+
+    # Import multi-symbol sampling data builder
+    from services.ai_decision_service import _build_multi_symbol_sampling_data
+
+    previews = []
+
+    for account_id in account_ids:
+        account = db.get(Account, account_id)
+        if not account:
+            logger.warning(f"Account {account_id} not found, skipping")
+            continue
+
+        portfolio = _get_portfolio_data(db, account)
+
+        # Build context with multi-symbol sampling data if symbols are specified
+        if symbols:
+            # Build multi-symbol sampling data
+            sampling_data = _build_multi_symbol_sampling_data(symbols, sampling_pool)
+            context = _build_prompt_context(
+                account, portfolio, prices, news_section, None, None
+            )
+            # Override sampling_data with multi-symbol version
+            context["sampling_data"] = sampling_data
+        else:
+            # No symbol specified, no sampling data
+            context = _build_prompt_context(
+                account, portfolio, prices, news_section, None, None
+            )
+
+        try:
+            filled_prompt = template.template_text.format_map(SafeDict(context))
+        except Exception as err:
+            logger.error(f"Failed to fill prompt for {account.name}: {err}")
+            filled_prompt = f"Error filling prompt: {err}"
+
+        previews.append({
+            "accountId": account.id,
+            "accountName": account.name,
+            "symbols": symbols if symbols else [],
+            "filledPrompt": filled_prompt,
+        })
+
+    return {"previews": previews}

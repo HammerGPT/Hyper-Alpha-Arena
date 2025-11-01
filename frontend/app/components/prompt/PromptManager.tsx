@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import PromptPreviewDialog from './PromptPreviewDialog'
 
 interface BindingFormState {
   id?: number
@@ -46,6 +47,7 @@ export default function PromptManager() {
   const [saving, setSaving] = useState(false)
   const [bindingSaving, setBindingSaving] = useState(false)
   const [bindingForm, setBindingForm] = useState<BindingFormState>(DEFAULT_BINDING_FORM)
+  const [previewDialogOpen, setPreviewDialogOpen] = useState(false)
 
   const selectedTemplate = useMemo(
     () => templates.find((tpl) => tpl.key === selectedKey) || null,
@@ -216,8 +218,9 @@ export default function PromptManager() {
   }, [accounts])
 
   return (
-    <div className="h-full w-full overflow-hidden flex flex-col gap-4">
-      <div className="flex flex-col lg:flex-row gap-4 h-full overflow-hidden">
+    <>
+      <div className="h-full w-full overflow-hidden flex flex-col gap-4">
+        <div className="flex flex-col lg:flex-row gap-4 h-full overflow-hidden">
         {/* LEFT COLUMN - Template Selection + Edit Area */}
         <div className="flex-1 flex flex-col h-full gap-4 overflow-hidden">
           <Card className="flex-1 flex flex-col h-full overflow-hidden">
@@ -272,17 +275,26 @@ export default function PromptManager() {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex justify-end mt-2 gap-2">
+              <div className="flex justify-between mt-2 gap-2">
                 <Button
                   variant="outline"
-                  onClick={handleRestoreTemplate}
+                  onClick={() => setPreviewDialogOpen(true)}
                   disabled={!selectedTemplate || saving}
                 >
-                  Restore Default
+                  💡 Preview Filled
                 </Button>
-                <Button onClick={handleSaveTemplate} disabled={!selectedTemplate || saving}>
-                  Save Template
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={handleRestoreTemplate}
+                    disabled={!selectedTemplate || saving}
+                  >
+                    Restore Default
+                  </Button>
+                  <Button onClick={handleSaveTemplate} disabled={!selectedTemplate || saving}>
+                    Save Template
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -421,5 +433,16 @@ export default function PromptManager() {
         </Card>
       </div>
     </div>
+
+      {/* Preview Dialog */}
+      {selectedTemplate && (
+        <PromptPreviewDialog
+          open={previewDialogOpen}
+          onOpenChange={setPreviewDialogOpen}
+          templateKey={selectedTemplate.key}
+          templateName={selectedTemplate.name}
+        />
+      )}
+    </>
   )
 }

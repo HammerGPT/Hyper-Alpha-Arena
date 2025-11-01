@@ -129,20 +129,39 @@ def place_ai_driven_crypto_order(max_ratio: float = 0.2, account_ids: Optional[I
             logger.warning("Failed to fetch market prices, skipping AI trading")
             return
 
+        # Get all symbols with available sampling data
+        from services.sampling_pool import sampling_pool
+        available_symbols = []
+        for sym in SUPPORTED_SYMBOLS.keys():
+            samples_data = sampling_pool.get_samples(sym)
+            if samples_data:
+                available_symbols.append(sym)
+
+        if available_symbols:
+            logger.info(f"Available sampling pool symbols: {', '.join(available_symbols)}")
+        else:
+            logger.warning("No sampling data available for any symbol")
+
         # Iterate through all active accounts
         for account in accounts:
             try:
                 logger.info(f"Processing AI trading for account: {account.name}")
-                
+
                 # Get portfolio data for this account
                 portfolio = _get_portfolio_data(db, account)
-                
+
                 if portfolio['total_assets'] <= 0:
                     logger.debug(f"Account {account.name} has non-positive total assets, skipping")
                     continue
 
-                # Call AI for trading decision
-                decision = call_ai_for_decision(db, account, portfolio, prices, samples=samples, target_symbol=symbol)
+                # Call AI for trading decision with all available sampling symbols
+                # Always use all available symbols from pool (not just single symbol from strategy)
+                # This allows controlling AI trading scope via sampling pool, not strategy parameters
+                decision = call_ai_for_decision(
+                    db, account, portfolio, prices,
+                    samples=samples, target_symbol=symbol,  # Legacy params for backward compatibility
+                    symbols=available_symbols if available_symbols else None  # New multi-symbol param
+                )
                 if not decision or not isinstance(decision, dict):
                     logger.warning(f"Failed to get AI decision for {account.name}, skipping")
                     continue
@@ -155,7 +174,7 @@ def place_ai_driven_crypto_order(max_ratio: float = 0.2, account_ids: Optional[I
                 logger.info(f"AI decision for {account.name}: {operation} {symbol} (portion: {target_portion:.2%}) - {reason}")
 
                 # Validate decision
-                if operation not in ["buy", "sell", "hold"]:
+                if operation not in ["buy", "sell", "hold", "close"]:
                     logger.warning(f"Invalid operation '{operation}' from AI for {account.name}, skipping")
                     # Save invalid decision for debugging
                     save_ai_decision(db, account, decision, portfolio, executed=False)
@@ -225,21 +244,39 @@ def place_ai_driven_crypto_order(max_ratio: float = 0.2, account_ids: Optional[I
                         .filter(Position.account_id == account.id, Position.symbol == symbol, Position.market == "CRYPTO")
                         .first()
                     )
-                    
+
                     if not position or float(position.available_quantity) <= 0:
                         logger.info(f"No position available to SELL for {symbol} for {account.name}, skipping")
                         # Save decision with execution failure
                         save_ai_decision(db, account, decision, portfolio, executed=False)
                         continue
-                    
-                    available_quantity = int(position.available_quantity)
-                    quantity = max(1, int(available_quantity * target_portion))
-                    
+
+                    available_quantity = float(position.available_quantity)
+                    quantity = float(available_quantity * target_portion)
+
                     if quantity > available_quantity:
                         quantity = available_quantity
-                    
+
                     side = "SELL"
-                
+
+                elif operation == "close":
+                    # Close entire position (sell 100%)
+                    position = (
+                        db.query(Position)
+                        .filter(Position.account_id == account.id, Position.symbol == symbol, Position.market == "CRYPTO")
+                        .first()
+                    )
+
+                    if not position or float(position.available_quantity) <= 0:
+                        logger.info(f"No position available to CLOSE for {symbol} for {account.name}, skipping")
+                        # Save decision with execution failure
+                        save_ai_decision(db, account, decision, portfolio, executed=False)
+                        continue
+
+                    # Close entire position regardless of target_portion
+                    quantity = float(position.available_quantity)
+                    side = "CLOSE"
+
                 else:
                     continue
 

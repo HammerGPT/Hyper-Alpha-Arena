@@ -278,6 +278,33 @@ export async function deletePromptBinding(bindingId: number): Promise<void> {
   })
 }
 
+export interface PromptPreviewRequest {
+  promptTemplateKey: string
+  accountIds: number[]
+  symbols?: string[]
+}
+
+export interface PromptPreviewItem {
+  accountId: number
+  accountName: string
+  symbols: string[]
+  filledPrompt: string
+}
+
+export interface PromptPreviewResponse {
+  previews: PromptPreviewItem[]
+}
+
+export async function previewPrompt(
+  payload: PromptPreviewRequest,
+): Promise<PromptPreviewResponse> {
+  const response = await apiRequest('/prompts/preview', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  return response.json()
+}
+
 
 export async function loginUser(username: string, password: string): Promise<UserAuthResponse> {
   const response = await apiRequest('/users/login', {

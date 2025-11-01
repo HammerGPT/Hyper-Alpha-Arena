@@ -65,6 +65,7 @@ def _format_quantity(value: Optional[float], precision: int = 6, default: str = 
 
 
 def _build_session_context(account: Account) -> str:
+    """Build session context (legacy format for backward compatibility)"""
     now = datetime.utcnow()
     runtime_minutes = "N/A"
 
@@ -80,6 +81,72 @@ def _build_session_context(account: Account) -> str:
         "INVOCATION_COUNT: N/A",
         f"CURRENT_TIME_UTC: {now.isoformat()}",
     ]
+    return "\n".join(lines)
+
+
+def _calculate_runtime_minutes(account: Account) -> str:
+    """Calculate runtime minutes for Alpha Arena style prompts"""
+    created_at = getattr(account, "created_at", None)
+    if isinstance(created_at, datetime):
+        now = datetime.utcnow()
+        created = created_at.replace(tzinfo=None) if created_at.tzinfo else created_at
+        return str(max(0, int((now - created).total_seconds() // 60)))
+    return "0"
+
+
+def _calculate_total_return_percent(account: Account) -> str:
+    """Calculate total return percentage"""
+    initial_cash = float(getattr(account, "initial_cash", 0) or 10000)
+    current_total = float(getattr(account, "current_cash", 0))
+
+    # Add positions value if available
+    try:
+        from services.asset_calculator import calc_positions_value
+        from database.connection import SessionLocal
+        db = SessionLocal()
+        try:
+            positions_value = calc_positions_value(db, account.id)
+            current_total += positions_value
+        finally:
+            db.close()
+    except Exception:
+        pass
+
+    if initial_cash > 0:
+        return_pct = ((current_total - initial_cash) / initial_cash) * 100
+        return f"{return_pct:+.2f}"
+    return "0.00"
+
+
+def _build_holdings_detail(positions: Dict[str, Dict[str, Any]]) -> str:
+    """Build detailed holdings list for Alpha Arena style prompts"""
+    if not positions:
+        return "- None (all cash)"
+
+    lines = []
+    for symbol, data in positions.items():
+        qty = data.get('quantity', 0)
+        avg_cost = data.get('avg_cost', 0)
+        current_value = data.get('current_value', 0)
+
+        lines.append(
+            f"- {symbol}: {_format_quantity(qty)} units @ ${_format_currency(avg_cost, precision=4)} avg "
+            f"(current value: ${_format_currency(current_value)})"
+        )
+
+    return "\n".join(lines)
+
+
+def _build_market_prices(prices: Dict[str, float]) -> str:
+    """Build simple market prices list for Alpha Arena style prompts"""
+    lines = []
+    for symbol in SUPPORTED_SYMBOLS.keys():
+        price = prices.get(symbol)
+        if price:
+            lines.append(f"{symbol}: ${_format_currency(price, precision=4)}")
+        else:
+            lines.append(f"{symbol}: N/A")
+
     return "\n".join(lines)
 
 
@@ -107,7 +174,7 @@ def _build_account_state(portfolio: Dict[str, Any]) -> str:
 
 
 def _build_sampling_data(samples: Optional[List], target_symbol: Optional[str]) -> str:
-    """Build sampling pool data section for Alpha Arena style prompts"""
+    """Build sampling pool data section for Alpha Arena style prompts (single symbol)"""
     if not samples or not target_symbol:
         return "No sampling data available."
 
@@ -146,6 +213,56 @@ def _build_sampling_data(samples: Optional[List], target_symbol: Optional[str]) 
             lines.append(f"Range: ${first_price:.6f} → ${last_price:.6f}")
 
     return "\n".join(lines)
+
+
+def _build_multi_symbol_sampling_data(symbols: List[str], sampling_pool) -> str:
+    """Build sampling pool data for multiple symbols (Alpha Arena style)"""
+    if not symbols:
+        return "No symbols selected for sampling data."
+
+    sections = []
+
+    for symbol in symbols:
+        samples = sampling_pool.get_samples(symbol)
+        if not samples:
+            sections.append(f"{symbol}: No sampling data available")
+            continue
+
+        lines = [
+            f"{symbol} (18-second intervals, oldest to newest):",
+            f"Total samples: {len(samples)}",
+            ""
+        ]
+
+        # Format samples
+        for i, sample in enumerate(samples):
+            timestamp = sample.get('datetime', 'N/A')
+            price = sample.get('price', 0)
+            if timestamp != 'N/A':
+                try:
+                    dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                    time_str = dt.strftime('%H:%M:%S')
+                except:
+                    time_str = timestamp
+            else:
+                time_str = 'N/A'
+
+            lines.append(f"T-{len(samples)-i-1}: ${price:.6f} ({time_str})")
+
+        # Calculate momentum
+        if len(samples) >= 2:
+            first_price = samples[0].get('price', 0)
+            last_price = samples[-1].get('price', 0)
+            if first_price > 0:
+                change_pct = ((last_price - first_price) / first_price) * 100
+                trend = "BULLISH" if change_pct > 0 else "BEARISH" if change_pct < 0 else "NEUTRAL"
+                lines.append("")
+                lines.append(f"Price momentum: {change_pct:+.3f}% ({trend})")
+                lines.append(f"Range: ${first_price:.6f} → ${last_price:.6f}")
+
+        sections.append("\n".join(lines))
+
+    return "\n\n".join(sections)
 
 
 def _build_market_snapshot(prices: Dict[str, float], positions: Dict[str, Dict[str, Any]]) -> str:
@@ -197,12 +314,25 @@ def _build_prompt_context(
     target_symbol: Optional[str] = None,
 ) -> Dict[str, Any]:
     positions = portfolio.get("positions", {})
+    now = datetime.utcnow()
+
+    # Legacy format variables (for backward compatibility with existing templates)
     account_state = _build_account_state(portfolio)
     market_snapshot = _build_market_snapshot(prices, positions)
     session_context = _build_session_context(account)
     sampling_data = _build_sampling_data(samples, target_symbol)
 
+    # New Alpha Arena style variables
+    runtime_minutes = _calculate_runtime_minutes(account)
+    current_time_utc = now.isoformat() + "Z"
+    total_return_percent = _calculate_total_return_percent(account)
+    available_cash = _format_currency(portfolio.get('cash'))
+    total_account_value = _format_currency(portfolio.get('total_assets'))
+    holdings_detail = _build_holdings_detail(positions)
+    market_prices = _build_market_prices(prices)
+
     return {
+        # Legacy variables (for Default prompt and backward compatibility)
         "account_state": account_state,
         "market_snapshot": market_snapshot,
         "session_context": session_context,
@@ -215,6 +345,14 @@ def _build_prompt_context(
         "news_section": news_section,
         "account_name": account.name,
         "model_name": account.model or "",
+        # New Alpha Arena style variables (for Pro prompt)
+        "runtime_minutes": runtime_minutes,
+        "current_time_utc": current_time_utc,
+        "total_return_percent": total_return_percent,
+        "available_cash": available_cash,
+        "total_account_value": total_account_value,
+        "holdings_detail": holdings_detail,
+        "market_prices": market_prices,
     }
 
 
@@ -333,13 +471,24 @@ def call_ai_for_decision(
     prices: Dict[str, float],
     samples: Optional[List] = None,
     target_symbol: Optional[str] = None,
+    symbols: Optional[List[str]] = None,
 ) -> Optional[Dict]:
-    """Call AI model API to get trading decision"""
+    """Call AI model API to get trading decision
+
+    Args:
+        db: Database session
+        account: Trading account
+        portfolio: Portfolio data
+        prices: Market prices
+        samples: Legacy single-symbol samples (deprecated, use symbols instead)
+        target_symbol: Legacy single symbol (deprecated, use symbols instead)
+        symbols: List of symbols to include sampling data for (preferred method)
+    """
     # Check if this is a default API key
     if _is_default_api_key(account.api_key):
         logger.info(f"Skipping AI trading for account {account.name} - using default API key")
         return None
-    
+
     try:
         news_summary = fetch_latest_news()
         news_section = news_summary if news_summary else "No recent CoinJournal news available."
@@ -355,7 +504,16 @@ def call_ai_for_decision(
             logger.error("Prompt template resolution failed: %s", exc)
             return None
 
-    context = _build_prompt_context(account, portfolio, prices, news_section, samples, target_symbol)
+    # Build context with multi-symbol support
+    if symbols:
+        # New multi-symbol approach
+        from services.sampling_pool import sampling_pool
+        sampling_data = _build_multi_symbol_sampling_data(symbols, sampling_pool)
+        context = _build_prompt_context(account, portfolio, prices, news_section, None, None)
+        context["sampling_data"] = sampling_data
+    else:
+        # Legacy single-symbol approach (backward compatibility)
+        context = _build_prompt_context(account, portfolio, prices, news_section, samples, target_symbol)
 
     try:
         prompt = template.template_text.format_map(SafeDict(context))

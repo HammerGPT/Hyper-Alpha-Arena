@@ -28,23 +28,49 @@ Respond with ONLY a JSON object using this schema:
 
 # Structured prompt inspired by Alpha Arena research
 PRO_PROMPT_TEMPLATE = """=== SESSION CONTEXT ===
-{session_context}
+Runtime: {runtime_minutes} minutes since trading started
+Current UTC time: {current_time_utc}
 
-=== MARKET SNAPSHOT ===
-{market_snapshot}
+=== PORTFOLIO STATE ===
+Current Total Return: {total_return_percent}%
+Available Cash: ${available_cash}
+Current Account Value: ${total_account_value}
 
-=== SAMPLING POOL DATA ===
+Holdings:
+{holdings_detail}
+
+=== MARKET DATA ===
+Current prices (USD):
+{market_prices}
+
+=== INTRADAY PRICE SERIES ===
 {sampling_data}
 
-=== ACCOUNT STATE ===
-{account_state}
-
-=== LATEST CRYPTO NEWS SNIPPET ===
+=== LATEST CRYPTO NEWS ===
 {news_section}
 
-=== DECISION TASK ===
-{decision_task}
+=== TRADING FRAMEWORK ===
+You are a systematic trader operating on Hyper Alpha Arena (sandbox environment, no real funds at risk).
+
+Operational constraints:
+- No pyramiding or position size increases without explicit exit plan
+- Default risk per trade: ≤ 20% of available cash
+- Default stop loss: -5% from entry (adjust based on volatility)
+- Default take profit: +10% from entry (adjust based on signals)
+
+Decision requirements:
+- Choose operation: "buy", "sell", "hold", or "close"
+- For "buy": target_portion_of_balance is % of available cash to deploy (0.0-1.0)
+- For "sell" or "close": target_portion_of_balance is % of position to exit (0.0-1.0)
+- For "hold": keep target_portion_of_balance at 0
+- Never invent trades for symbols not in the market data
+- Keep reasoning concise and signal-focused
+
+Invalidation conditions (default exit triggers):
+- Long position: "If price closes below entry_price * 0.95 on 1-minute basis"
+- Short position: "If price closes above entry_price * 1.05 on 1-minute basis"
 
 === OUTPUT FORMAT ===
+Respond with ONLY a JSON object using this schema:
 {output_format}
 """
