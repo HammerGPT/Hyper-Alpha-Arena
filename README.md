@@ -1,6 +1,6 @@
  # <img width="40" height="40" alt="logo_app" src="https://github.com/user-attachments/assets/911ba846-a08b-4e3e-b119-ec1e78347288" style="vertical-align: middle;" /> Hyper Alpha Arena
 
-> An open-source AI trading competition platform with Hyperliquid integration for real cryptocurrency trading.
+> An open-source AI-powered paper trading platform with simulated cryptocurrency trading and Hyperliquid market data integration.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![GitHub stars](https://img.shields.io/github/stars/HammerGPT/Hyper-Alpha-Arena)](https://github.com/HammerGPT/Hyper-Alpha-Arena/stargazers)
@@ -8,13 +8,13 @@
 
 ## Overview
 
-Hyper Alpha Arena is an advanced AI trading competition platform where multiple Large Language Models (LLMs) compete in live cryptocurrency trading. Inspired by [nof1 Alpha Arena](https://nof1.ai), this platform enables AI models like GPT-5, Claude, Deepseek, and others to autonomously trade crypto assets and compete on a real-time leaderboard.
+Hyper Alpha Arena is an advanced AI-powered paper trading platform where Large Language Models (LLMs) autonomously execute simulated cryptocurrency trading strategies. Inspired by [nof1 Alpha Arena](https://nof1.ai), this platform enables AI models like GPT-5, Claude, Deepseek, and others to make intelligent trading decisions based on real-time market data from Hyperliquid and other exchanges.
 
-**Key Highlight**: Integration with [Hyperliquid](https://hyperliquid.xyz/) for real perpetual futures trading (currently in development).
+**Current Status**: Paper trading with real market data. Real exchange integration for live trading is under development.
 
 ### Project Origin
 
-This project is based on [open-alpha-arena](https://github.com/etrobot/open-alpha-arena) by etrobot. We extend our gratitude to the original author for laying the groundwork. Our fork introduces critical bug fixes, UI enhancements, and most importantly, real trading capabilities through Hyperliquid integration.
+This project is based on [open-alpha-arena](https://github.com/etrobot/open-alpha-arena) by etrobot. We extend our gratitude to the original author for laying the groundwork. Our fork introduces critical bug fixes, UI enhancements, improved AI decision engine, and market data integration from multiple sources including Hyperliquid.
 
 ## Features
 
@@ -26,8 +26,8 @@ This project is based on [open-alpha-arena](https://github.com/etrobot/open-alph
   - Account-specific prompt binding system
   - Default and Pro templates with restore functionality
   - Automatic fallback to default template for unbound accounts
-- **Paper Trading**: Simulated trading environment for testing AI strategies
-- **Real-time Market Data**: Live cryptocurrency price feeds via ccxt
+- **Paper Trading Engine**: Simulated order matching and position management for risk-free strategy testing
+- **Real-time Market Data**: Live cryptocurrency price feeds from Hyperliquid and other exchanges via ccxt
 - **AI Trader Management**: Create and manage multiple AI trading agents
 - **Real-time Trading Triggers**: Event-driven AI trading with configurable strategies
   - Real-time trigger: Execute on every market update
@@ -46,11 +46,11 @@ This project is based on [open-alpha-arena](https://github.com/etrobot/open-alph
 
 ### Upcoming Features
 
-- **Hyperliquid Integration**: Real perpetual futures trading on testnet and mainnet
-- **Real-time WebSocket Data**: Direct market data from Hyperliquid
-- **Advanced Risk Management**: Position limits, leverage controls, stop-loss/take-profit
-- **Competition System**: Leaderboard with risk-adjusted metrics (Sharpe ratio, win rate)
-- **Model Chat Interface**: View AI reasoning and decision explanations
+- **Live Trading Integration**: Real order execution on Hyperliquid testnet and mainnet
+- **Advanced Risk Management**: Position limits, leverage controls, stop-loss/take-profit automation
+- **Multiple Exchange Support**: Live trading on Binance, Bybit, and other major exchanges
+- **Backtesting Framework**: Historical data simulation and strategy optimization
+- **Trade Execution Analytics**: Slippage analysis and execution quality metrics
 
 ## Screenshots
 
@@ -233,54 +233,61 @@ The platform automatically handles model-specific configurations and parameter d
 
 ## Roadmap
 
-### Phase 1: Core Infrastructure (In Progress)
-- [ ] Complete Hyperliquid Python SDK integration
-- [ ] Implement testnet trading engine
-- [ ] Add real-time Hyperliquid WebSocket data
-- [ ] Build comprehensive risk management system
+### Phase 1: Paper Trading Infrastructure (Completed)
+- [✔️] Hyperliquid market data integration (read-only via ccxt)
+- [✔️] Real-time price feeds from multiple exchanges
+- [✔️] AI decision engine with multi-model support (GPT-5, Claude, Deepseek)
+- [✔️] Simulated order matching and execution engine
+- [✔️] Comprehensive logging and monitoring system with 60s refresh intervals
+- [✔️] Manual AI trade trigger API with force operation support
 
-### Phase 2: Trading System Enhancement
-- [ ] Advanced AI decision engine with market context
-- [ ] Multi-model prompt optimization
-- [ ] Decision validation and safety checks
-- [ ] Model performance analytics
+### Phase 2: Live Trading Integration (Current Focus)
+- [ ] Hyperliquid testnet trading with real order execution
+- [ ] Account authentication and API key management for exchanges
+- [ ] Real-time position synchronization with exchange APIs
+- [ ] Advanced risk management with position limits and stop-loss
+- [ ] Production-ready error handling and failover mechanisms
 
-### Phase 3: Competition Features
-- [ ] Real-time leaderboard with risk metrics
-- [ ] Season/round management system
-- [ ] Model chat interface for decision transparency
-- [ ] Historical performance tracking
+### Phase 3: Trading Enhancement (Medium Term)
+- [ ] Multiple exchange support (Binance, Bybit, OKX, etc.)
+- [ ] Historical data backtesting framework
+- [ ] Advanced portfolio management and rebalancing
+- [ ] Trading strategy optimization and A/B testing
 
-### Phase 4: Advanced Features
-- [ ] Multiple exchange support (Binance, Bybit, etc.)
-- [ ] Backtesting framework
-- [ ] User-submitted AI agents
-- [ ] On-chain trade verification
-- [ ] Mobile-responsive UI
+### Phase 4: Advanced Features (Long Term)
+- [ ] User-submitted AI agents marketplace
+- [ ] On-chain trade verification and transparency
+- [ ] Advanced analytics dashboard with custom metrics
+- [ ] Public API for third-party integrations and webhooks
 
 ## Key Improvements Over Original Project
 
-1. **LLM API Compatibility**: Fixed parameter issues for GPT-5, o1, and Deepseek models
-2. **Performance Optimization**: 10x faster account operations (5s to 0.5s)
-3. **Enhanced UI**: Improved interface mimicking Alpha Arena design
-4. **Hyperliquid Integration**: Real trading capabilities (in development)
+1. **LLM API Compatibility**: Fixed parameter issues for GPT-5, o1, and Deepseek models with proper max_completion_tokens handling
+2. **Performance Optimization**: 10x faster account operations (5s to 0.5s) and reduced API call frequency (95% reduction from 3s to 60s intervals)
+3. **Enhanced UI**: Improved interface inspired by Alpha Arena with modern design patterns
+4. **Market Data Integration**: Real-time price feeds from Hyperliquid and multiple exchanges via ccxt
 5. **System Logging & Monitoring**: Comprehensive real-time logging system
-   - In-memory log collector (500 entries)
-   - Auto-categorization (price updates, AI decisions, errors)
-   - Frontend dashboard with filtering and auto-refresh
-   - Price snapshot tracking every 60 seconds
+   - In-memory log collector (500 entries with automatic rotation)
+   - Auto-categorization (price updates, AI decisions, errors, warnings)
+   - Frontend dashboard with filtering and 60-second auto-refresh
+   - Price snapshot tracking with database persistence
 6. **Critical Bug Fixes**:
    - Fixed race condition in trading strategy manager causing AI traders to freeze
    - Resolved state management issues preventing real-time triggers
-   - Corrected API trailing slash issues in frontend
-   - Fixed FastAPI type annotation errors
-7. **Real-time Trading Triggers**: Event-driven strategy execution with configurable modes
-8. **Database Enhancements**: Added snapshot fields for AI decision debugging (prompt, reasoning, decision)
-9. **Prompt Template Management System**: Complete customizable prompt system
-   - Visual template editor with real-time preview
-   - Account-specific prompt binding with automatic fallback
-   - Default and Pro templates for different trading strategies
-   - Template versioning and restore functionality
+   - Corrected API trailing slash issues in frontend requests
+   - Fixed FastAPI type annotation errors for Python 3.8+ compatibility
+   - Improved JSON parsing with better error handling and regex fallback
+7. **Real-time Trading Triggers**: Event-driven strategy execution with three configurable modes
+   - Real-time: Execute on every market update
+   - Interval: Execute at fixed time intervals
+   - Tick batch: Execute after N price updates
+8. **Database Enhancements**: Added snapshot fields for AI decision debugging (full prompt, reasoning chain, final decision)
+9. **Prompt Template Management System**: Professional prompt engineering interface
+   - Visual template editor with real-time multi-symbol preview
+   - Account-specific prompt binding with automatic fallback to default
+   - Default and Pro templates optimized for different risk profiles
+   - Template versioning and one-click restore functionality
+10. **Manual Trade Trigger API**: New endpoint for programmatic AI trading control with force operation support
 
 ## Troubleshooting
 
@@ -335,9 +342,9 @@ Please star and fork this repository to stay updated with development progress.
 
 ## Resources
 
-### Official Alpha Arena
+### Alpha Arena (Inspiration)
 - Website: https://nof1.ai/leaderboard
-- Season 1 Results: DeepSeek +35%, GPT-5 -27%, Gemini -33%
+- Research: AI trading model performance analysis
 
 ### Hyperliquid
 - Official Docs: https://hyperliquid.gitbook.io/
@@ -352,8 +359,8 @@ Please star and fork this repository to stay updated with development progress.
 This project is developed and maintained by **Heliki AI Community**.
 
 - Website: https://www.heliki.com/
-- Focus: AI trading research and practical applications
-- Community: 2+ years of AI practitioner collaboration
+- Focus: AI-powered trading tools and practical applications
+- Community: 2+ years of AI trading research and development
 
 ## License
 
@@ -370,7 +377,7 @@ When using this software, please include attribution to Heliki AI Community in y
 
 ## Disclaimer
 
-This software is for educational and research purposes. Cryptocurrency trading carries significant risk. Always conduct thorough testing on testnet before using real funds. The developers are not responsible for any financial losses incurred through the use of this software.
+This software is currently a paper trading simulation platform for educational and research purposes only. All trades are simulated and no real funds are at risk. When live trading features are implemented in future versions, cryptocurrency trading will carry significant financial risk. Users will be solely responsible for their trading decisions and any financial outcomes. The developers assume no liability for trading losses, system failures, or data inaccuracies. Always conduct thorough testing on exchange testnets before deploying any real capital.
 
 ---
 

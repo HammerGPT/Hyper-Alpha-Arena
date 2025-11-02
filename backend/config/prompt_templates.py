@@ -73,4 +73,28 @@ Invalidation conditions (default exit triggers):
 === OUTPUT FORMAT ===
 Respond with ONLY a JSON object using this schema:
 {output_format}
+
+CRITICAL OUTPUT REQUIREMENTS:
+- Output MUST be a single, valid JSON object only
+- NO markdown code blocks (no ```json``` wrappers)
+- NO explanatory text before or after the JSON
+- NO comments or additional content outside the JSON object
+- Ensure all JSON fields are properly quoted and formatted
+- Double-check JSON syntax before responding
+
+Example of correct output:
+{{
+  "operation": "hold",
+  "symbol": "BTC",
+  "target_portion_of_balance": 0.0,
+  "reason": "Market consolidation with mixed signals",
+  "trading_strategy": "Waiting for clearer directional momentum. Current volatility suggests risk of false breakouts. Will reassess on volume confirmation or technical pattern completion."
+}}
+
+FIELD TYPE REQUIREMENTS:
+- operation: string (exactly "buy", "sell", "hold", or "close")
+- symbol: string (exactly one of: BTC, ETH, SOL, BNB, XRP, DOGE)
+- target_portion_of_balance: number (float between 0.0 and 1.0)
+- reason: string (maximum 150 characters)
+- trading_strategy: string (2-3 complete sentences)
 """

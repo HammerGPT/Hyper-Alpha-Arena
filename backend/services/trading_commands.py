@@ -106,8 +106,8 @@ def place_ai_driven_crypto_order(max_ratio: float = 0.2, account_ids: Optional[I
         # Handle single account strategy trigger
         if account_id is not None:
             account = db.query(Account).filter(Account.id == account_id).first()
-            if not account or account.is_active != "true":
-                logger.debug(f"Account {account_id} not found or inactive, skipping AI trading")
+            if not account or account.is_active != "true" or account.auto_trading_enabled != "true":
+                logger.debug(f"Account {account_id} not found, inactive, or auto trading disabled, skipping AI trading")
                 return
             accounts = [account]
         else:

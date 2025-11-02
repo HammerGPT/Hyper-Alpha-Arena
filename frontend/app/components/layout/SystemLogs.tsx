@@ -115,7 +115,7 @@ export default function SystemLogs() {
         } else if (activeTab === 'sampling') {
           fetchSamplingPool()
         }
-      }, 3000) // Refresh every 3 seconds
+      }, 60000) // Refresh every 60 seconds
     } else {
       if (refreshIntervalRef.current) {
         clearInterval(refreshIntervalRef.current)
