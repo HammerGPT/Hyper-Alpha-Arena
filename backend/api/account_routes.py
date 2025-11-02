@@ -96,7 +96,12 @@ async def list_all_accounts(status: str = "active", db: Session = Depends(get_db
                 "base_url": account.base_url,
                 "api_key": account.api_key,
                 "is_active": account.is_active == "true",
-                "auto_trading_enabled": account.auto_trading_enabled == "true"
+                "auto_trading_enabled": account.auto_trading_enabled == "true",
+                # Phase 2: Live Trading Support
+                "trading_mode": account.trading_mode if hasattr(account, 'trading_mode') and account.trading_mode else "PAPER",
+                "exchange": account.exchange if hasattr(account, 'exchange') else None,
+                "wallet_address": account.wallet_address if hasattr(account, 'wallet_address') else None,
+                "testnet_enabled": account.testnet_enabled if hasattr(account, 'testnet_enabled') and account.testnet_enabled else "true"
             })
         
         return result

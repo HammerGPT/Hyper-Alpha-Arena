@@ -517,6 +517,33 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
                           <div className="text-xs text-muted-foreground">
                             Cash: ${account.current_cash?.toLocaleString() || '0'}
                           </div>
+                          {/* Phase 2: Trading Mode Display */}
+                          <div className="flex items-center gap-2 mt-2">
+                            {account.trading_mode && (
+                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                account.trading_mode === 'LIVE'
+                                  ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400 border border-orange-200 dark:border-orange-800'
+                                  : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border border-green-200 dark:border-green-800'
+                              }`}>
+                                {account.trading_mode}
+                              </span>
+                            )}
+                            {account.exchange && (
+                              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
+                                {account.exchange}
+                              </span>
+                            )}
+                            {account.testnet_enabled === 'true' && (
+                              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400 border border-purple-200 dark:border-purple-800">
+                                TESTNET
+                              </span>
+                            )}
+                          </div>
+                          {account.wallet_address && (
+                            <div className="text-xs text-muted-foreground truncate mt-1">
+                              Wallet: {account.wallet_address.slice(0, 6)}...{account.wallet_address.slice(-4)}
+                            </div>
+                          )}
                         </div>
                         <div className="flex items-center gap-2">
                           <Button

@@ -155,6 +155,11 @@ export interface TradingAccount {
   account_type: string  // "AI" or "MANUAL"
   is_active: boolean
   auto_trading_enabled?: boolean
+  // Phase 2: Live Trading Support
+  trading_mode?: string  // "PAPER" | "LIVE"
+  exchange?: string | null  // "HYPERLIQUID"
+  wallet_address?: string | null  // Wallet address for exchange
+  testnet_enabled?: string  // "true" | "false"
 }
 
 export interface TradingAccountCreate {
@@ -232,6 +237,29 @@ export interface PromptBindingUpsertRequest {
   accountId: number
   promptTemplateId: number
   updatedBy?: string
+}
+
+// Order & Trade interfaces
+export interface Order {
+  id: number
+  order_no: string
+  user_id: number
+  symbol: string
+  name: string
+  market: string
+  side: string
+  order_type: string
+  price?: number
+  quantity: number
+  filled_quantity: number
+  status: string
+  // Phase 1: Paper Trading Enhancements
+  slippage?: number | null
+  rejection_reason?: string | null
+  // Phase 2: Live Trading Support
+  exchange_order_id?: string | null
+  exchange?: string | null
+  actual_fill_price?: number | null
 }
 
 export async function getPromptTemplates(): Promise<PromptListResponse> {

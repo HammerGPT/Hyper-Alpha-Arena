@@ -23,6 +23,7 @@ dev-dependencies = [
     "pytest",
     "black",
     "ruff",
+    "httpx>=0.28.1",
 ]
 
 [tool.hatch.build.targets.wheel]

@@ -553,6 +553,36 @@ export default function AlphaArenaFeed({
                             </div>
                           </div>
                         )}
+                        {/* Phase 1: Rejection Reason */}
+                        {trade.rejection_reason && (
+                          <div className="mt-1 pt-1 border-t border-border/50">
+                            <div className="text-xs">
+                              <span className="text-red-600 font-medium">Rejected:</span>
+                              <span className="text-muted-foreground ml-1">{trade.rejection_reason}</span>
+                            </div>
+                          </div>
+                        )}
+                        {/* Phase 2: Exchange Info */}
+                        {trade.exchange && (
+                          <div className="mt-1 pt-1 border-t border-border/50 space-y-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-muted-foreground">Exchange:</span>
+                              <span className="font-medium text-blue-600">{trade.exchange}</span>
+                            </div>
+                            {trade.exchange_order_id && (
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-muted-foreground">Order ID:</span>
+                                <span className="font-mono text-xs">{trade.exchange_order_id}</span>
+                              </div>
+                            )}
+                            {trade.actual_fill_price && (
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-muted-foreground">Fill Price:</span>
+                                <span className="font-medium">${trade.actual_fill_price.toFixed(2)}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
                         </div>
                       </HighlightWrapper>
                     )

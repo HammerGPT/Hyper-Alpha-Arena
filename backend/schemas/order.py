@@ -45,6 +45,13 @@ class OrderOut(BaseModel):
     quantity: int
     filled_quantity: int
     status: str
+    # Phase 1: Paper Trading Enhancements
+    slippage: Optional[float] = None  # Simulated slippage percentage
+    rejection_reason: Optional[str] = None  # Reason if order was rejected
+    # Phase 2: Live Trading Support
+    exchange_order_id: Optional[str] = None  # Exchange-assigned order ID
+    exchange: Optional[str] = None  # Which exchange (HYPERLIQUID)
+    actual_fill_price: Optional[float] = None  # Actual fill price from exchange
 
     class Config:
         from_attributes = True

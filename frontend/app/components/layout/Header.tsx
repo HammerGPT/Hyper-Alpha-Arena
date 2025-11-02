@@ -15,6 +15,7 @@ interface Account {
   initial_capital: number
   current_cash: number
   frozen_cash: number
+  trading_mode?: string  // "PAPER" | "LIVE"
 }
 
 interface HeaderProps {
