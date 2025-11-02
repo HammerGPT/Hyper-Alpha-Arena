@@ -437,6 +437,9 @@ export interface ArenaTrade {
   notional: number
   commission: number
   trade_time?: string | null
+  slippage?: number | null  // Slippage percentage from paper trading simulation
+  rejection_reason?: string | null  // Reason if order was rejected
+  order_status?: string | null  // Order status (FILLED, PARTIALLY_FILLED, REJECTED)
 }
 
 export interface ArenaTradesResponse {

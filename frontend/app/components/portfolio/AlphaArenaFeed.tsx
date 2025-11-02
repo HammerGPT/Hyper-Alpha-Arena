@@ -539,6 +539,20 @@ export default function AlphaArenaFeed({
                             </span>
                           </div>
                         </div>
+                        {trade.slippage !== null && trade.slippage !== undefined && (
+                          <div className="mt-1 pt-1 border-t border-border/50">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-muted-foreground">Slippage:</span>
+                              <span className={`font-medium ${
+                                trade.slippage > 0.0005
+                                  ? 'text-orange-600'
+                                  : 'text-green-600'
+                              }`}>
+                                {formatPercent(trade.slippage)}
+                              </span>
+                            </div>
+                          </div>
+                        )}
                         </div>
                       </HighlightWrapper>
                     )

@@ -232,10 +232,16 @@ def get_completed_trades(
         notional = price * quantity
 
         order_no = None
+        slippage = None
+        rejection_reason = None
+        order_status = None
         if trade.order_id:
             order = db.query(Order).filter(Order.id == trade.order_id).first()
             if order:
                 order_no = order.order_no
+                slippage = float(order.slippage) if order.slippage else None
+                rejection_reason = order.rejection_reason
+                order_status = order.status
 
         trades.append(
             {
@@ -254,6 +260,9 @@ def get_completed_trades(
                 "notional": notional,
                 "commission": float(trade.commission),
                 "trade_time": trade.trade_time.isoformat() if trade.trade_time else None,
+                "slippage": slippage,
+                "rejection_reason": rejection_reason,
+                "order_status": order_status,
             }
         )
 

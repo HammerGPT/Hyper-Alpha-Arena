@@ -118,6 +118,8 @@ class Order(Base):
     quantity = Column(DECIMAL(18, 8), nullable=False)  # Support fractional crypto amounts
     filled_quantity = Column(DECIMAL(18, 8), nullable=False, default=0)
     status = Column(String(20), nullable=False)
+    slippage = Column(DECIMAL(10, 6), nullable=True)  # Slippage percentage (e.g., 0.0005 = 0.05%)
+    rejection_reason = Column(String(200), nullable=True)  # Reason if order is rejected
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(
         TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
