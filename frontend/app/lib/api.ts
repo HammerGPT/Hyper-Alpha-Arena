@@ -362,8 +362,8 @@ export async function deleteTradingAccount(accountId: number, sessionToken: stri
 
 // Account functions for paper trading with hardcoded user
 // Note: Backend initializes default user on startup, frontend just queries the endpoints
-export async function getAccounts(): Promise<TradingAccount[]> {
-  const response = await apiRequest('/account/list')
+export async function getAccounts(status: 'active' | 'archived' | 'all' = 'active'): Promise<TradingAccount[]> {
+  const response = await apiRequest(`/account/list?status=${status}`)
   return response.json()
 }
 
@@ -398,6 +398,27 @@ export async function updateAccount(accountId: number, account: TradingAccountUp
       api_key: account.api_key,
       auto_trading_enabled: account.auto_trading_enabled,
     })
+  })
+  return response.json()
+}
+
+export async function archiveAccount(accountId: number): Promise<{ message: string }> {
+  const response = await apiRequest(`/account/${accountId}/archive`, {
+    method: 'POST',
+  })
+  return response.json()
+}
+
+export async function restoreAccount(accountId: number): Promise<{ message: string }> {
+  const response = await apiRequest(`/account/${accountId}/restore`, {
+    method: 'POST',
+  })
+  return response.json()
+}
+
+export async function permanentlyDeleteAccount(accountId: number): Promise<{ message: string }> {
+  const response = await apiRequest(`/account/${accountId}/permanent`, {
+    method: 'DELETE',
   })
   return response.json()
 }
