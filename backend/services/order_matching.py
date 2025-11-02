@@ -365,45 +365,54 @@ def _execute_order(
         from repositories.position_repo import list_positions
 
         try:
-            # Broadcast trade update
-            asyncio.create_task(broadcast_trade_update({
-                "trade_id": trade.id,
-                "account_id": account.id,
-                "account_name": account.name,
-                "symbol": trade.symbol,
-                "name": trade.name,
-                "market": trade.market,
-                "side": trade.side,
-                "price": float(execution_price),
-                "quantity": float(quantity),
-                "commission": float(commission),
-                "notional": float(notional),
-                "trade_time": trade.trade_time.isoformat() if hasattr(trade.trade_time, 'isoformat') else str(trade.trade_time),
-                "direction": trade.side  # For frontend compatibility
-            }))
+            # Check if there's a running event loop (required for async tasks)
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                # No event loop running, skip WebSocket broadcast
+                logger.debug(f"No event loop available for WebSocket broadcast of order {order.order_no}")
+                loop = None
 
-            # Broadcast position update
-            positions = list_positions(db, account.id)
-            positions_data = [
-                {
-                    "id": p.id,
-                    "account_id": p.account_id,
-                    "symbol": p.symbol,
-                    "name": p.name,
-                    "market": p.market,
-                    "quantity": float(p.quantity),
-                    "available_quantity": float(p.available_quantity),
-                    "avg_cost": float(p.avg_cost),
-                    "last_price": None,  # Will be updated by frontend
-                    "market_value": None  # Will be updated by frontend
-                }
-                for p in positions
-            ]
-            asyncio.create_task(broadcast_position_update(account.id, positions_data))
+            if loop:
+                # Broadcast trade update
+                asyncio.create_task(broadcast_trade_update({
+                    "trade_id": trade.id,
+                    "account_id": account.id,
+                    "account_name": account.name,
+                    "symbol": trade.symbol,
+                    "name": trade.name,
+                    "market": trade.market,
+                    "side": trade.side,
+                    "price": float(execution_price),
+                    "quantity": float(quantity),
+                    "commission": float(commission),
+                    "notional": float(notional),
+                    "trade_time": trade.trade_time.isoformat() if hasattr(trade.trade_time, 'isoformat') else str(trade.trade_time),
+                    "direction": trade.side  # For frontend compatibility
+                }))
+
+                # Broadcast position update
+                positions = list_positions(db, account.id)
+                positions_data = [
+                    {
+                        "id": p.id,
+                        "account_id": p.account_id,
+                        "symbol": p.symbol,
+                        "name": p.name,
+                        "market": p.market,
+                        "quantity": float(p.quantity),
+                        "available_quantity": float(p.available_quantity),
+                        "avg_cost": float(p.avg_cost),
+                        "last_price": None,  # Will be updated by frontend
+                        "market_value": None  # Will be updated by frontend
+                    }
+                    for p in positions
+                ]
+                asyncio.create_task(broadcast_position_update(account.id, positions_data))
 
         except Exception as broadcast_err:
             # Don't fail the order execution if broadcast fails
-            logger.warning(f"Failed to broadcast updates for order {order.order_no}: {broadcast_err}")
+            logger.debug(f"WebSocket broadcast skipped for order {order.order_no}: {broadcast_err}")
 
         return True
 
