@@ -147,8 +147,8 @@ def place_ai_driven_crypto_order(max_ratio: float = 0.2, account_ids: Optional[I
             try:
                 logger.info(f"Processing AI trading for account: {account.name}")
 
-                # Get portfolio data for this account
-                portfolio = _get_portfolio_data(db, account)
+                # Get portfolio data for this account (with current market prices)
+                portfolio = _get_portfolio_data(db, account, prices)
 
                 if portfolio['total_assets'] <= 0:
                     logger.debug(f"Account {account.name} has non-positive total assets, skipping")

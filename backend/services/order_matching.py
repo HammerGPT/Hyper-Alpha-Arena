@@ -1,6 +1,6 @@
 """
 Order matching service
-Implements conditional execution logic for limit orders
+Implements conditional execution logic for limit orders with enhanced paper trading simulations
 """
 
 import uuid
@@ -11,6 +11,7 @@ import logging
 
 from database.models import Order, Position, Trade, Account, User, CRYPTO_MIN_COMMISSION, CRYPTO_COMMISSION_RATE, CRYPTO_MIN_ORDER_QUANTITY, CRYPTO_LOT_SIZE
 from .market_data import get_last_price
+from .paper_trading_engine import paper_trading_engine
 
 logger = logging.getLogger(__name__)
 
@@ -117,22 +118,29 @@ def create_order(db: Session, account: Account, symbol: str, name: str,
 
 def check_and_execute_order(db: Session, order: Order) -> bool:
     """
-    Check and execute limit order
+    Check and execute limit order with enhanced paper trading simulations
 
     Execution conditions:
     - Buy: order price >= current market price and sufficient funds
     - Sell: order price <= current market price and sufficient positions
+
+    Paper trading enhancements:
+    - Realistic slippage (0.01-0.1% based on order size)
+    - Execution latency (50-200ms)
+    - Partial fills for large orders (>$10k)
+    - Random order rejections (2% base rate)
+    - Liquidity constraints (max $100k per order)
 
     Args:
         db: Database session
         order: Order to check
 
     Returns:
-        Whether order was executed
+        Whether order was executed (fully or partially)
     """
     if order.status != "PENDING":
         return False
-    
+
     # Check if cookie is configured, skip order checking if not
     try:
         # Get current market price
@@ -174,8 +182,41 @@ def check_and_execute_order(db: Session, order: Order) -> bool:
             logger.debug(f"Order {order.order_no} does not meet execution condition: {order.side} {order.price} vs market {current_price}")
             return False
 
-        # Execute order
-        return _execute_order(db, order, account, execution_price)
+        # Enhanced paper trading simulation
+        simulation_result = paper_trading_engine.simulate_order_execution(
+            symbol=order.symbol,
+            side=order.side,
+            order_type=order.order_type,
+            quantity=Decimal(str(order.quantity)),
+            current_price=current_price_decimal,
+            limit_price=Decimal(str(order.price)) if order.price else None
+        )
+
+        # Handle rejection
+        if simulation_result.status == "REJECTED":
+            order.status = "REJECTED"
+            order.rejection_reason = simulation_result.rejection_reason
+            db.commit()
+            logger.info(f"Order {order.order_no} rejected: {simulation_result.rejection_reason}")
+            return False
+
+        # Use simulated execution price and quantity
+        execution_price = simulation_result.execution_price
+        filled_quantity = simulation_result.filled_quantity
+
+        # Handle partial fills
+        if simulation_result.status == "PARTIALLY_FILLED":
+            logger.info(f"Order {order.order_no} partially filled: {float(filled_quantity)}/{order.quantity}")
+
+        # Execute order with simulated parameters
+        return _execute_order(
+            db=db,
+            order=order,
+            account=account,
+            execution_price=execution_price,
+            filled_quantity=filled_quantity,
+            slippage=simulation_result.slippage
+        )
 
     except Exception as e:
         logger.error(f"Error checking order {order.order_no}: {e}")
@@ -191,21 +232,31 @@ def _release_frozen_on_fill(account: Account, order: Order, execution_price: Dec
         account.frozen_cash = float(max(Decimal(str(account.frozen_cash)) - frozen_to_release, Decimal('0')))
 
 
-def _execute_order(db: Session, order: Order, account: Account, execution_price: Decimal) -> bool:
+def _execute_order(
+    db: Session,
+    order: Order,
+    account: Account,
+    execution_price: Decimal,
+    filled_quantity: Optional[Decimal] = None,
+    slippage: Optional[Decimal] = None
+) -> bool:
     """
-    Execute order fill
+    Execute order fill with optional paper trading parameters
 
     Args:
         db: Database session
         order: Order object
         account: Account object
-        execution_price: Execution price
+        execution_price: Execution price (may include simulated slippage)
+        filled_quantity: Quantity filled (may be partial). If None, uses full order quantity
+        slippage: Slippage percentage (for paper trading tracking)
 
     Returns:
         Whether execution was successful
     """
     try:
-        quantity = Decimal(str(order.quantity))  # Ensure quantity is Decimal
+        # Use filled_quantity if provided, otherwise full order quantity
+        quantity = filled_quantity if filled_quantity is not None else Decimal(str(order.quantity))
         notional = execution_price * quantity
         commission = _calc_commission(notional)
         
@@ -290,10 +341,19 @@ def _execute_order(db: Session, order: Order, account: Account, execution_price:
 
         # Release frozen (BUY)
         _release_frozen_on_fill(account, order, execution_price, commission)
-        
-        # Update order status
+
+        # Update order status and paper trading metadata
         order.filled_quantity = float(quantity)
-        order.status = "FILLED"
+
+        # Set status based on fill completeness
+        if quantity >= Decimal(str(order.quantity)):
+            order.status = "FILLED"
+        else:
+            order.status = "PARTIALLY_FILLED"
+
+        # Store slippage for paper trading analysis
+        if slippage is not None:
+            order.slippage = float(slippage)
 
         db.commit()
 
@@ -305,45 +365,54 @@ def _execute_order(db: Session, order: Order, account: Account, execution_price:
         from repositories.position_repo import list_positions
 
         try:
-            # Broadcast trade update
-            asyncio.create_task(broadcast_trade_update({
-                "trade_id": trade.id,
-                "account_id": account.id,
-                "account_name": account.name,
-                "symbol": trade.symbol,
-                "name": trade.name,
-                "market": trade.market,
-                "side": trade.side,
-                "price": float(execution_price),
-                "quantity": float(quantity),
-                "commission": float(commission),
-                "notional": float(notional),
-                "trade_time": trade.trade_time.isoformat() if hasattr(trade.trade_time, 'isoformat') else str(trade.trade_time),
-                "direction": trade.side  # For frontend compatibility
-            }))
+            # Check if there's a running event loop (required for async tasks)
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                # No event loop running, skip WebSocket broadcast
+                logger.debug(f"No event loop available for WebSocket broadcast of order {order.order_no}")
+                loop = None
 
-            # Broadcast position update
-            positions = list_positions(db, account.id)
-            positions_data = [
-                {
-                    "id": p.id,
-                    "account_id": p.account_id,
-                    "symbol": p.symbol,
-                    "name": p.name,
-                    "market": p.market,
-                    "quantity": float(p.quantity),
-                    "available_quantity": float(p.available_quantity),
-                    "avg_cost": float(p.avg_cost),
-                    "last_price": None,  # Will be updated by frontend
-                    "market_value": None  # Will be updated by frontend
-                }
-                for p in positions
-            ]
-            asyncio.create_task(broadcast_position_update(account.id, positions_data))
+            if loop:
+                # Broadcast trade update
+                asyncio.create_task(broadcast_trade_update({
+                    "trade_id": trade.id,
+                    "account_id": account.id,
+                    "account_name": account.name,
+                    "symbol": trade.symbol,
+                    "name": trade.name,
+                    "market": trade.market,
+                    "side": trade.side,
+                    "price": float(execution_price),
+                    "quantity": float(quantity),
+                    "commission": float(commission),
+                    "notional": float(notional),
+                    "trade_time": trade.trade_time.isoformat() if hasattr(trade.trade_time, 'isoformat') else str(trade.trade_time),
+                    "direction": trade.side  # For frontend compatibility
+                }))
+
+                # Broadcast position update
+                positions = list_positions(db, account.id)
+                positions_data = [
+                    {
+                        "id": p.id,
+                        "account_id": p.account_id,
+                        "symbol": p.symbol,
+                        "name": p.name,
+                        "market": p.market,
+                        "quantity": float(p.quantity),
+                        "available_quantity": float(p.available_quantity),
+                        "avg_cost": float(p.avg_cost),
+                        "last_price": None,  # Will be updated by frontend
+                        "market_value": None  # Will be updated by frontend
+                    }
+                    for p in positions
+                ]
+                asyncio.create_task(broadcast_position_update(account.id, positions_data))
 
         except Exception as broadcast_err:
             # Don't fail the order execution if broadcast fails
-            logger.warning(f"Failed to broadcast updates for order {order.order_no}: {broadcast_err}")
+            logger.debug(f"WebSocket broadcast skipped for order {order.order_no}: {broadcast_err}")
 
         return True
 

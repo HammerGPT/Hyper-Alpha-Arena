@@ -54,8 +54,8 @@ class ConnectionManager:
                     continue
                 await ws.send_text(payload)
             except Exception as e:
-                # Log the error and remove broken connection
-                logging.warning(f"Failed to send message to WebSocket: {e}")
+                # Log the error and remove broken connection (expected when clients disconnect)
+                logging.debug(f"WebSocket connection dropped (account_id={account_id}): {type(e).__name__}: {e}")
                 self.active_connections[account_id].discard(ws)
 
     async def broadcast_to_all(self, message: dict):
@@ -70,8 +70,8 @@ class ConnectionManager:
                         continue
                     await ws.send_text(payload)
                 except Exception as e:
-                    # Log the error and remove broken connection
-                    logging.warning(f"Failed to broadcast message to WebSocket: {e}")
+                    # Log the error and remove broken connection (expected when clients disconnect)
+                    logging.debug(f"WebSocket connection dropped (account_id={account_id}): {type(e).__name__}: {e}")
                     websockets.discard(ws)
 
     def has_connections(self) -> bool:
