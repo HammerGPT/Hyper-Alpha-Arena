@@ -873,11 +873,10 @@ def save_ai_decision(db: Session, account: Account, decision: Dict, portfolio: D
         )
 
         # Broadcast AI decision update via WebSocket
-        import asyncio
-        from api.ws import broadcast_model_chat_update
+        from api.ws import manager, broadcast_model_chat_update
 
         try:
-            asyncio.create_task(broadcast_model_chat_update({
+            manager.schedule_task(broadcast_model_chat_update({
                 "id": decision_log.id,
                 "account_id": account.id,
                 "account_name": account.name,

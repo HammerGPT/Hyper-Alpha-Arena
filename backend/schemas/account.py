@@ -33,6 +33,12 @@ class AccountOut(BaseModel):
     frozen_cash: float
     account_type: str
     is_active: bool
+    # Phase 2: Live Trading Support
+    trading_mode: str = "PAPER"  # PAPER | LIVE
+    exchange: Optional[str] = None  # HYPERLIQUID
+    wallet_address: Optional[str] = None  # For Hyperliquid wallet-based auth
+    testnet_enabled: str = "true"  # true | false
+    # Note: exchange_api_key/secret not exposed (defer to Phase 3)
 
     class Config:
         from_attributes = True

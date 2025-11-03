@@ -36,23 +36,35 @@ class Account(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     version = Column(String(100), nullable=False, default="v1")
-    
+
     # Account Identity
     name = Column(String(100), nullable=False)  # Display name (e.g., "GPT Trader", "Claude Analyst")
     account_type = Column(String(20), nullable=False, default="AI")  # "AI" or "MANUAL"
     is_active = Column(String(10), nullable=False, default="true")
     auto_trading_enabled = Column(String(10), nullable=False, default="true")
-    
+
     # AI Model Configuration (for AI accounts)
     model = Column(String(100), nullable=True, default="gpt-4")  # AI model name
     base_url = Column(String(500), nullable=True, default="https://api.openai.com/v1")  # API endpoint
     api_key = Column(String(500), nullable=True)  # API key for authentication
-    
+
+    # Trading Mode & Exchange (Phase 2: Live Trading Support)
+    trading_mode = Column(String(10), nullable=False, default="PAPER")  # "PAPER" or "LIVE"
+    exchange = Column(String(20), nullable=False, default="HYPERLIQUID")  # Exchange name
+    exchange_api_key = Column(String(500), nullable=True)  # Exchange API key (encrypted)
+    exchange_api_secret = Column(String(500), nullable=True)  # Exchange API secret (encrypted)
+    wallet_address = Column(String(100), nullable=True)  # Wallet address for Hyperliquid (main wallet)
+    testnet_enabled = Column(String(10), nullable=False, default="true")  # Use testnet for live trading
+
+    # API Wallet (Phase 2B: MetaMask Integration)
+    api_wallet_address = Column(String(100), nullable=True)  # API wallet address (delegated for trading)
+    api_wallet_registered_at = Column(TIMESTAMP, nullable=True)  # When API wallet was registered
+
     # Trading Account Balances (USD for CRYPTO market)
     initial_capital = Column(DECIMAL(18, 2), nullable=False, default=10000.00)
     current_cash = Column(DECIMAL(18, 2), nullable=False, default=10000.00)
     frozen_cash = Column(DECIMAL(18, 2), nullable=False, default=0.00)
-    
+
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(
         TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
@@ -118,6 +130,14 @@ class Order(Base):
     quantity = Column(DECIMAL(18, 8), nullable=False)  # Support fractional crypto amounts
     filled_quantity = Column(DECIMAL(18, 8), nullable=False, default=0)
     status = Column(String(20), nullable=False)
+    slippage = Column(DECIMAL(10, 6), nullable=True)  # Slippage percentage (e.g., 0.0005 = 0.05%)
+    rejection_reason = Column(String(200), nullable=True)  # Reason if order is rejected
+
+    # Phase 2: Live Trading Exchange Integration
+    exchange_order_id = Column(String(100), nullable=True)  # Exchange-assigned order ID
+    exchange = Column(String(20), nullable=True)  # Which exchange this order was placed on
+    actual_fill_price = Column(DECIMAL(18, 6), nullable=True)  # Actual fill price from exchange
+
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(
         TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
@@ -330,6 +350,26 @@ class AccountPromptBinding(Base):
 
     account = relationship("Account", back_populates="prompt_binding")
     prompt_template = relationship("PromptTemplate", back_populates="account_bindings")
+
+
+class ExchangeConfig(Base):
+    """Exchange configuration for live trading"""
+    __tablename__ = "exchange_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    exchange = Column(String(20), nullable=False)  # e.g., "HYPERLIQUID", "BINANCE"
+    environment = Column(String(10), nullable=False)  # "TESTNET" or "MAINNET"
+    api_endpoint = Column(String(200), nullable=False)  # REST API endpoint
+    ws_endpoint = Column(String(200), nullable=True)  # WebSocket endpoint
+    commission_rate = Column(Float, nullable=False)  # e.g., 0.00025 for 0.025%
+    min_commission = Column(Float, nullable=False)  # Minimum commission in USD
+    max_leverage = Column(Integer, nullable=True)  # Maximum leverage allowed
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at = Column(
+        TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
+    )
+
+    __table_args__ = (UniqueConstraint('exchange', 'environment'),)
 
 
 # CRYPTO market trading configuration constants

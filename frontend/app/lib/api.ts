@@ -155,6 +155,11 @@ export interface TradingAccount {
   account_type: string  // "AI" or "MANUAL"
   is_active: boolean
   auto_trading_enabled?: boolean
+  // Phase 2: Live Trading Support
+  trading_mode?: string  // "PAPER" | "LIVE"
+  exchange?: string | null  // "HYPERLIQUID"
+  wallet_address?: string | null  // Wallet address for exchange
+  testnet_enabled?: string  // "true" | "false"
 }
 
 export interface TradingAccountCreate {
@@ -232,6 +237,29 @@ export interface PromptBindingUpsertRequest {
   accountId: number
   promptTemplateId: number
   updatedBy?: string
+}
+
+// Order & Trade interfaces
+export interface Order {
+  id: number
+  order_no: string
+  user_id: number
+  symbol: string
+  name: string
+  market: string
+  side: string
+  order_type: string
+  price?: number
+  quantity: number
+  filled_quantity: number
+  status: string
+  // Phase 1: Paper Trading Enhancements
+  slippage?: number | null
+  rejection_reason?: string | null
+  // Phase 2: Live Trading Support
+  exchange_order_id?: string | null
+  exchange?: string | null
+  actual_fill_price?: number | null
 }
 
 export async function getPromptTemplates(): Promise<PromptListResponse> {
@@ -362,8 +390,8 @@ export async function deleteTradingAccount(accountId: number, sessionToken: stri
 
 // Account functions for paper trading with hardcoded user
 // Note: Backend initializes default user on startup, frontend just queries the endpoints
-export async function getAccounts(): Promise<TradingAccount[]> {
-  const response = await apiRequest('/account/list')
+export async function getAccounts(status: 'active' | 'archived' | 'all' = 'active'): Promise<TradingAccount[]> {
+  const response = await apiRequest(`/account/list?status=${status}`)
   return response.json()
 }
 
@@ -398,6 +426,27 @@ export async function updateAccount(accountId: number, account: TradingAccountUp
       api_key: account.api_key,
       auto_trading_enabled: account.auto_trading_enabled,
     })
+  })
+  return response.json()
+}
+
+export async function archiveAccount(accountId: number): Promise<{ message: string }> {
+  const response = await apiRequest(`/account/${accountId}/archive`, {
+    method: 'POST',
+  })
+  return response.json()
+}
+
+export async function restoreAccount(accountId: number): Promise<{ message: string }> {
+  const response = await apiRequest(`/account/${accountId}/restore`, {
+    method: 'POST',
+  })
+  return response.json()
+}
+
+export async function permanentlyDeleteAccount(accountId: number): Promise<{ message: string }> {
+  const response = await apiRequest(`/account/${accountId}/permanent`, {
+    method: 'DELETE',
   })
   return response.json()
 }
@@ -437,6 +486,9 @@ export interface ArenaTrade {
   notional: number
   commission: number
   trade_time?: string | null
+  slippage?: number | null  // Slippage percentage from paper trading simulation
+  rejection_reason?: string | null  // Reason if order was rejected
+  order_status?: string | null  // Order status (FILLED, PARTIALLY_FILLED, REJECTED)
 }
 
 export interface ArenaTradesResponse {

@@ -9,11 +9,14 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Trash2, Plus, Pencil } from 'lucide-react'
-import { 
+import { Trash2, Plus, Pencil, Archive, RotateCcw } from 'lucide-react'
+import {
   getAccounts as getAccounts,
   createAccount as createAccount,
   updateAccount as updateAccount,
+  archiveAccount,
+  restoreAccount,
+  permanentlyDeleteAccount,
   testLLMConnection,
   type TradingAccount,
   type TradingAccountCreate,
@@ -48,6 +51,9 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
   const [error, setError] = useState<string | null>(null)
   const [testResult, setTestResult] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
+  const [accountFilter, setAccountFilter] = useState<'active' | 'archived' | 'all'>('active')
+  const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null)
   const [newAccount, setNewAccount] = useState<AIAccountCreate>({
     name: '',
     model: '',
@@ -66,7 +72,7 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
   const loadAccounts = async () => {
     try {
       setLoading(true)
-      const data = await getAccounts()
+      const data = await getAccounts(accountFilter)
       setAccounts(data)
     } catch (error) {
       console.error('Failed to load accounts:', error)
@@ -85,6 +91,13 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
       setEditingId(null)
     }
   }, [open])
+
+  // Reload when filter changes
+  useEffect(() => {
+    if (open) {
+      loadAccounts()
+    }
+  }, [accountFilter])
 
   const handleCreateAccount = async () => {
     try {
@@ -257,6 +270,55 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
     }
   }
 
+  const handleArchive = async (account: AIAccount) => {
+    try {
+      setDeletingId(account.id)
+      await archiveAccount(account.id)
+      toast.success(`${account.name} has been archived`)
+      await loadAccounts()
+      onAccountUpdated?.()
+    } catch (error) {
+      console.error('Failed to archive account:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Failed to archive AI trader'
+      toast.error(errorMessage)
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  const handleRestore = async (account: AIAccount) => {
+    try {
+      setDeletingId(account.id)
+      await restoreAccount(account.id)
+      toast.success(`${account.name} has been restored`)
+      await loadAccounts()
+      onAccountUpdated?.()
+    } catch (error) {
+      console.error('Failed to restore account:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Failed to restore AI trader'
+      toast.error(errorMessage)
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  const handlePermanentDelete = async (accountId: number) => {
+    try {
+      setDeletingId(accountId)
+      await permanentlyDeleteAccount(accountId)
+      toast.success('AI trader permanently deleted')
+      setConfirmDelete(null)
+      await loadAccounts()
+      onAccountUpdated?.()
+    } catch (error) {
+      console.error('Failed to delete account:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Failed to delete AI trader'
+      toast.error(errorMessage)
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   const content = (
     <>
       {!embedded && (
@@ -277,7 +339,19 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
         <div className="space-y-6">
           {/* Existing Accounts */}
           <div className="space-y-4 flex-1 flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-muted-foreground">Show:</label>
+                <select
+                  value={accountFilter}
+                  onChange={(e) => setAccountFilter(e.target.value as 'active' | 'archived' | 'all')}
+                  className="px-3 py-1 text-sm border rounded bg-background"
+                >
+                  <option value="active">Active</option>
+                  <option value="archived">Archived</option>
+                  <option value="all">All</option>
+                </select>
+              </div>
               <Button
                 onClick={() => setShowAddForm(!showAddForm)}
                 size="sm"
@@ -404,7 +478,18 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
                       <div className="flex items-center justify-between gap-4">
                         <div className="space-y-1 flex-1">
                           <div className="flex items-center justify-between gap-3">
-                            <div className="font-medium">{account.name}</div>
+                            <div className="flex items-center gap-2">
+                              <div className="font-medium">{account.name}</div>
+                              {account.is_active === "false" ? (
+                                <span className="px-2 py-0.5 text-xs font-medium rounded bg-gray-200 text-gray-700">
+                                  Archived
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 text-xs font-medium rounded bg-green-100 text-green-700">
+                                  Active
+                                </span>
+                              )}
+                            </div>
                             <label className="flex items-center gap-2 text-xs text-muted-foreground whitespace-nowrap">
                               <input
                                 type="checkbox"
@@ -432,6 +517,33 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
                           <div className="text-xs text-muted-foreground">
                             Cash: ${account.current_cash?.toLocaleString() || '0'}
                           </div>
+                          {/* Phase 2: Trading Mode Display */}
+                          <div className="flex items-center gap-2 mt-2">
+                            {account.trading_mode && (
+                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                account.trading_mode === 'LIVE'
+                                  ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400 border border-orange-200 dark:border-orange-800'
+                                  : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border border-green-200 dark:border-green-800'
+                              }`}>
+                                {account.trading_mode}
+                              </span>
+                            )}
+                            {account.exchange && (
+                              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
+                                {account.exchange}
+                              </span>
+                            )}
+                            {account.testnet_enabled === 'true' && (
+                              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400 border border-purple-200 dark:border-purple-800">
+                                TESTNET
+                              </span>
+                            )}
+                          </div>
+                          {account.wallet_address && (
+                            <div className="text-xs text-muted-foreground truncate mt-1">
+                              Wallet: {account.wallet_address.slice(0, 6)}...{account.wallet_address.slice(-4)}
+                            </div>
+                          )}
                         </div>
                         <div className="flex items-center gap-2">
                           <Button
@@ -441,6 +553,39 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
                           >
                             <Pencil className="h-4 w-4" />
                           </Button>
+                          {account.is_active === "false" ? (
+                            <>
+                              <Button
+                                onClick={() => handleRestore(account)}
+                                variant="outline"
+                                size="sm"
+                                disabled={deletingId === account.id}
+                                title="Restore"
+                              >
+                                <RotateCcw className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                onClick={() => setConfirmDelete(account.id)}
+                                variant="outline"
+                                size="sm"
+                                disabled={deletingId === account.id}
+                                title="Permanently delete"
+                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              onClick={() => handleArchive(account)}
+                              variant="outline"
+                              size="sm"
+                              disabled={deletingId === account.id}
+                              title="Archive"
+                            >
+                              <Archive className="h-4 w-4" />
+                            </Button>
+                          )}
                         </div>
                       </div>
                     )}
@@ -449,6 +594,47 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
               </div>
             )}
           </div>
+
+          {/* Permanent Delete Confirmation Dialog */}
+          {confirmDelete && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+              <div className="bg-white rounded-lg shadow-lg p-6 max-w-md mx-4">
+                <h3 className="text-lg font-semibold mb-3">Permanently Delete AI Trader?</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  This will permanently delete <strong>{accounts.find(a => a.id === confirmDelete)?.name}</strong> and all associated data including:
+                </p>
+                <ul className="text-sm text-muted-foreground mb-6 list-disc list-inside space-y-1">
+                  <li>Trading history and orders</li>
+                  <li>Position records</li>
+                  <li>AI decision logs</li>
+                  <li>Strategy configuration</li>
+                  <li>All account data</li>
+                </ul>
+                <p className="text-sm font-semibold text-red-600 mb-6">
+                  This action cannot be undone!
+                </p>
+                <div className="flex gap-3 justify-end">
+                  <Button
+                    onClick={() => setConfirmDelete(null)}
+                    variant="outline"
+                    size="sm"
+                    disabled={deletingId === confirmDelete}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={() => handlePermanentDelete(confirmDelete)}
+                    variant="destructive"
+                    size="sm"
+                    disabled={deletingId === confirmDelete}
+                    className="bg-red-600 hover:bg-red-700"
+                  >
+                    {deletingId === confirmDelete ? 'Deleting...' : 'Permanently Delete'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
 
         </div>
     </>

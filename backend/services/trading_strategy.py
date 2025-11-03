@@ -146,7 +146,8 @@ class StrategyManager:
                 sampling_pool.add_sample(symbol, price, event_time.timestamp())
 
             # Check each strategy for triggers
-            for account_id, state in self.strategies.items():
+            # Create snapshot to avoid "dictionary changed size during iteration" error
+            for account_id, state in list(self.strategies.items()):
                 if state.should_trigger(symbol, event_time):
                     self._execute_strategy(account_id, symbol, event_time)
 
@@ -202,7 +203,8 @@ class StrategyManager:
             "strategies": {}
         }
 
-        for account_id, state in self.strategies.items():
+        # Create snapshot to avoid "dictionary changed size during iteration" error
+        for account_id, state in list(self.strategies.items()):
             status["strategies"][account_id] = {
                 "enabled": state.enabled,
                 "running": state.running,

@@ -15,6 +15,7 @@ interface Account {
   initial_capital: number
   current_cash: number
   frozen_cash: number
+  trading_mode?: string  // "PAPER" | "LIVE"
 }
 
 interface HeaderProps {
@@ -64,8 +65,11 @@ export default function Header({ title = 'Hyper Alpha Arena', currentUser, curre
         <div className="flex items-center gap-3">
           <img src="/static/logo_app.png" alt="Logo" className="h-8 w-8 object-contain" />
           <h1 className="text-xl font-bold">{title}</h1>
+          <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
+            PAPER TRADING
+          </span>
         </div>
-        
+
         <div className="flex items-center gap-4">
           <Button
             variant="ghost"

@@ -65,11 +65,20 @@ def _serialize_strategy(account: Account, strategy) -> StrategyConfig:
 
 
 @router.get("/list")
-async def list_all_accounts(db: Session = Depends(get_db)):
-    """Get all active accounts (for paper trading demo)"""
+async def list_all_accounts(status: str = "active", db: Session = Depends(get_db)):
+    """Get accounts filtered by status (active/archived/all)"""
     try:
         from database.models import User
-        accounts = db.query(Account).filter(Account.is_active == "true").all()
+
+        # Apply status filter
+        query = db.query(Account)
+        if status == "active":
+            query = query.filter(Account.is_active == "true")
+        elif status == "archived":
+            query = query.filter(Account.is_active == "false")
+        # if status == "all", no filter applied
+
+        accounts = query.all()
         
         result = []
         for account in accounts:
@@ -87,7 +96,12 @@ async def list_all_accounts(db: Session = Depends(get_db)):
                 "base_url": account.base_url,
                 "api_key": account.api_key,
                 "is_active": account.is_active == "true",
-                "auto_trading_enabled": account.auto_trading_enabled == "true"
+                "auto_trading_enabled": account.auto_trading_enabled == "true",
+                # Phase 2: Live Trading Support
+                "trading_mode": account.trading_mode if hasattr(account, 'trading_mode') and account.trading_mode else "PAPER",
+                "exchange": account.exchange if hasattr(account, 'exchange') else None,
+                "wallet_address": account.wallet_address if hasattr(account, 'wallet_address') else None,
+                "testnet_enabled": account.testnet_enabled if hasattr(account, 'testnet_enabled') and account.testnet_enabled else "true"
             })
         
         return result
@@ -791,6 +805,132 @@ async def test_llm_connection(payload: dict):
         return {"success": False, "message": f"Failed to test LLM connection: {str(e)}"}
 
 
+@router.post("/{account_id}/archive")
+async def archive_account(account_id: int, db: Session = Depends(get_db)):
+    """Archive an account (soft delete, reversible)"""
+    try:
+        # Check if account exists and is active
+        account = db.query(Account).filter(
+            Account.id == account_id,
+            Account.is_active == "true"
+        ).first()
+
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found or already archived")
+
+        # Safety check: prevent archiving accounts with active trading
+        if account.auto_trading_enabled == "true":
+            from repositories.strategy_repo import get_strategy_by_account
+            strategy = get_strategy_by_account(db, account_id)
+            if strategy and strategy.enabled == "true":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot archive account with active trading. Please disable auto-trading first."
+                )
+
+        # Check for pending orders
+        from database.models import Order
+        pending_orders_count = db.query(Order).filter(
+            Order.account_id == account_id,
+            Order.status == "PENDING"
+        ).count()
+
+        if pending_orders_count > 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot archive account with {pending_orders_count} pending order(s). Please cancel orders first."
+            )
+
+        # Archive the account (soft delete)
+        from repositories.account_repo import deactivate_account
+        deactivate_account(db, account_id)
+
+        # Invalidate strategy cache to remove from active trading
+        strategy_manager._load_strategies()
+
+        logger.info(f"Account {account_id} ({account.name}) archived successfully")
+        return {"message": f"Account '{account.name}' archived successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to archive account {account_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to archive account: {str(e)}")
+
+
+@router.post("/{account_id}/restore")
+async def restore_account(account_id: int, db: Session = Depends(get_db)):
+    """Restore an archived account"""
+    try:
+        # Check if account exists and is archived
+        account = db.query(Account).filter(
+            Account.id == account_id,
+            Account.is_active == "false"
+        ).first()
+
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found or not archived")
+
+        # Restore the account
+        from repositories.account_repo import activate_account
+        activate_account(db, account_id)
+
+        # Notify strategy manager to reload
+        strategy_manager._load_strategies()
+
+        logger.info(f"Account {account_id} ({account.name}) restored successfully")
+        return {"message": f"Account '{account.name}' restored successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to restore account {account_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to restore account: {str(e)}")
+
+
+@router.delete("/{account_id}/permanent")
+async def permanently_delete_account(account_id: int, db: Session = Depends(get_db)):
+    """Permanently delete an account (CAUTION: irreversible)"""
+    try:
+        # Check if account exists and is archived
+        account = db.query(Account).filter(
+            Account.id == account_id,
+            Account.is_active == "false"
+        ).first()
+
+        if not account:
+            raise HTTPException(
+                status_code=404,
+                detail="Account not found. Only archived accounts can be permanently deleted."
+            )
+
+        account_name = account.name
+
+        # Cascade delete related data
+        from database.models import (
+            Order, Trade, Position, AIDecisionLog,
+            AccountPromptBinding, AccountStrategyConfig, AccountAssetSnapshot
+        )
+
+        # Delete in order to respect foreign key constraints
+        db.query(AccountPromptBinding).filter(AccountPromptBinding.account_id == account_id).delete()
+        db.query(AccountStrategyConfig).filter(AccountStrategyConfig.account_id == account_id).delete()
+        db.query(AIDecisionLog).filter(AIDecisionLog.account_id == account_id).delete()
+        db.query(Trade).filter(Trade.account_id == account_id).delete()
+        db.query(Order).filter(Order.account_id == account_id).delete()
+        db.query(Position).filter(Position.account_id == account_id).delete()
+        db.query(AccountAssetSnapshot).filter(AccountAssetSnapshot.account_id == account_id).delete()
+
+        # Finally, delete the account itself
+        db.delete(account)
+        db.commit()
+
+        # Invalidate caches
+        invalidate_asset_curve_cache()
+        strategy_manager._load_strategies()
+
+        logger.info(f"Account {account_id} ({account_name}) permanently deleted")
+        return {"message": f"Account '{account_name}' permanently deleted"}
 @router.post("/{account_id}/trigger-ai-trade")
 async def trigger_ai_trade(
     account_id: int,
@@ -923,6 +1063,9 @@ async def trigger_ai_trade(
     except HTTPException:
         raise
     except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to permanently delete account {account_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete account: {str(e)}")
         logger.error(f"Failed to trigger AI trade for account {account_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
