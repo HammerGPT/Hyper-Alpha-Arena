@@ -289,8 +289,8 @@ OUTPUT_FORMAT_JSON = (
     '  "operation": "buy" | "sell" | "hold" | "close",\n'
     '  "symbol": "<BTC|ETH|SOL|BNB|XRP|DOGE>",\n'
     '  "target_portion_of_balance": <float 0.0-1.0>,\n'
-    '  "reason": "<150 characters maximum>",\n'
-    '  "trading_strategy": "<2-3 sentences covering signals, risk, execution>"\n'
+    '  "reason": "<string max 150 chars>",\n'
+    '  "trading_strategy": "<string 2-3 sentences>"\n'
     '}'
 )
 
@@ -560,10 +560,10 @@ def call_ai_for_decision(
     # Modern models have large context windows, allocate generous token budgets
     if is_new_model:
         # Reasoning models (GPT-5/o1) need more tokens for internal reasoning
-        payload["max_completion_tokens"] = 3000
+        payload["max_completion_tokens"] = 5000
     else:
         # Regular models (GPT-4, Deepseek, Claude, etc.)
-        payload["max_tokens"] = 3000
+        payload["max_tokens"] = 5000
 
     # For GPT-5 family set reasoning_effort to balance latency and quality
     if "gpt-5" in model_lower:
@@ -727,10 +727,12 @@ def call_ai_for_decision(
                     logger.info("Successfully parsed AI decision after cleanup")
                 except json.JSONDecodeError:
                     logger.error("JSON parsing failed after cleanup, attempting manual extraction")
+                    logger.error(f"Original AI response: {text_content[:1000]}...")
+                    logger.error(f"Cleaned content: {cleaned[:1000]}...")
                     operation_match = re.search(r'"operation"\s*:\s*"([^"]+)"', text_content, re.IGNORECASE)
                     symbol_match = re.search(r'"symbol"\s*:\s*"([^"]+)"', text_content, re.IGNORECASE)
                     portion_match = re.search(r'"target_portion_of_balance"\s*:\s*([0-9.]+)', text_content)
-                    reason_match = re.search(r'"reason"\s*:\s*"([^"]+)"', text_content)
+                    reason_match = re.search(r'"reason"\s*:\s*"([^"]*(?:\\.[^"]*)*)"', text_content, re.DOTALL)
 
                     if operation_match and symbol_match and portion_match:
                         decision = {
@@ -743,6 +745,7 @@ def call_ai_for_decision(
                         cleaned_content = json.dumps(decision)
                     else:
                         logger.error("Unable to extract required fields from AI response")
+                        logger.error(f"Regex match results - operation: {operation_match.group(1) if operation_match else None}, symbol: {symbol_match.group(1) if symbol_match else None}, portion: {portion_match.group(1) if portion_match else None}, reason: {reason_match.group(1)[:100] if reason_match else None}...")
                         return None
 
             # Validate that decision is a dict with required structure
