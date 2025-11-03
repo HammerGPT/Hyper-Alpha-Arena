@@ -80,12 +80,16 @@ async def list_all_accounts(db: Session = Depends(get_db)):
                 "username": user.username if user else "unknown",
                 "name": account.name,
                 "account_type": account.account_type,
+                "provider_type": getattr(account, 'provider_type', 'openai'),
                 "initial_capital": float(account.initial_capital),
                 "current_cash": float(account.current_cash),
                 "frozen_cash": float(account.frozen_cash),
                 "model": account.model,
                 "base_url": account.base_url,
                 "api_key": account.api_key,
+                "aws_region": getattr(account, 'aws_region', 'us-east-1'),
+                "aws_access_key_id": getattr(account, 'aws_access_key_id', ''),
+                "aws_secret_access_key": getattr(account, 'aws_secret_access_key', ''),
                 "is_active": account.is_active == "true",
                 "auto_trading_enabled": account.auto_trading_enabled == "true"
             })
@@ -290,14 +294,21 @@ async def create_new_account(payload: dict, db: Session = Depends(get_db)):
         auto_trading_enabled = _normalize_bool(payload.get("auto_trading_enabled", True))
         auto_trading_value = "true" if auto_trading_enabled else "false"
 
+        # Determine provider type
+        provider_type = payload.get("provider_type", "openai")
+
         new_account = Account(
             user_id=user.id,
             version="v1",
             name=payload["name"],
             account_type=payload.get("account_type", "AI"),
+            provider_type=provider_type,
             model=payload.get("model", "gpt-4-turbo"),
             base_url=payload.get("base_url", "https://api.openai.com/v1"),
             api_key=payload.get("api_key", ""),
+            aws_region=payload.get("aws_region", "us-east-1"),
+            aws_access_key_id=payload.get("aws_access_key_id", ""),
+            aws_secret_access_key=payload.get("aws_secret_access_key", ""),
             initial_capital=float(payload.get("initial_capital", 10000.0)),
             current_cash=float(payload.get("initial_capital", 10000.0)),
             frozen_cash=0.0,
@@ -354,12 +365,16 @@ async def create_new_account(payload: dict, db: Session = Depends(get_db)):
             "username": user.username,
             "name": new_account.name,
             "account_type": new_account.account_type,
+            "provider_type": new_account.provider_type,
             "initial_capital": float(new_account.initial_capital),
             "current_cash": float(new_account.current_cash),
             "frozen_cash": float(new_account.frozen_cash),
             "model": new_account.model,
             "base_url": new_account.base_url,
             "api_key": new_account.api_key,
+            "aws_region": new_account.aws_region,
+            "aws_access_key_id": new_account.aws_access_key_id,
+            "aws_secret_access_key": new_account.aws_secret_access_key,
             "is_active": new_account.is_active == "true",
             "auto_trading_enabled": new_account.auto_trading_enabled == "true"
         }
@@ -391,18 +406,34 @@ async def update_account_settings(account_id: int, payload: dict, db: Session = 
                 logger.info(f"Updated name to: {payload['name']}")
             else:
                 raise HTTPException(status_code=400, detail="Account name cannot be empty")
-        
+
+        if "provider_type" in payload:
+            account.provider_type = payload["provider_type"]
+            logger.info(f"Updated provider_type to: {account.provider_type}")
+
         if "model" in payload:
             account.model = payload["model"] if payload["model"] else None
             logger.info(f"Updated model to: {account.model}")
-        
+
         if "base_url" in payload:
             account.base_url = payload["base_url"]
             logger.info(f"Updated base_url to: {account.base_url}")
-        
+
         if "api_key" in payload:
             account.api_key = payload["api_key"]
             logger.info(f"Updated api_key (length: {len(payload['api_key']) if payload['api_key'] else 0})")
+
+        if "aws_region" in payload:
+            account.aws_region = payload["aws_region"]
+            logger.info(f"Updated aws_region to: {account.aws_region}")
+
+        if "aws_access_key_id" in payload:
+            account.aws_access_key_id = payload["aws_access_key_id"]
+            logger.info(f"Updated aws_access_key_id (length: {len(payload['aws_access_key_id']) if payload['aws_access_key_id'] else 0})")
+
+        if "aws_secret_access_key" in payload:
+            account.aws_secret_access_key = payload["aws_secret_access_key"]
+            logger.info(f"Updated aws_secret_access_key (length: {len(payload['aws_secret_access_key']) if payload['aws_secret_access_key'] else 0})")
 
         if "auto_trading_enabled" in payload:
             auto_trading_enabled = _normalize_bool(payload.get("auto_trading_enabled"))
@@ -430,19 +461,23 @@ async def update_account_settings(account_id: int, payload: dict, db: Session = 
 
         from database.models import User
         user = db.query(User).filter(User.id == account.user_id).first()
-        
+
         return {
             "id": account.id,
             "user_id": account.user_id,
             "username": user.username if user else "unknown",
             "name": account.name,
             "account_type": account.account_type,
+            "provider_type": account.provider_type,
             "initial_capital": float(account.initial_capital),
             "current_cash": float(account.current_cash),
             "frozen_cash": float(account.frozen_cash),
             "model": account.model,
             "base_url": account.base_url,
             "api_key": account.api_key,
+            "aws_region": account.aws_region,
+            "aws_access_key_id": account.aws_access_key_id,
+            "aws_secret_access_key": account.aws_secret_access_key,
             "is_active": account.is_active == "true",
             "auto_trading_enabled": account.auto_trading_enabled == "true"
         }

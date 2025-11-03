@@ -44,9 +44,15 @@ class Account(Base):
     auto_trading_enabled = Column(String(10), nullable=False, default="true")
     
     # AI Model Configuration (for AI accounts)
+    provider_type = Column(String(20), nullable=False, default="openai")  # "openai" or "bedrock"
     model = Column(String(100), nullable=True, default="gpt-4")  # AI model name
     base_url = Column(String(500), nullable=True, default="https://api.openai.com/v1")  # API endpoint
     api_key = Column(String(500), nullable=True)  # API key for authentication
+
+    # AWS Bedrock Configuration (for Bedrock provider)
+    aws_region = Column(String(50), nullable=True, default="us-east-1")  # AWS region for Bedrock
+    aws_access_key_id = Column(String(500), nullable=True)  # AWS access key ID
+    aws_secret_access_key = Column(String(500), nullable=True)  # AWS secret access key
     
     # Trading Account Balances (USD for CRYPTO market)
     initial_capital = Column(DECIMAL(18, 2), nullable=False, default=10000.00)

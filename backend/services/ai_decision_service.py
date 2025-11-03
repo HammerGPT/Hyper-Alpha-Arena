@@ -12,6 +12,8 @@ from datetime import datetime
 
 import requests
 from sqlalchemy.orm import Session
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 
 from database.models import Position, Account, AIDecisionLog
 from services.asset_calculator import calc_positions_value
@@ -464,6 +466,173 @@ def _extract_text_from_message(content: Any) -> str:
     return ""
 
 
+def call_bedrock_for_decision(
+    account: Account,
+    prompt: str,
+) -> Optional[Dict]:
+    """Call AWS Bedrock API to get trading decision
+
+    Args:
+        account: Trading account with Bedrock configuration
+        prompt: The formatted prompt to send to the model
+
+    Returns:
+        AI response dict with 'text' field, or None if failed
+    """
+    try:
+        # Initialize Bedrock runtime client
+        bedrock_runtime = boto3.client(
+            service_name='bedrock-runtime',
+            region_name=account.aws_region or 'us-east-1',
+            aws_access_key_id=account.aws_access_key_id,
+            aws_secret_access_key=account.aws_secret_access_key
+        )
+
+        # Prepare the request body based on the model
+        # AWS Bedrock supports various model formats, we'll use the Converse API for consistency
+        model_id = account.model
+
+        # Use Bedrock's Converse API for a unified interface
+        request_body = {
+            "modelId": model_id,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "text": prompt
+                        }
+                    ]
+                }
+            ],
+            "inferenceConfig": {
+                "maxTokens": 5000,
+                "temperature": 0.6,  # Recommended for reasoning models like Qwen3 and DeepSeek-R1
+                "topP": 0.95,
+            }
+        }
+
+        logger.info(f"Calling Bedrock model {model_id} in region {account.aws_region}")
+
+        # Call Bedrock Converse API
+        response = bedrock_runtime.converse(**request_body)
+
+        # Extract response text
+        if 'output' in response and 'message' in response['output']:
+            message = response['output']['message']
+            if 'content' in message and len(message['content']) > 0:
+                content = message['content'][0]
+                if 'text' in content:
+                    text_response = content['text']
+                    logger.info(f"Bedrock response received: {len(text_response)} characters")
+                    return {"text": text_response}
+
+        logger.error(f"Unexpected Bedrock response format: {response}")
+        return None
+
+    except (BotoCoreError, ClientError) as err:
+        logger.error(f"AWS Bedrock API call failed: {err}")
+        system_logger.log_error(
+            "BEDROCK_API_ERROR",
+            f"Bedrock API call failed for {account.name}",
+            {"account": account.name, "model": account.model, "error": str(err)},
+        )
+        return None
+    except Exception as err:
+        logger.error(f"Unexpected error calling Bedrock: {err}", exc_info=True)
+        return None
+
+
+def _process_bedrock_decision(
+    account: Account,
+    prompt: str,
+    portfolio: Dict,
+) -> Optional[Dict]:
+    """Process Bedrock API response and convert to decision format
+
+    Args:
+        account: Trading account
+        prompt: The formatted prompt
+        portfolio: Portfolio data for logging
+
+    Returns:
+        Decision dict or None if failed
+    """
+    response = call_bedrock_for_decision(account, prompt)
+    if not response or 'text' not in response:
+        return None
+
+    text_content = response['text'].strip()
+
+    # Try to extract JSON from the text
+    # Sometimes AI might wrap JSON in markdown code blocks
+    raw_decision_text = text_content
+    cleaned_content = text_content
+    if "```json" in cleaned_content:
+        cleaned_content = cleaned_content.split("```json")[1].split("```")[0].strip()
+    elif "```" in cleaned_content:
+        cleaned_content = cleaned_content.split("```")[1].split("```")[0].strip()
+
+    # Handle potential JSON parsing issues
+    try:
+        decision = json.loads(cleaned_content)
+    except json.JSONDecodeError as parse_err:
+        logger.warning("Initial JSON parse failed: %s", parse_err)
+        logger.warning("Problematic content: %s...", cleaned_content[:200])
+
+        cleaned = (
+            cleaned_content.replace("\n", " ")
+            .replace("\r", " ")
+            .replace("\t", " ")
+        )
+        cleaned = cleaned.replace(""", '"').replace(""", '"')
+        cleaned = cleaned.replace("'", "'").replace("'", "'")
+        cleaned = cleaned.replace("–", "-").replace("—", "-").replace("‑", "-")
+
+        try:
+            decision = json.loads(cleaned)
+            cleaned_content = cleaned
+            logger.info("Successfully parsed Bedrock decision after cleanup")
+        except json.JSONDecodeError:
+            logger.error("JSON parsing failed after cleanup, attempting manual extraction")
+            logger.error(f"Original Bedrock response: {text_content[:1000]}...")
+            logger.error(f"Cleaned content: {cleaned[:1000]}...")
+            operation_match = re.search(r'"operation"\s*:\s*"([^"]+)"', text_content, re.IGNORECASE)
+            symbol_match = re.search(r'"symbol"\s*:\s*"([^"]+)"', text_content, re.IGNORECASE)
+            portion_match = re.search(r'"target_portion_of_balance"\s*:\s*([0-9.]+)', text_content)
+            reason_match = re.search(r'"reason"\s*:\s*"([^"]*(?:\\.[^"]*)*)"', text_content, re.DOTALL)
+
+            if operation_match and symbol_match and portion_match:
+                decision = {
+                    "operation": operation_match.group(1),
+                    "symbol": symbol_match.group(1),
+                    "target_portion_of_balance": float(portion_match.group(1)),
+                    "reason": reason_match.group(1) if reason_match else "Bedrock response parsing issue",
+                }
+                logger.info("Successfully recovered Bedrock decision via manual extraction")
+                cleaned_content = json.dumps(decision)
+            else:
+                logger.error("Unable to extract required fields from Bedrock response")
+                return None
+
+    # Validate that decision is a dict with required structure
+    if not isinstance(decision, dict):
+        logger.error(f"Bedrock response is not a dict: {type(decision)}")
+        return None
+
+    # Attach debugging snapshots
+    strategy_details = decision.get("trading_strategy")
+    decision["_prompt_snapshot"] = prompt
+    if isinstance(strategy_details, str) and strategy_details.strip():
+        decision["_reasoning_snapshot"] = strategy_details.strip()
+    else:
+        decision["_reasoning_snapshot"] = ""
+    decision["_raw_decision_text"] = cleaned_content if 'cleaned_content' in locals() else raw_decision_text
+
+    logger.info(f"Bedrock decision for {account.name}: {decision}")
+    return decision
+
+
 def call_ai_for_decision(
     db: Session,
     account: Account,
@@ -523,6 +692,12 @@ def call_ai_for_decision(
 
     logger.debug("Using prompt template '%s' for account %s", template.key, account.id)
 
+    # Route to appropriate AI provider based on provider_type
+    provider_type = getattr(account, 'provider_type', 'openai')
+    if provider_type == 'bedrock':
+        return _process_bedrock_decision(account, prompt, portfolio)
+
+    # Continue with OpenAI-compatible API flow
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {account.api_key}",
