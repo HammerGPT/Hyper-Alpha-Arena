@@ -239,21 +239,77 @@ def preview_prompt(
             logger.warning(f"Account {account_id} not found, skipping")
             continue
 
-        portfolio = _get_portfolio_data(db, account)
+        # Check if account uses Hyperliquid
+        hyperliquid_enabled = getattr(account, "hyperliquid_enabled", "false") == "true"
+        hyperliquid_environment = getattr(account, "hyperliquid_environment", None)
+
+        hyperliquid_state = None
+
+        if hyperliquid_enabled and hyperliquid_environment in ["testnet", "mainnet"]:
+            # Get Hyperliquid real-time data
+            try:
+                from services.hyperliquid_environment import get_hyperliquid_client
+
+                client = get_hyperliquid_client(db, account_id)
+                account_state = client.get_account_state(db)
+                positions = client.get_positions(db)
+
+                # Build portfolio with Hyperliquid data
+                portfolio = {
+                    'cash': account_state['available_balance'],
+                    'frozen_cash': account_state.get('used_margin', 0),
+                    'positions': {},
+                    'total_assets': account_state['total_equity']
+                }
+
+                for pos in positions:
+                    symbol = pos['coin']
+                    portfolio['positions'][symbol] = {
+                        'quantity': pos['szi'],
+                        'avg_cost': pos['entry_px'],
+                        'current_value': pos['position_value'],
+                        'unrealized_pnl': pos['unrealized_pnl'],
+                        'leverage': pos['leverage']
+                    }
+
+                # Build Hyperliquid state for prompt context
+                hyperliquid_state = {
+                    'total_equity': account_state['total_equity'],
+                    'available_balance': account_state['available_balance'],
+                    'used_margin': account_state.get('used_margin', 0),
+                    'margin_usage_percent': account_state['margin_usage_percent'],
+                    'maintenance_margin': account_state.get('maintenance_margin', 0),
+                    'positions': positions
+                }
+
+                logger.info(
+                    f"Preview: Using Hyperliquid {hyperliquid_environment} data for {account.name}: "
+                    f"equity=${account_state['total_equity']:.2f}"
+                )
+
+            except Exception as hl_err:
+                logger.error(f"Failed to get Hyperliquid data for {account.name}: {hl_err}")
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Failed to fetch Hyperliquid {hyperliquid_environment} data: {hl_err}",
+                )
+        else:
+            # Paper trading mode
+            portfolio = _get_portfolio_data(db, account)
 
         # Build context with multi-symbol sampling data if symbols are specified
         if symbols:
             # Build multi-symbol sampling data
             sampling_data = _build_multi_symbol_sampling_data(symbols, sampling_pool)
             context = _build_prompt_context(
-                account, portfolio, prices, news_section, None, None
+                account, portfolio, prices, news_section, None, None, hyperliquid_state
             )
             # Override sampling_data with multi-symbol version
             context["sampling_data"] = sampling_data
         else:
             # No symbol specified, no sampling data
             context = _build_prompt_context(
-                account, portfolio, prices, news_section, None, None
+                account, portfolio, prices, news_section, None, None, hyperliquid_state
             )
 
         try:

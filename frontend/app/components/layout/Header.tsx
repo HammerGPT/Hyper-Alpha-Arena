@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Moon, Sun } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import TradingModeSwitcher from '@/components/trading/TradingModeSwitcher'
 
 interface User {
   id: number
@@ -65,8 +66,9 @@ export default function Header({ title = 'Hyper Alpha Arena', currentUser, curre
           <img src="/static/logo_app.png" alt="Logo" className="h-8 w-8 object-contain" />
           <h1 className="text-xl font-bold">{title}</h1>
         </div>
-        
+
         <div className="flex items-center gap-4">
+          <TradingModeSwitcher />
           <Button
             variant="ghost"
             size="icon"

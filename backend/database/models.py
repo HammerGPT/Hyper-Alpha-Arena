@@ -52,7 +52,15 @@ class Account(Base):
     initial_capital = Column(DECIMAL(18, 2), nullable=False, default=10000.00)
     current_cash = Column(DECIMAL(18, 2), nullable=False, default=10000.00)
     frozen_cash = Column(DECIMAL(18, 2), nullable=False, default=0.00)
-    
+
+    # Hyperliquid Trading Configuration
+    hyperliquid_enabled = Column(String(10), nullable=False, default="false")
+    hyperliquid_environment = Column(String(20), nullable=True)  # "testnet" | "mainnet" | null
+    hyperliquid_testnet_private_key = Column(String(500), nullable=True)  # Encrypted storage
+    hyperliquid_mainnet_private_key = Column(String(500), nullable=True)  # Encrypted storage
+    max_leverage = Column(Integer, nullable=True, default=3)  # Maximum allowed leverage
+    default_leverage = Column(Integer, nullable=True, default=1)  # Default leverage for orders
+
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(
         TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
@@ -118,6 +126,15 @@ class Order(Base):
     quantity = Column(DECIMAL(18, 8), nullable=False)  # Support fractional crypto amounts
     filled_quantity = Column(DECIMAL(18, 8), nullable=False, default=0)
     status = Column(String(20), nullable=False)
+
+    # Hyperliquid specific fields
+    hyperliquid_environment = Column(String(20), nullable=True)  # "testnet" | "mainnet" | null
+    leverage = Column(Integer, nullable=True, default=1)  # Position leverage (1-50)
+    margin_mode = Column(String(20), nullable=True, default="cross")  # "cross" or "isolated"
+    reduce_only = Column(String(10), nullable=True, default="false")  # Only close positions
+    hyperliquid_order_id = Column(String(50), nullable=True)  # OID from Hyperliquid API
+    liquidation_price = Column(DECIMAL(18, 6), nullable=True)  # Liquidation price for position
+
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(
         TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
@@ -141,6 +158,9 @@ class Trade(Base):
     quantity = Column(DECIMAL(18, 8), nullable=False)  # Support fractional crypto amounts
     commission = Column(DECIMAL(18, 6), nullable=False, default=0)
     trade_time = Column(TIMESTAMP, server_default=func.current_timestamp())
+
+    # Hyperliquid environment tracking
+    hyperliquid_environment = Column(String(20), nullable=True)  # "testnet" | "mainnet" | null (paper)
 
     order = relationship("Order", back_populates="trades")
 
@@ -289,6 +309,9 @@ class AIDecisionLog(Base):
     decision_snapshot = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
 
+    # Hyperliquid environment tracking
+    hyperliquid_environment = Column(String(20), nullable=True)  # "testnet" | "mainnet" | null (paper)
+
     # Relationships
     account = relationship("Account")
     order = relationship("Order")
@@ -330,6 +353,54 @@ class AccountPromptBinding(Base):
 
     account = relationship("Account", back_populates="prompt_binding")
     prompt_template = relationship("PromptTemplate", back_populates="account_bindings")
+
+
+class HyperliquidAccountSnapshot(Base):
+    """Store Hyperliquid account state snapshots for audit and analysis"""
+    __tablename__ = "hyperliquid_account_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    environment = Column(String(20), nullable=False, index=True)  # "testnet" | "mainnet"
+    snapshot_time = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
+
+    # Account state
+    total_equity = Column(DECIMAL(18, 6), nullable=False)
+    available_balance = Column(DECIMAL(18, 6), nullable=False)
+    used_margin = Column(DECIMAL(18, 6), nullable=False)
+    maintenance_margin = Column(DECIMAL(18, 6), nullable=False)
+
+    # Snapshot metadata
+    trigger_event = Column(String(50), nullable=True)  # "pre_decision", "post_order", etc.
+    snapshot_data = Column(Text, nullable=True)  # JSON of full API response
+
+    account = relationship("Account")
+
+
+class HyperliquidPosition(Base):
+    """Store Hyperliquid position snapshots"""
+    __tablename__ = "hyperliquid_positions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    environment = Column(String(20), nullable=False, index=True)  # "testnet" | "mainnet"
+    snapshot_time = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
+
+    symbol = Column(String(20), nullable=False)
+    position_size = Column(DECIMAL(18, 8), nullable=False)  # Signed: positive=long, negative=short
+    entry_price = Column(DECIMAL(18, 6), nullable=False)
+    current_price = Column(DECIMAL(18, 6), nullable=False)
+    position_value = Column(DECIMAL(18, 6), nullable=False)
+    unrealized_pnl = Column(DECIMAL(18, 6), nullable=False)
+    margin_used = Column(DECIMAL(18, 6), nullable=False)
+    liquidation_price = Column(DECIMAL(18, 6), nullable=True)
+    leverage = Column(Integer, nullable=False)
+
+    # Link to order that created/modified this position
+    order_id = Column(Integer, ForeignKey("orders.id"), nullable=True)
+
+    account = relationship("Account")
+    order = relationship("Order")
 
 
 # CRYPTO market trading configuration constants

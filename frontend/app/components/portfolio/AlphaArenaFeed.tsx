@@ -10,6 +10,7 @@ import {
   getArenaTrades,
 } from '@/lib/api'
 import { useArenaData } from '@/contexts/ArenaDataContext'
+import { useTradingMode } from '@/contexts/TradingModeContext'
 import { Button } from '@/components/ui/button'
 import { getModelLogo, getSymbolLogo } from './logoAssets'
 import FlipNumber from './FlipNumber'
@@ -63,6 +64,7 @@ export default function AlphaArenaFeed({
   onSelectedAccountChange,
 }: AlphaArenaFeedProps) {
   const { getData, updateData } = useArenaData()
+  const { tradingMode } = useTradingMode()
   const [activeTab, setActiveTab] = useState<FeedTab>('trades')
   const [allTraderOptions, setAllTraderOptions] = useState<ArenaAccountMeta[]>([])
   const [internalSelectedAccount, setInternalSelectedAccount] = useState<number | 'all'>(
@@ -86,6 +88,7 @@ export default function AlphaArenaFeed({
   const seenDecisionIds = useRef<Set<number>>(new Set())
   const prevManualRefreshKey = useRef(manualRefreshKey)
   const prevRefreshKey = useRef(refreshKey)
+  const prevTradingMode = useRef(tradingMode)
 
   // Sync external account selection with internal state
   useEffect(() => {
@@ -96,7 +99,10 @@ export default function AlphaArenaFeed({
 
   // Compute active account and cache key
   const activeAccount = useMemo(() => selectedAccountProp ?? internalSelectedAccount, [selectedAccountProp, internalSelectedAccount])
-  const cacheKey: CacheKey = useMemo(() => activeAccount === 'all' ? 'all' : String(activeAccount), [activeAccount])
+  const cacheKey: CacheKey = useMemo(() => {
+    const accountKey = activeAccount === 'all' ? 'all' : String(activeAccount)
+    return `${accountKey}_${tradingMode}`
+  }, [activeAccount, tradingMode])
 
   // Initialize from global state on mount or account change
   useEffect(() => {
@@ -205,7 +211,7 @@ export default function AlphaArenaFeed({
     try {
       setLoadingTrades(true)
       const accountId = activeAccount === 'all' ? undefined : activeAccount
-      const tradeRes = await getArenaTrades({ limit: DEFAULT_LIMIT, account_id: accountId })
+      const tradeRes = await getArenaTrades({ limit: DEFAULT_LIMIT, account_id: accountId, trading_mode: tradingMode })
       const newTrades = tradeRes.trades || []
       setTrades(newTrades)
       updateData(cacheKey, { trades: newTrades })
@@ -228,13 +234,13 @@ export default function AlphaArenaFeed({
       setLoadingTrades(false)
       return null
     }
-  }, [activeAccount, cacheKey, updateData])
+  }, [activeAccount, cacheKey, updateData, tradingMode])
 
   const loadModelChatData = useCallback(async () => {
     try {
       setLoadingModelChat(true)
       const accountId = activeAccount === 'all' ? undefined : activeAccount
-      const chatRes = await getArenaModelChat({ limit: MODEL_CHAT_LIMIT, account_id: accountId })
+      const chatRes = await getArenaModelChat({ limit: MODEL_CHAT_LIMIT, account_id: accountId, trading_mode: tradingMode })
       const newModelChat = chatRes.entries || []
       setModelChat(newModelChat)
       updateData(cacheKey, { modelChat: newModelChat })
@@ -260,13 +266,13 @@ export default function AlphaArenaFeed({
       setLoadingModelChat(false)
       return null
     }
-  }, [activeAccount, cacheKey, updateData])
+  }, [activeAccount, cacheKey, updateData, tradingMode])
 
   const loadPositionsData = useCallback(async () => {
     try {
       setLoadingPositions(true)
       const accountId = activeAccount === 'all' ? undefined : activeAccount
-      const positionRes = await getArenaPositions({ account_id: accountId })
+      const positionRes = await getArenaPositions({ account_id: accountId, trading_mode: tradingMode })
       const newPositions = positionRes.accounts || []
       setPositions(newPositions)
       updateData(cacheKey, { positions: newPositions })
@@ -300,7 +306,7 @@ export default function AlphaArenaFeed({
       setLoadingPositions(false)
       return null
     }
-  }, [activeAccount, cacheKey, updateData])
+  }, [activeAccount, cacheKey, updateData, tradingMode])
 
   // Lazy load data when tab becomes active
   useEffect(() => {
@@ -308,34 +314,28 @@ export default function AlphaArenaFeed({
 
     if (activeTab === 'trades' && trades.length === 0 && !loadingTrades) {
       if (cached?.trades && cached.trades.length > 0) {
-        // Use cached data
         setTrades(cached.trades)
       } else {
-        // Load fresh data
         loadTradesData()
       }
     }
 
     if (activeTab === 'model-chat' && modelChat.length === 0 && !loadingModelChat) {
       if (cached?.modelChat && cached.modelChat.length > 0) {
-        // Use cached data
         setModelChat(cached.modelChat)
       } else {
-        // Load fresh data
         loadModelChatData()
       }
     }
 
     if (activeTab === 'positions' && positions.length === 0 && !loadingPositions) {
       if (cached?.positions && cached.positions.length > 0) {
-        // Use cached data
         setPositions(cached.positions)
       } else {
-        // Load fresh data
         loadPositionsData()
       }
     }
-  }, [activeTab, cacheKey, getData, trades.length, modelChat.length, positions.length, loadingTrades, loadingModelChat, loadingPositions, loadTradesData, loadModelChatData, loadPositionsData])
+  }, [activeTab, cacheKey])
 
   // Background polling - refresh all data regardless of active tab
   useEffect(() => {
@@ -355,7 +355,7 @@ export default function AlphaArenaFeed({
     return () => clearInterval(intervalId)
   }, [autoRefreshInterval, loadTradesData, loadModelChatData, loadPositionsData])
 
-  // Manual refresh trigger
+  // Manual refresh trigger handler
   useEffect(() => {
     const shouldForce =
       manualRefreshKey !== prevManualRefreshKey.current ||

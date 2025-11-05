@@ -188,15 +188,16 @@ async def broadcast_model_chat_update(decision_data: dict):
         logging.error(f"Failed to broadcast model chat update: {e}")
 
 
-def get_all_asset_curves_data(db: Session, timeframe: str = "1h"):
+def get_all_asset_curves_data(db: Session, timeframe: str = "1h", trading_mode: str = "paper"):
     """Get timeframe-based asset curve data for all accounts - WebSocket version
-    
+
     Uses the new algorithm that draws curves by accounts and creates all-time lists.
-    
+
     Args:
         timeframe: Time period for the curve, options: "5m", "1h", "1d"
+        trading_mode: Trading mode filter, options: "paper", "testnet", "mainnet"
     """
-    return get_all_asset_curves_data_new(db, timeframe)
+    return get_all_asset_curves_data_new(db, timeframe, trading_mode)
 
 
 async def _send_snapshot_optimized(db: Session, account_id: int):
@@ -338,6 +339,230 @@ async def _send_snapshot_optimized(db: Session, account_id: int):
         }
 
     await manager.send_to_account(account_id, response_data)
+
+
+async def _send_snapshot_by_mode(db: Session, account_id: int, trading_mode: str):
+    """
+    Send snapshot based on trading mode
+
+    Args:
+        db: Database session
+        account_id: Account ID
+        trading_mode: "paper", "testnet", or "mainnet"
+    """
+    logging.info(f"_send_snapshot_by_mode called: trading_mode={trading_mode}, account_id={account_id}")
+    if trading_mode == "paper":
+        # Use traditional paper trading snapshot
+        logging.info(f"Sending paper trading snapshot for account {account_id}")
+        await _send_snapshot(db, account_id)
+    elif trading_mode in ["testnet", "mainnet"]:
+        # Use Hyperliquid real-time snapshot
+        logging.info(f"Sending Hyperliquid {trading_mode} snapshot for account {account_id}")
+        await _send_hyperliquid_snapshot(db, account_id, trading_mode)
+    else:
+        logging.error(f"Invalid trading_mode: {trading_mode}")
+        await _send_snapshot(db, account_id)  # Fallback to paper
+
+
+async def _send_hyperliquid_snapshot(db: Session, account_id: int, environment: str):
+    """
+    Send Hyperliquid real-time snapshot (testnet or mainnet)
+
+    Args:
+        db: Database session
+        account_id: Account ID
+        environment: "testnet" or "mainnet"
+    """
+    from services.hyperliquid_trading_client import HyperliquidTradingClient
+    from utils.encryption import decrypt_private_key
+
+    account = get_account(db, account_id)
+    if not account:
+        logging.error(f"Account {account_id} not found for Hyperliquid snapshot")
+        return
+
+    # Validate account has Hyperliquid configured
+    if not account.hyperliquid_enabled:
+        logging.warning(f"Account {account_id} does not have Hyperliquid enabled")
+        await manager.send_to_account(account_id, {
+            "type": "error",
+            "message": "Hyperliquid not enabled for this account"
+        })
+        return
+
+    # Get appropriate private key based on environment
+    if environment == "testnet":
+        encrypted_key = account.hyperliquid_testnet_private_key
+    else:  # mainnet
+        encrypted_key = account.hyperliquid_mainnet_private_key
+
+    if not encrypted_key:
+        logging.error(f"Account {account_id} missing {environment} private key")
+        await manager.send_to_account(account_id, {
+            "type": "error",
+            "message": f"Hyperliquid {environment} private key not configured"
+        })
+        return
+
+    # Decrypt private key
+    try:
+        private_key = decrypt_private_key(encrypted_key)
+    except Exception as e:
+        logging.error(f"Failed to decrypt private key: {e}")
+        await manager.send_to_account(account_id, {
+            "type": "error",
+            "message": f"Failed to decrypt private key: {str(e)}"
+        })
+        return
+
+    try:
+        # Create Hyperliquid client
+        client = HyperliquidTradingClient(
+            account_id=account_id,
+            private_key=private_key,
+            environment=environment
+        )
+
+        # Get account state from Hyperliquid API
+        account_state = client.get_account_state(db)
+        positions_data = client.get_positions(db)
+
+        # Transform Hyperliquid data to frontend format
+        overview = {
+            "account": {
+                "id": account.id,
+                "user_id": account.user_id,
+                "name": account.name,
+                "account_type": f"hyperliquid_{environment}",
+                "initial_capital": float(account.initial_capital),
+                # Use Hyperliquid balance instead of local database
+                "current_cash": account_state.get("available_balance", 0),
+                "frozen_cash": account_state.get("used_margin", 0),
+            },
+            "total_assets": account_state.get("total_equity", 0),
+            "positions_value": sum(
+                abs(p.get("position_value", 0)) for p in positions_data
+            ),
+        }
+
+        # Transform Hyperliquid positions to frontend format
+        enriched_positions = []
+        for p in positions_data:
+            enriched_positions.append({
+                "id": 0,  # Hyperliquid positions don't have local DB ID
+                "account_id": account_id,
+                "symbol": p.get("coin", ""),
+                "name": p.get("coin", ""),
+                "market": "HYPERLIQUID_PERP",
+                "quantity": abs(p.get("szi", 0)),  # Absolute size
+                "available_quantity": abs(p.get("szi", 0)),
+                "avg_cost": p.get("entry_px", 0),
+                "last_price": None,  # Can fetch from market data if needed
+                "market_value": p.get("position_value", 0),
+                "current_value": p.get("position_value", 0),
+                "unrealized_pnl": p.get("unrealized_pnl", 0),
+                "leverage": p.get("leverage", 1),
+                "side": "LONG" if p.get("szi", 0) > 0 else "SHORT",
+            })
+
+        # Get orders and trades from local database (filtered by environment)
+        orders = list_orders(db, account_id)
+        # Filter orders by hyperliquid_environment
+        hyperliquid_orders = [
+            o for o in orders
+            if o.hyperliquid_environment == environment
+        ]
+
+        trades = (
+            db.query(Trade)
+            .filter(Trade.account_id == account_id)
+            .filter(Trade.hyperliquid_environment == environment)
+            .order_by(Trade.trade_time.desc())
+            .limit(20)
+            .all()
+        )
+
+        ai_decisions = (
+            db.query(AIDecisionLog)
+            .filter(AIDecisionLog.account_id == account_id)
+            .filter(AIDecisionLog.hyperliquid_environment == environment)
+            .order_by(AIDecisionLog.decision_time.desc())
+            .limit(20)
+            .all()
+        )
+
+        # Prepare response data
+        response_data = {
+            "type": "snapshot",
+            "trading_mode": environment,
+            "overview": overview,
+            "positions": enriched_positions,
+            "orders": [
+                {
+                    "id": o.id,
+                    "order_no": o.order_no,
+                    "user_id": o.account_id,
+                    "symbol": o.symbol,
+                    "name": o.name,
+                    "market": o.market,
+                    "side": o.side,
+                    "order_type": o.order_type,
+                    "price": float(o.price) if o.price is not None else None,
+                    "quantity": float(o.quantity),
+                    "filled_quantity": float(o.filled_quantity),
+                    "status": o.status,
+                }
+                for o in hyperliquid_orders[:20]
+            ],
+            "trades": [
+                {
+                    "id": t.id,
+                    "order_id": t.order_id,
+                    "user_id": t.account_id,
+                    "symbol": t.symbol,
+                    "name": t.name,
+                    "market": t.market,
+                    "side": t.side,
+                    "price": float(t.price),
+                    "quantity": float(t.quantity),
+                    "commission": float(t.commission),
+                    "trade_time": str(t.trade_time),
+                }
+                for t in trades
+            ],
+            "ai_decisions": [
+                {
+                    "id": d.id,
+                    "decision_time": str(d.decision_time),
+                    "reason": d.reason,
+                    "operation": d.operation,
+                    "symbol": d.symbol,
+                    "prev_portion": float(d.prev_portion),
+                    "target_portion": float(d.target_portion),
+                    "total_balance": float(d.total_balance),
+                    "executed": str(d.executed).lower() if d.executed else "false",
+                    "order_id": d.order_id,
+                }
+                for d in ai_decisions
+            ],
+            "all_asset_curves": get_all_asset_curves_data(db, "1h"),  # Include asset curves for consistency
+            "hyperliquid_state": {
+                "environment": environment,
+                "total_equity": account_state.get("total_equity", 0),
+                "available_balance": account_state.get("available_balance", 0),
+                "used_margin": account_state.get("used_margin", 0),
+                "margin_usage_percent": account_state.get("margin_usage_percent", 0),
+            }
+        }
+
+        await manager.send_to_account(account_id, response_data)
+
+    except Exception as e:
+        logging.error(f"Failed to get Hyperliquid snapshot: {e}", exc_info=True)
+        await manager.send_to_account(account_id, {
+            "type": "error",
+            "message": f"Failed to fetch Hyperliquid data: {str(e)}"
+        })
 
 
 async def _send_snapshot(db: Session, account_id: int):
@@ -615,18 +840,23 @@ async def websocket_endpoint(websocket: WebSocket):
                     await _send_snapshot(db, account_id)
                 elif kind == "get_snapshot":
                     if account_id is not None:
-                        await _send_snapshot(db, account_id)
+                        # Get trading mode from request (default to "paper")
+                        trading_mode = msg.get("trading_mode", "paper")
+                        logging.info(f"Received get_snapshot request: account_id={account_id}, trading_mode={trading_mode}")
+                        await _send_snapshot_by_mode(db, account_id, trading_mode)
                 elif kind == "get_asset_curve":
-                    # Get asset curve data with specific timeframe
+                    # Get asset curve data with specific timeframe and trading mode
                     timeframe = msg.get("timeframe", "1h")
+                    trading_mode = msg.get("trading_mode", "paper")
                     if timeframe not in ["5m", "1h", "1d"]:
                         await websocket.send_text(json.dumps({"type": "error", "message": "Invalid timeframe. Must be 5m, 1h, or 1d"}))
                         continue
-                    
-                    asset_curves = get_all_asset_curves_data(db, timeframe)
+
+                    asset_curves = get_all_asset_curves_data(db, timeframe, trading_mode)
                     await websocket.send_text(json.dumps({
                         "type": "asset_curve_data",
                         "timeframe": timeframe,
+                        "trading_mode": trading_mode,
                         "data": asset_curves
                     }))
                 elif kind == "place_order":

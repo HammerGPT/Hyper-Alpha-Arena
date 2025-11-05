@@ -16,7 +16,7 @@ from services.asset_curve_calculator import invalidate_asset_curve_cache
 from services.ai_decision_service import build_chat_completion_endpoints, _extract_text_from_message
 from schemas.account import StrategyConfig, StrategyConfigUpdate
 from repositories.strategy_repo import get_strategy_by_account, upsert_strategy
-from services.trading_strategy import strategy_manager
+from services.trading_strategy import paper_strategy_manager, hyper_strategy_manager
 
 logger = logging.getLogger(__name__)
 
@@ -70,10 +70,41 @@ async def list_all_accounts(db: Session = Depends(get_db)):
     try:
         from database.models import User
         accounts = db.query(Account).filter(Account.is_active == "true").all()
-        
+
         result = []
         for account in accounts:
             user = db.query(User).filter(User.id == account.user_id).first()
+
+            # Check if this is a Hyperliquid account
+            hyperliquid_enabled = getattr(account, "hyperliquid_enabled", "false") == "true"
+            hyperliquid_environment = getattr(account, "hyperliquid_environment", None)
+
+            current_cash = float(account.current_cash)
+            frozen_cash = float(account.frozen_cash)
+
+            # For Hyperliquid accounts, fetch real-time balance
+            if hyperliquid_enabled and hyperliquid_environment in ["testnet", "mainnet"]:
+                try:
+                    from services.hyperliquid_environment import get_hyperliquid_client
+
+                    client = get_hyperliquid_client(db, account.id)
+                    account_state = client.get_account_state(db)
+
+                    # Use Hyperliquid real balance
+                    current_cash = account_state['available_balance']
+                    frozen_cash = account_state.get('used_margin', 0)
+
+                    logger.info(
+                        f"Account {account.name}: Using Hyperliquid {hyperliquid_environment} balance: "
+                        f"available=${current_cash:.2f}, used_margin=${frozen_cash:.2f}"
+                    )
+                except Exception as hl_err:
+                    logger.warning(
+                        f"Failed to get Hyperliquid balance for {account.name}, "
+                        f"falling back to database values: {hl_err}"
+                    )
+                    # Keep database values on error
+
             result.append({
                 "id": account.id,
                 "user_id": account.user_id,
@@ -81,15 +112,15 @@ async def list_all_accounts(db: Session = Depends(get_db)):
                 "name": account.name,
                 "account_type": account.account_type,
                 "initial_capital": float(account.initial_capital),
-                "current_cash": float(account.current_cash),
-                "frozen_cash": float(account.frozen_cash),
+                "current_cash": current_cash,
+                "frozen_cash": frozen_cash,
                 "model": account.model,
                 "base_url": account.base_url,
                 "api_key": account.api_key,
                 "is_active": account.is_active == "true",
                 "auto_trading_enabled": account.auto_trading_enabled == "true"
             })
-        
+
         return result
     except Exception as e:
         logger.error(f"Failed to list accounts: {e}", exc_info=True)
@@ -165,7 +196,10 @@ async def get_account_strategy(account_id: int, db: Session = Depends(get_db)):
             trigger_interval=150,
             enabled=(account.auto_trading_enabled == "true"),
         )
-        strategy_manager._load_strategies()
+        if getattr(account, "hyperliquid_enabled", "false") == "true":
+            hyper_strategy_manager._load_strategies()
+        else:
+            paper_strategy_manager._load_strategies()
 
     return _serialize_strategy(account, strategy)
 
@@ -216,7 +250,10 @@ async def update_account_strategy(
         enabled=payload.enabled,
     )
 
-    strategy_manager._load_strategies()
+    if getattr(account, "hyperliquid_enabled", "false") == "true":
+        hyper_strategy_manager._load_strategies()
+    else:
+        paper_strategy_manager._load_strategies()
     return _serialize_strategy(account, strategy)
 
 
@@ -451,6 +488,22 @@ async def update_account_settings(account_id: int, payload: dict, db: Session = 
     except Exception as e:
         logger.error(f"Failed to update account: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to update account: {str(e)}")
+
+
+@router.get("/asset-curve")
+async def get_asset_curve(
+    timeframe: str = "5m",
+    trading_mode: str = "paper",
+    db: Session = Depends(get_db)
+):
+    """Get asset curve data for all accounts with specified timeframe and trading mode"""
+    try:
+        from services.asset_curve_calculator import get_all_asset_curves_data_new
+        data = get_all_asset_curves_data_new(db, timeframe=timeframe, trading_mode=trading_mode)
+        return data
+    except Exception as e:
+        logger.error(f"Error fetching asset curve data: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch asset curve data: {str(e)}")
 
 
 @router.get("/asset-curve/timeframe")
@@ -883,13 +936,41 @@ async def trigger_ai_trade(
                     "reason": f"Manual HOLD trigger via API for {account.name}"
                 }]
 
-        # Trigger AI trading
-        place_ai_driven_crypto_order(
-            max_ratio=0.2,
-            account_id=account_id,
-            symbol=symbol,
-            samples=samples
+        # Check if account is Hyperliquid-enabled
+        hyperliquid_enabled = getattr(account, "hyperliquid_enabled", "false") == "true"
+        hyperliquid_environment = getattr(account, "hyperliquid_environment", None)
+
+        print(
+            f"[DEBUG] Trigger API: account_id={account_id} "
+            f"hyperliquid_enabled={hyperliquid_enabled} "
+            f"hyperliquid_environment={hyperliquid_environment}"
         )
+
+        # Debug condition check
+        print(f"[DEBUG] Type check: hyperliquid_enabled type={type(hyperliquid_enabled)}, value={repr(hyperliquid_enabled)}")
+        print(f"[DEBUG] Type check: hyperliquid_environment type={type(hyperliquid_environment)}, value={repr(hyperliquid_environment)}")
+        print(f"[DEBUG] Condition check: hyperliquid_enabled={bool(hyperliquid_enabled)}, env_check={hyperliquid_environment in ['testnet', 'mainnet']}")
+        # Trigger AI trading based on account configuration
+        if hyperliquid_enabled and hyperliquid_environment in ["testnet", "mainnet"]:
+            print(f"[DEBUG] ENTERING HYPERLIQUID BRANCH")
+            try:
+                from services.trading_commands import place_ai_driven_hyperliquid_order
+                print(f"[DEBUG] Successfully imported place_ai_driven_hyperliquid_order")
+                print(f"[DEBUG] Calling place_ai_driven_hyperliquid_order for account {account_id}")
+                # Note: place_ai_driven_hyperliquid_order doesn't support samples override yet
+                # TODO: Add samples support for forced operations in Hyperliquid trading
+                place_ai_driven_hyperliquid_order(account_id=account_id)
+                print(f"[DEBUG] place_ai_driven_hyperliquid_order completed for account {account_id}")
+            except Exception as hyperliquid_err:
+                print(f"[DEBUG] Error in Hyperliquid trading: {hyperliquid_err}")
+                logger.error(f"Error in Hyperliquid trading for account {account_id}: {hyperliquid_err}", exc_info=True)
+        else:
+            place_ai_driven_crypto_order(
+                max_ratio=0.2,
+                account_id=account_id,
+                symbol=symbol,
+                samples=samples
+            )
 
         # Check for new trades
         recent_trades = db.query(Trade).filter(

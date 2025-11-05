@@ -76,7 +76,9 @@ class MarketDataStream:
     def _process_symbol(self, symbol: str) -> None:
         """Fetch ticker for symbol, update cache, persist tick, publish event."""
         try:
+            print(f"Fetching price for {symbol}...")
             ticker_price = hyperliquid_client.get_last_price(symbol)
+            print(f"Got price for {symbol}: {ticker_price}")
         except Exception as fetch_err:
             logger.warning("Failed to fetch price for %s: %s", symbol, fetch_err)
             return
@@ -102,40 +104,16 @@ class MarketDataStream:
         )
 
         # Handle strategy triggers and sampling
+        print(f"Calling strategy handler for {symbol} at {ticker_price}")
         handle_price_update(symbol, float(ticker_price), event_time)
+        print(f"Strategy handler completed for {symbol}")
 
     def _persist_tick(self, symbol: str, price: float, event_time: datetime) -> None:
         """Persist tick data and prune old entries beyond retention window."""
-        session = SessionLocal()
-        try:
-            tick = CryptoPriceTick(
-                symbol=symbol,
-                market=self.market,
-                price=price,
-                event_time=event_time,
-            )
-            session.add(tick)
-            session.commit()
-
-            cutoff = event_time.timestamp() - self.retention_seconds
-            cutoff_dt = datetime.fromtimestamp(cutoff, tz=timezone.utc)
-
-            deleted = (
-                session.query(CryptoPriceTick)
-                .filter(
-                    CryptoPriceTick.symbol == symbol,
-                    CryptoPriceTick.event_time < cutoff_dt,
-                )
-                .delete(synchronize_session=False)
-            )
-            if deleted:
-                session.commit()
-                logger.debug("Purged %d old ticks for %s", deleted, symbol)
-        except Exception as err:
-            session.rollback()
-            logger.error("Failed to persist tick for %s: %s", symbol, err)
-        finally:
-            session.close()
+        # DISABLED: Price data not used anywhere, only causes DB locks
+        # All trading uses real-time API prices instead
+        logger.debug(f"Price tick for {symbol}: {price} (DB write disabled)")
+        return
 
 
 # Global stream holder (initialized in startup)

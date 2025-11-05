@@ -30,8 +30,21 @@ def _get_active_accounts(db: Session) -> List[Account]:
     )
 
 
+# Global variable to track last snapshot time
+_last_snapshot_time = 0
+
 def handle_price_update(event: Dict[str, Any]) -> None:
     """Persist account asset snapshots based on the latest price event."""
+    global _last_snapshot_time
+
+    # Limit to once per 60 seconds
+    import time
+    current_time = time.time()
+    if current_time - _last_snapshot_time < 60:
+        return
+
+    _last_snapshot_time = current_time
+
     session = SessionLocal()
     try:
         accounts = _get_active_accounts(session)

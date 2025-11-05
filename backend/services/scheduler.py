@@ -329,10 +329,10 @@ def reset_auto_trading_job():
         # Import constants from auto_trader module
         from services.auto_trader import AI_TRADE_JOB_ID
         from services.trading_commands import place_ai_driven_crypto_order
-        
+
         # Define interval (5 minutes)
         AI_TRADE_INTERVAL_SECONDS = 300
-        
+
         # Ensure market data is ready before scheduling trading tasks
         _ensure_market_data_ready()
 
@@ -345,19 +345,21 @@ def reset_auto_trading_job():
         if task_scheduler.scheduler and task_scheduler.scheduler.get_job(AI_TRADE_JOB_ID):
             task_scheduler.remove_task(AI_TRADE_JOB_ID)
             logger.info(f"Removed existing auto trading job: {AI_TRADE_JOB_ID}")
-        
+
         # Re-add the auto trading job with updated configuration
         task_scheduler.add_interval_task(
             task_func=lambda: place_ai_driven_crypto_order(max_ratio=0.2),
             interval_seconds=AI_TRADE_INTERVAL_SECONDS,
             task_id=AI_TRADE_JOB_ID
         )
-        
+
         logger.info(f"Auto trading job reset successfully - interval: {AI_TRADE_INTERVAL_SECONDS}s")
 
     except Exception as e:
         logger.error(f"Failed to reset auto trading job: {e}")
         raise
+
+
 
 
 def start_asset_curve_broadcast():

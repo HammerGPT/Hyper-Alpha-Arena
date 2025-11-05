@@ -16,6 +16,8 @@ dependencies = [
     "ccxt>=4.0.0",
     "pydantic>=2.5.0",
     "pydantic-core>=2.14.0",
+    "cryptography>=41.0.0",
+    "eth-account>=0.10.0",
 ]
 
 [tool.uv]

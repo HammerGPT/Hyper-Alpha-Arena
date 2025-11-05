@@ -11,8 +11,12 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 import os
+from dotenv import load_dotenv
 
 from decimal import Decimal
+
+# Load environment variables from .env file
+load_dotenv()
 
 from database.connection import engine, Base, SessionLocal
 from database.models import TradingConfig, User, Account, SystemConfig, AccountAssetSnapshot
@@ -172,7 +176,13 @@ def on_startup():
     try:
         # Ensure AI decision log table has snapshot columns (backfill on existing installs)
         try:
-            columns = {row[1] for row in db.execute(text("PRAGMA table_info(ai_decision_logs)"))}
+            # PostgreSQL-compatible column check
+            result = db.execute(text("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'ai_decision_logs'
+            """))
+            columns = {row[0] for row in result}
+
             if "prompt_snapshot" not in columns:
                 db.execute(text("ALTER TABLE ai_decision_logs ADD COLUMN prompt_snapshot TEXT"))
             if "reasoning_snapshot" not in columns:
@@ -252,8 +262,10 @@ def on_startup():
     setup_system_logger()
 
     # Initialize all services (scheduler, market data tasks, auto trading, etc.)
+    print("About to initialize services...")
     from services.startup import initialize_services
     initialize_services()
+    print("Services initialization completed")
 
 
 @app.on_event("shutdown")
@@ -274,6 +286,7 @@ from api.arena_routes import router as arena_router
 from api.system_log_routes import router as system_log_router
 from api.prompt_routes import router as prompt_router
 from api.sampling_routes import router as sampling_router
+from api.hyperliquid_routes import router as hyperliquid_router
 # Removed: AI account routes merged into account_routes (unified AI trader accounts)
 
 app.include_router(market_data_router)
@@ -286,6 +299,7 @@ app.include_router(arena_router)
 app.include_router(system_log_router)
 app.include_router(prompt_router)
 app.include_router(sampling_router)
+app.include_router(hyperliquid_router)
 # app.include_router(ai_account_router, prefix="/api")  # Removed - merged into account_router
 
 # Strategy route aliases for frontend compatibility
@@ -317,6 +331,12 @@ async def update_account_strategy_alias(account_id: int, payload: dict, db: Sess
         return await update_account_strategy(account_id, strategy_update, db)
     except ValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/strategy/status")
+async def get_strategy_manager_status():
+    """Get strategy manager status"""
+    from services.trading_strategy import get_strategy_status
+    return get_strategy_status()
 
 # WebSocket endpoint
 from api.ws import websocket_endpoint

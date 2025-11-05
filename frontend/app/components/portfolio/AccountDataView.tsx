@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import AssetCurveWithData from './AssetCurveWithData'
+import HyperliquidSummary from './HyperliquidSummary'
 import StrategyPanel from '@/components/portfolio/StrategyPanel'
 import {
   AIDecision,
@@ -12,6 +13,7 @@ import ArenaAnalyticsFeed from './ArenaAnalyticsFeed'
 import FlipNumber from './FlipNumber'
 import { getSymbolLogo } from './logoAssets'
 import RealtimePrice from './RealtimePrice'
+import { useTradingMode } from '@/contexts/TradingModeContext'
 
 interface Account {
   id: number
@@ -110,6 +112,7 @@ export default function AccountDataView(props: AccountDataViewProps) {
     showAssetCurves = true,
     showStrategyPanel = false,
   } = props
+  const { tradingMode } = useTradingMode()
   const [selectedArenaAccount, setSelectedArenaAccount] = useState<number | 'all'>('all')
   const [globalPositionSnapshots, setGlobalPositionSnapshots] = useState<ArenaPositionsAccount[]>([])
   const [realtimeTotals, setRealtimeTotals] = useState<{
@@ -126,7 +129,7 @@ export default function AccountDataView(props: AccountDataViewProps) {
 
     const loadGlobalSnapshots = async () => {
       try {
-        const response = await getArenaPositions()
+        const response = await getArenaPositions({ trading_mode: tradingMode })
         if (isMounted) {
           setGlobalPositionSnapshots(response.accounts ?? [])
         }
@@ -142,7 +145,7 @@ export default function AccountDataView(props: AccountDataViewProps) {
       isMounted = false
       clearInterval(intervalId)
     }
-  }, [accountRefreshTrigger])
+  }, [accountRefreshTrigger, tradingMode])
 
   useEffect(() => {
     if (!wsRef?.current) return
@@ -320,12 +323,16 @@ export default function AccountDataView(props: AccountDataViewProps) {
 
     const globalPositionsValue = hasGlobalSnapshots
       ? globalPositionSnapshots.reduce((acc, snapshot) => {
-          const snapshotTotal = snapshot.positions.reduce((sum, position: ArenaPositionItem) => {
-            const currentValue = Number(
-              position.current_value ?? position.notional ?? 0,
-            )
-            return sum + currentValue
-          }, 0)
+          // Use positions_value from API if available (Hyperliquid provides accurate real-time value)
+          // Otherwise fall back to summing individual position values
+          const snapshotTotal = snapshot.positions_value !== undefined
+            ? snapshot.positions_value
+            : snapshot.positions.reduce((sum, position: ArenaPositionItem) => {
+                const currentValue = Number(
+                  position.current_value ?? position.notional ?? 0,
+                )
+                return sum + currentValue
+              }, 0)
           return acc + snapshotTotal
         }, 0)
       : 0
@@ -456,21 +463,27 @@ export default function AccountDataView(props: AccountDataViewProps) {
               />
             </div>
           </div>
-        </div>
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 min-h-0">
-        <div className={`grid gap-6 overflow-hidden ${showAssetCurves ? 'grid-cols-5' : 'grid-cols-1'} h-full min-h-0`}>
+      <div className={`grid gap-6 ${showAssetCurves ? 'grid-cols-5' : 'grid-cols-1'} min-h-0`}>
           {/* Asset Curves */}
           {showAssetCurves && (
-            <div className="col-span-3 min-h-0 border border-border rounded-lg bg-card shadow-sm px-4 py-3 flex flex-col gap-4">
-              <AssetCurveWithData
-                data={allAssetCurves}
-                wsRef={wsRef}
-                highlightAccountId={selectedArenaAccount}
-                onHighlightAccountChange={handleArenaAccountChange}
-              />
+            <div className="col-span-3 min-h-0 flex flex-col gap-4">
+              <div className="flex-1 min-h-[320px] border border-border rounded-lg bg-card shadow-sm px-4 py-3 flex flex-col gap-4">
+                <AssetCurveWithData
+                  data={allAssetCurves}
+                  wsRef={wsRef}
+                  highlightAccountId={selectedArenaAccount}
+                  onHighlightAccountChange={handleArenaAccountChange}
+                />
+              </div>
+              <div className="border text-card-foreground shadow p-6 space-y-6">
+                <HyperliquidSummary
+                  accountId={overview?.account?.id}
+                  refreshKey={accountRefreshTrigger}
+                />
+              </div>
             </div>
           )}
 

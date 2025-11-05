@@ -14,6 +14,8 @@ from sqlalchemy.orm import Session, aliased
 from sqlalchemy.types import Integer
 
 from database.models import Account, AccountAssetSnapshot
+from database.snapshot_connection import SnapshotSessionLocal
+from database.snapshot_models import HyperliquidAccountSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,12 @@ def _ensure_utc(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+def _to_utc_timestamp(dt: datetime) -> int:
+    """Convert datetime to UTC timestamp"""
+    utc_dt = _ensure_utc(dt)
+    return int(utc_dt.timestamp())
+
+
 def _get_bucketed_snapshots(
     db: Session, bucket_minutes: int
 ) -> List[Tuple[int, float, float, float, datetime]]:
@@ -54,7 +62,7 @@ def _get_bucketed_snapshots(
     if bucket_seconds <= 0:
         bucket_seconds = TIMEFRAME_BUCKET_MINUTES["5m"] * 60
 
-    time_seconds = cast(func.strftime("%s", AccountAssetSnapshot.event_time), Integer)
+    time_seconds = cast(func.extract('epoch', AccountAssetSnapshot.event_time), Integer)
     bucket_index_expr = cast(func.floor(time_seconds / bucket_seconds), Integer)
 
     bucket_subquery = (
@@ -89,14 +97,22 @@ def _get_bucketed_snapshots(
     return rows
 
 
-def get_all_asset_curves_data_new(db: Session, timeframe: str = "1h") -> List[Dict]:
+def get_all_asset_curves_data_new(db: Session, timeframe: str = "1h", trading_mode: str = "paper") -> List[Dict]:
     """
     Build asset curve data for all active accounts using cached SQL aggregation.
     """
     bucket_minutes = TIMEFRAME_BUCKET_MINUTES.get(timeframe, TIMEFRAME_BUCKET_MINUTES["5m"])
 
+    # Handle Hyperliquid mode with 5-minute bucketing
+    if trading_mode == "hyperliquid":
+        return _build_hyperliquid_asset_curve(db, bucket_minutes)
+
+    # For other non-paper modes, return empty data for now
+    if trading_mode != "paper":
+        return []
+
     current_max_snapshot_id: Optional[int] = db.query(func.max(AccountAssetSnapshot.id)).scalar()
-    cache_key = timeframe
+    cache_key = f"{timeframe}_{trading_mode}"
 
     with _CACHE_LOCK:
         cache_entry = _ASSET_CURVE_CACHE.get(cache_key)
@@ -107,6 +123,7 @@ def get_all_asset_curves_data_new(db: Session, timeframe: str = "1h") -> List[Di
         ):
             return cache_entry["data"]  # type: ignore[return-value]
 
+    # Get all active accounts for paper mode
     accounts = db.query(Account).filter(Account.is_active == "true").all()
     account_map = {account.id: account for account in accounts}
     rows = _get_bucketed_snapshots(db, bucket_minutes)
@@ -160,3 +177,93 @@ def get_all_asset_curves_data_new(db: Session, timeframe: str = "1h") -> List[Di
         }
 
     return result
+
+
+def _build_hyperliquid_asset_curve(db: Session, bucket_minutes: int) -> List[Dict]:
+    """Build asset curve for Hyperliquid accounts with 5-minute bucketing"""
+    bucket_seconds = bucket_minutes * 60
+    if bucket_seconds <= 0:
+        bucket_seconds = TIMEFRAME_BUCKET_MINUTES["5m"] * 60
+
+    # Use snapshot database for Hyperliquid data
+    snapshot_db = SnapshotSessionLocal()
+
+    try:
+        # Get active Hyperliquid accounts from main DB
+        accounts = db.query(Account).filter(
+            Account.hyperliquid_enabled == "true",
+            Account.is_active == "true"
+        ).all()
+
+        if not accounts:
+            return []
+
+        account_map = {account.id: account for account in accounts}
+
+        # Build bucket query for Hyperliquid snapshots
+        time_seconds = cast(func.extract('epoch', HyperliquidAccountSnapshot.created_at), Integer)
+        bucket_index_expr = cast(func.floor(time_seconds / bucket_seconds), Integer)
+
+        bucket_subquery = (
+            snapshot_db.query(
+                HyperliquidAccountSnapshot.account_id.label("account_id"),
+                bucket_index_expr.label("bucket_index"),
+                func.max(HyperliquidAccountSnapshot.created_at).label("latest_created_at"),
+            )
+            .group_by(HyperliquidAccountSnapshot.account_id, bucket_index_expr)
+            .subquery()
+        )
+
+        snapshot_alias = aliased(HyperliquidAccountSnapshot)
+        rows = (
+            snapshot_db.query(
+                snapshot_alias.account_id,
+                snapshot_alias.total_equity,
+                snapshot_alias.created_at,
+            )
+            .join(
+                bucket_subquery,
+                (snapshot_alias.account_id == bucket_subquery.c.account_id)
+                & (snapshot_alias.created_at == bucket_subquery.c.latest_created_at),
+            )
+            .order_by(snapshot_alias.created_at.asc(), snapshot_alias.account_id.asc())
+            .all()
+        )
+
+        result: List[Dict] = []
+        seen_accounts = set()
+
+        for account_id, total_equity, created_at in rows:
+            account = account_map.get(account_id)
+            if not account:
+                continue
+
+            seen_accounts.add(account_id)
+            timestamp = _to_utc_timestamp(created_at)
+
+            result.append({
+                "timestamp": timestamp,
+                "datetime_str": _ensure_utc(created_at).strftime("%Y-%m-%d %H:%M:%S"),
+                "account_id": account_id,
+                "username": account.name,
+                "total_equity": float(total_equity),
+            })
+
+        # Add accounts without snapshots with initial capital
+        now_utc = datetime.now(timezone.utc)
+        for account in accounts:
+            if account.id not in seen_accounts:
+                initial_capital = float(account.initial_capital or 1000)
+                result.append({
+                    "timestamp": _to_utc_timestamp(now_utc),
+                    "datetime_str": now_utc.strftime("%Y-%m-%d %H:%M:%S"),
+                    "account_id": account.id,
+                    "username": account.name,
+                    "total_equity": initial_capital,
+                })
+
+        result.sort(key=lambda item: (item["timestamp"], item["account_id"]))
+        return result
+
+    finally:
+        snapshot_db.close()

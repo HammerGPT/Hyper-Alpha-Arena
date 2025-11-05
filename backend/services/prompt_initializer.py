@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from config.prompt_templates import DEFAULT_PROMPT_TEMPLATE, PRO_PROMPT_TEMPLATE
+from config.prompt_templates import DEFAULT_PROMPT_TEMPLATE, PRO_PROMPT_TEMPLATE, HYPERLIQUID_PROMPT_TEMPLATE
 from repositories import prompt_repo
 
 SYSTEM_USER = "system"
@@ -30,6 +30,12 @@ def seed_prompt_templates(db: Session) -> None:
             "name": "Pro Prompt",
             "description": "Structured prompt inspired by Alpha Arena with richer context.",
             "template_text": PRO_PROMPT_TEMPLATE,
+        },
+        {
+            "key": "hyperliquid",
+            "name": "Hyperliquid Prompt",
+            "description": "Specialized prompt for Hyperliquid perpetual contract trading with detailed margin and leverage information.",
+            "template_text": HYPERLIQUID_PROMPT_TEMPLATE,
         },
     ]
 

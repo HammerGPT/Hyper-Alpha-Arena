@@ -46,24 +46,57 @@ async def list_user_accounts(session_token: str, db: Session = Depends(get_db)):
     try:
         user_id = await get_current_user_id(session_token, db)
         accounts = get_accounts_by_user(db, user_id, active_only=True)
-        
-        return [
-            AccountOut(
-                id=account.id,
-                user_id=account.user_id,
-                name=account.name,
-                model=account.model,
-                base_url=account.base_url,
-                api_key="****" + account.api_key[-4:] if account.api_key else "",  # Mask API key
-                initial_capital=float(account.initial_capital),
-                current_cash=float(account.current_cash),
-                frozen_cash=float(account.frozen_cash),
-                account_type=account.account_type,
-                is_active=account.is_active == "true"
+
+        result = []
+        for account in accounts:
+            # Check if this is a Hyperliquid account
+            hyperliquid_enabled = getattr(account, "hyperliquid_enabled", "false") == "true"
+            hyperliquid_environment = getattr(account, "hyperliquid_environment", None)
+
+            current_cash = float(account.current_cash)
+            frozen_cash = float(account.frozen_cash)
+
+            # For Hyperliquid accounts, fetch real-time balance
+            if hyperliquid_enabled and hyperliquid_environment in ["testnet", "mainnet"]:
+                try:
+                    from services.hyperliquid_environment import get_hyperliquid_client
+
+                    client = get_hyperliquid_client(db, account.id)
+                    account_state = client.get_account_state(db)
+
+                    # Use Hyperliquid real balance
+                    current_cash = account_state['available_balance']
+                    frozen_cash = account_state.get('used_margin', 0)
+
+                    logger.info(
+                        f"Account {account.name}: Using Hyperliquid {hyperliquid_environment} balance: "
+                        f"available=${current_cash:.2f}, used_margin=${frozen_cash:.2f}"
+                    )
+                except Exception as hl_err:
+                    logger.warning(
+                        f"Failed to get Hyperliquid balance for {account.name}, "
+                        f"falling back to database values: {hl_err}"
+                    )
+                    # Keep database values on error
+
+            result.append(
+                AccountOut(
+                    id=account.id,
+                    user_id=account.user_id,
+                    name=account.name,
+                    model=account.model,
+                    base_url=account.base_url,
+                    api_key="****" + account.api_key[-4:] if account.api_key else "",
+                    initial_capital=float(account.initial_capital),
+                    current_cash=current_cash,
+                    frozen_cash=frozen_cash,
+                    account_type=account.account_type,
+                    is_active=account.is_active == "true"
+                )
             )
-            for account in accounts
-        ]
-        
+
+        return result
+
     except HTTPException:
         raise
     except Exception as e:
@@ -129,13 +162,43 @@ async def get_account_details(
     try:
         user_id = await get_current_user_id(session_token, db)
         account = get_account(db, account_id)
-        
+
         if not account:
             raise HTTPException(status_code=404, detail="Account not found")
-        
+
         if account.user_id != user_id:
             raise HTTPException(status_code=403, detail="Access denied")
-        
+
+        # Check if this is a Hyperliquid account
+        hyperliquid_enabled = getattr(account, "hyperliquid_enabled", "false") == "true"
+        hyperliquid_environment = getattr(account, "hyperliquid_environment", None)
+
+        current_cash = float(account.current_cash)
+        frozen_cash = float(account.frozen_cash)
+
+        # For Hyperliquid accounts, fetch real-time balance
+        if hyperliquid_enabled and hyperliquid_environment in ["testnet", "mainnet"]:
+            try:
+                from services.hyperliquid_environment import get_hyperliquid_client
+
+                client = get_hyperliquid_client(db, account.id)
+                account_state = client.get_account_state(db)
+
+                # Use Hyperliquid real balance
+                current_cash = account_state['available_balance']
+                frozen_cash = account_state.get('used_margin', 0)
+
+                logger.info(
+                    f"Account {account.name}: Using Hyperliquid {hyperliquid_environment} balance: "
+                    f"available=${current_cash:.2f}, used_margin=${frozen_cash:.2f}"
+                )
+            except Exception as hl_err:
+                logger.warning(
+                    f"Failed to get Hyperliquid balance for {account.name}, "
+                    f"falling back to database values: {hl_err}"
+                )
+                # Keep database values on error
+
         return AccountOut(
             id=account.id,
             user_id=account.user_id,
@@ -144,8 +207,8 @@ async def get_account_details(
             base_url=account.base_url,
             api_key="****" + account.api_key[-4:] if account.api_key else "",
             initial_capital=float(account.initial_capital),
-            current_cash=float(account.current_cash),
-            frozen_cash=float(account.frozen_cash),
+            current_cash=current_cash,
+            frozen_cash=frozen_cash,
             account_type=account.account_type,
             is_active=account.is_active == "true"
         )

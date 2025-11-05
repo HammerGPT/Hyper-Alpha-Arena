@@ -23,7 +23,9 @@ def initialize_services():
     """Initialize all services"""
     try:
         # Start the scheduler
+        print("Starting scheduler...")
         start_scheduler()
+        print("Scheduler started")
         logger.info("Scheduler service started")
 
         # Set up market-related scheduled tasks
@@ -40,9 +42,26 @@ def initialize_services():
         logger.info("Price cache cleanup task started (2-minute interval)")
 
         # Start market data stream and subscribe asset snapshot handler
+        print("Starting market data stream...")
         start_market_stream(AI_TRADING_SYMBOLS, interval_seconds=1.5)
+        print("Market data stream started")
         subscribe_price_updates(handle_price_update)
+        print("Asset snapshot handler subscribed")
         logger.info("Market data stream initialized with asset snapshot handler")
+
+        # Subscribe strategy manager to price updates
+        from services.trading_strategy import handle_price_update as strategy_price_update
+
+        def strategy_price_wrapper(event):
+            """Wrapper to convert event format for strategy manager"""
+            symbol = event.get("symbol")
+            price = event.get("price")
+            event_time = event.get("event_time")
+            if symbol and price:
+                strategy_price_update(symbol, float(price), event_time)
+
+        subscribe_price_updates(strategy_price_wrapper)
+        logger.info("Strategy manager subscribed to price updates")
 
         # Start price snapshot logger (every 60 seconds)
         from services.system_logger import price_snapshot_logger
@@ -50,12 +69,20 @@ def initialize_services():
         logger.info("Price snapshot logger started (60-second interval)")
 
         # Start AI trading strategy manager
+        print("Starting strategy manager...")
         start_strategy_manager()
+        print("Strategy manager started")
 
         # Start asset curve broadcast task (every 60 seconds)
         from services.scheduler import start_asset_curve_broadcast
         start_asset_curve_broadcast()
         logger.info("Asset curve broadcast task started (60-second interval)")
+
+        # Start Hyperliquid account snapshot service (every 30 seconds)
+        from services.hyperliquid_snapshot_service import hyperliquid_snapshot_service
+        import asyncio
+        asyncio.create_task(hyperliquid_snapshot_service.start())
+        logger.info("Hyperliquid snapshot service started (30-second interval)")
 
         logger.info("All services initialized successfully")
 
@@ -69,10 +96,12 @@ def shutdown_services():
     try:
         from services.scheduler import stop_scheduler
         from services.system_logger import price_snapshot_logger
-        stop_trading_strategy_manager()
+        from services.hyperliquid_snapshot_service import hyperliquid_snapshot_service
+        stop_strategy_manager()
         stop_market_stream()
         unsubscribe_price_updates(handle_price_update)
         price_snapshot_logger.stop()
+        hyperliquid_snapshot_service.stop()
         stop_scheduler()
         logger.info("All services have been shut down")
 

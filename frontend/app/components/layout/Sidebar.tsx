@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { PieChart, Settings, TrendingUp, BarChart3, FileText, NotebookPen } from 'lucide-react'
+import { PieChart, Settings, TrendingUp, BarChart3, FileText, NotebookPen, Coins } from 'lucide-react'
 
 interface SidebarProps {
   currentPage?: string
@@ -26,17 +26,6 @@ export default function Sidebar({ currentPage = 'comprehensive', onPageChange, o
             <BarChart3 className="w-5 h-5" />
           </button>
 
-          <button
-            className={`flex items-center justify-center w-10 h-10 rounded-lg transition-colors ${
-              currentPage === 'portfolio'
-                ? 'bg-secondary/80 text-secondary-foreground'
-                : 'hover:bg-muted text-muted-foreground'
-            }`}
-            onClick={() => onPageChange?.('portfolio')}
-            title="Portfolio"
-          >
-            <PieChart className="w-5 h-5" />
-          </button>
 
           <button
             className={`flex items-center justify-center w-10 h-10 rounded-lg transition-colors ${
@@ -48,6 +37,18 @@ export default function Sidebar({ currentPage = 'comprehensive', onPageChange, o
             title="System Logs"
           >
             <FileText className="w-5 h-5" />
+          </button>
+
+          <button
+            className={`flex items-center justify-center w-10 h-10 rounded-lg transition-colors ${
+              currentPage === 'hyperliquid'
+                ? 'bg-secondary/80 text-secondary-foreground'
+                : 'hover:bg-muted text-muted-foreground'
+            }`}
+            onClick={() => onPageChange?.('hyperliquid')}
+            title="Hyperliquid Trading"
+          >
+            <Coins className="w-5 h-5" />
           </button>
 
           <button
@@ -87,15 +88,15 @@ export default function Sidebar({ currentPage = 'comprehensive', onPageChange, o
           </button>
           <button
             className={`flex flex-col items-center justify-center w-12 h-12 rounded-lg transition-colors ${
-              currentPage === 'portfolio'
+              currentPage === 'hyperliquid'
                 ? 'bg-secondary/80 text-secondary-foreground'
                 : 'hover:bg-muted text-muted-foreground'
             }`}
-            onClick={() => onPageChange?.('portfolio')}
-            title="Portfolio"
+            onClick={() => onPageChange?.('hyperliquid')}
+            title="Hyperliquid"
           >
-            <PieChart className="w-5 h-5" />
-            <span className="text-xs mt-1">Portfolio</span>
+            <Coins className="w-5 h-5" />
+            <span className="text-xs mt-1">Hyperliquid</span>
           </button>
           <button
             className={`flex flex-col items-center justify-center w-12 h-12 rounded-lg transition-colors ${
@@ -108,18 +109,6 @@ export default function Sidebar({ currentPage = 'comprehensive', onPageChange, o
           >
             <NotebookPen className="w-5 h-5" />
             <span className="text-xs mt-1">Prompts</span>
-          </button>
-          <button
-            className={`flex flex-col items-center justify-center w-12 h-12 rounded-lg transition-colors ${
-              currentPage === 'asset-curve'
-                ? 'bg-secondary/80 text-secondary-foreground'
-                : 'hover:bg-muted text-muted-foreground'
-            }`}
-            onClick={() => onPageChange?.('asset-curve')}
-            title="Asset Curve"
-          >
-            <TrendingUp className="w-5 h-5" />
-            <span className="text-xs mt-1">Curve</span>
           </button>
           <button
             className="flex flex-col items-center justify-center w-12 h-12 rounded-lg hover:bg-muted transition-colors text-muted-foreground"

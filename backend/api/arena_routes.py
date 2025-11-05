@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
 from database.connection import SessionLocal
+from database.snapshot_connection import SnapshotSessionLocal
 from database.models import (
     Account,
     Trade,
@@ -22,9 +23,15 @@ from database.models import (
     Order,
     AccountStrategyConfig,
 )
+from database.snapshot_models import HyperliquidTrade
 from services.asset_calculator import calc_positions_value
 from services.price_cache import get_cached_price, cache_price
 from services.market_data import get_last_price
+from services.hyperliquid_trading_client import HyperliquidTradingClient
+from utils.encryption import decrypt_private_key
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/arena", tags=["arena"])
 
@@ -51,6 +58,118 @@ def _get_latest_price(symbol: str, market: str = "CRYPTO") -> Optional[float]:
 
     except Exception:
         return None
+
+
+def _get_hyperliquid_positions(db: Session, account_id: Optional[int], environment: str) -> dict:
+    """
+    Get real-time positions from Hyperliquid API (testnet or mainnet)
+
+    Args:
+        db: Database session
+        account_id: Optional account ID to filter
+        environment: "testnet" or "mainnet"
+
+    Returns:
+        Dict with generated_at, trading_mode, and accounts list
+    """
+    # Get all AI accounts or specific account
+    accounts_query = db.query(Account).filter(
+        Account.account_type == "AI",
+        Account.is_active == "true",
+        Account.hyperliquid_enabled == "true"  # Only get Hyperliquid-enabled accounts
+    )
+
+    if account_id:
+        accounts_query = accounts_query.filter(Account.id == account_id)
+
+    accounts = accounts_query.all()
+    snapshots = []
+
+    for account in accounts:
+        # Get appropriate private key based on environment
+        if environment == "testnet":
+            encrypted_key = account.hyperliquid_testnet_private_key
+        else:  # mainnet
+            encrypted_key = account.hyperliquid_mainnet_private_key
+
+        if not encrypted_key:
+            logger.warning(f"Account {account.id} missing {environment} private key, skipping")
+            continue
+
+        try:
+            # Decrypt private key
+            private_key = decrypt_private_key(encrypted_key)
+
+            # Create Hyperliquid client
+            client = HyperliquidTradingClient(
+                account_id=account.id,
+                private_key=private_key,
+                environment=environment
+            )
+
+            # Get account state and positions from Hyperliquid API
+            account_state = client.get_account_state(db)
+            positions_data = client.get_positions(db)
+
+            # Transform Hyperliquid positions to frontend format
+            position_items = []
+            total_unrealized = 0.0
+
+            for p in positions_data:
+                unrealized_pnl = p.get("unrealized_pnl", 0)
+                total_unrealized += unrealized_pnl
+
+                position_items.append({
+                    "id": 0,  # Hyperliquid positions don't have local DB ID
+                    "symbol": p.get("coin", ""),
+                    "name": p.get("coin", ""),
+                    "market": "HYPERLIQUID_PERP",
+                    "side": "LONG" if p.get("szi", 0) > 0 else "SHORT",
+                    "quantity": abs(p.get("szi", 0)),
+                    "avg_cost": p.get("entry_px", 0),
+                    "current_price": p.get("position_value", 0) / abs(p.get("szi", 1)) if p.get("szi", 0) != 0 else 0,
+                    "notional": abs(p.get("szi", 0)) * p.get("entry_px", 0),
+                    "current_value": p.get("position_value", 0),
+                    "unrealized_pnl": unrealized_pnl,
+                })
+
+            # Calculate total return
+            total_equity = account_state.get("total_equity", 0)
+            available_balance = account_state.get("available_balance", 0)
+            used_margin = account_state.get("used_margin", 0)
+
+            # Positions value is the used margin (capital tied up in positions)
+            # Or equivalently: total_equity - available_balance
+            positions_value = used_margin
+
+            initial_capital = float(account.initial_capital or 0)
+            total_return = None
+            if initial_capital > 0:
+                total_return = (total_equity - initial_capital) / initial_capital
+
+            snapshots.append({
+                "account_id": account.id,
+                "account_name": account.name,
+                "model": account.model,
+                "total_unrealized_pnl": total_unrealized,
+                "available_cash": available_balance,
+                "positions_value": positions_value,  # Add positions_value from Hyperliquid data
+                "positions": position_items,
+                "total_assets": total_equity,
+                "initial_capital": initial_capital,
+                "total_return": total_return,
+            })
+
+        except Exception as e:
+            logger.error(f"Failed to get Hyperliquid positions for account {account.id}: {e}", exc_info=True)
+            # Continue with next account instead of failing completely
+            continue
+
+    return {
+        "generated_at": datetime.utcnow().isoformat(),
+        "trading_mode": environment,
+        "accounts": snapshots,
+    }
 
 
 def _analyze_balance_series(balances: List[float]) -> Tuple[float, float, List[float], float]:
@@ -202,9 +321,83 @@ def _aggregate_account_stats(db: Session, account: Account) -> Dict[str, Optiona
 def get_completed_trades(
     limit: int = Query(100, ge=1, le=500),
     account_id: Optional[int] = None,
+    trading_mode: Optional[str] = Query(None, regex="^(paper|testnet|mainnet)$"),
     db: Session = Depends(get_db),
 ):
-    """Return recent trades across all AI accounts."""
+    """Return recent trades across all AI accounts, filtered by trading mode."""
+    if trading_mode in ("testnet", "mainnet"):
+        snapshot_db = SnapshotSessionLocal()
+        try:
+            query = snapshot_db.query(HyperliquidTrade).order_by(desc(HyperliquidTrade.trade_time))
+            query = query.filter(HyperliquidTrade.environment == trading_mode)
+            if account_id:
+                query = query.filter(HyperliquidTrade.account_id == account_id)
+
+            hyper_trades = query.limit(limit).all()
+        finally:
+            snapshot_db.close()
+
+        if not hyper_trades:
+            return {
+                "generated_at": datetime.utcnow().isoformat(),
+                "accounts": [],
+                "trades": [],
+            }
+
+        account_ids = {trade.account_id for trade in hyper_trades}
+        account_map = {
+            acc.id: acc
+            for acc in db.query(Account).filter(Account.id.in_(account_ids)).all()
+        }
+
+        trades: List[dict] = []
+        accounts_meta: Dict[int, dict] = {}
+
+        for trade in hyper_trades:
+            account = account_map.get(trade.account_id)
+            if not account:
+                logger.warning(f"Hyperliquid trade references missing account_id={trade.account_id}")
+                continue
+
+            quantity = float(trade.quantity)
+            price = float(trade.price)
+            notional = float(trade.trade_value)
+            commission = float(trade.fee or 0)
+            side = trade.side.upper()
+
+            trades.append(
+                {
+                    "trade_id": trade.id,
+                    "order_id": None,
+                    "order_no": trade.order_id,
+                    "account_id": account.id,
+                    "account_name": account.name,
+                    "model": account.model,
+                    "side": side,
+                    "direction": "LONG" if side == "BUY" else "SHORT",
+                    "symbol": trade.symbol,
+                    "market": "HYPERLIQUID_PERP",
+                    "price": price,
+                    "quantity": quantity,
+                    "notional": notional,
+                    "commission": commission,
+                    "trade_time": trade.trade_time.isoformat() if trade.trade_time else None,
+                }
+            )
+
+            accounts_meta[account.id] = {
+                "account_id": account.id,
+                "name": account.name,
+                "model": account.model,
+            }
+
+        return {
+            "generated_at": datetime.utcnow().isoformat(),
+            "accounts": list(accounts_meta.values()),
+            "trades": trades,
+        }
+
+    # Paper mode (or no filter) falls back to paper trades table
     query = (
         db.query(Trade, Account)
         .join(Account, Trade.account_id == Account.id)
@@ -213,6 +406,11 @@ def get_completed_trades(
 
     if account_id:
         query = query.filter(Trade.account_id == account_id)
+
+    if trading_mode == "paper":
+        query = query.filter(Trade.hyperliquid_environment == None)
+    elif trading_mode in ("testnet", "mainnet"):
+        query = query.filter(Trade.hyperliquid_environment == trading_mode)
 
     trade_rows = query.limit(limit).all()
 
@@ -274,9 +472,10 @@ def get_completed_trades(
 def get_model_chat(
     limit: int = Query(60, ge=1, le=200),
     account_id: Optional[int] = None,
+    trading_mode: Optional[str] = Query(None, regex="^(paper|testnet|mainnet)$"),
     db: Session = Depends(get_db),
 ):
-    """Return recent AI decision logs as chat-style summaries."""
+    """Return recent AI decision logs as chat-style summaries, filtered by trading mode."""
     query = (
         db.query(AIDecisionLog, Account)
         .join(Account, AIDecisionLog.account_id == Account.id)
@@ -285,6 +484,13 @@ def get_model_chat(
 
     if account_id:
         query = query.filter(AIDecisionLog.account_id == account_id)
+
+    # Filter by trading mode based on hyperliquid_environment field
+    if trading_mode:
+        if trading_mode == "paper":
+            query = query.filter(AIDecisionLog.hyperliquid_environment == None)
+        else:
+            query = query.filter(AIDecisionLog.hyperliquid_environment == trading_mode)
 
     decision_rows = query.limit(limit).all()
 
@@ -365,9 +571,16 @@ def get_model_chat(
 @router.get("/positions")
 def get_positions_snapshot(
     account_id: Optional[int] = None,
+    trading_mode: Optional[str] = Query(None, regex="^(paper|testnet|mainnet)$"),
     db: Session = Depends(get_db),
 ):
-    """Return consolidated positions and cash for active AI accounts."""
+    """Return consolidated positions and cash for active AI accounts, filtered by trading mode."""
+
+    # For Hyperliquid modes (testnet/mainnet), fetch real-time data from Hyperliquid API
+    if trading_mode and trading_mode in ["testnet", "mainnet"]:
+        return _get_hyperliquid_positions(db, account_id, trading_mode)
+
+    # For paper mode (or no mode specified), query local database
     accounts_query = db.query(Account).filter(
         Account.account_type == "AI",
         Account.is_active == "true",
@@ -449,6 +662,7 @@ def get_positions_snapshot(
 
     return {
         "generated_at": datetime.utcnow().isoformat(),
+        "trading_mode": trading_mode or "paper",
         "accounts": snapshots,
     }
 

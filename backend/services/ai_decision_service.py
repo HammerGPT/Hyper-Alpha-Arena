@@ -289,6 +289,9 @@ OUTPUT_FORMAT_JSON = (
     '  "operation": "buy" | "sell" | "hold" | "close",\n'
     '  "symbol": "<BTC|ETH|SOL|BNB|XRP|DOGE>",\n'
     '  "target_portion_of_balance": <float 0.0-1.0>,\n'
+    '  "leverage": <integer 1-20>,\n'
+    '  "max_price": <number, required for "buy" operations>,\n'
+    '  "min_price": <number, required for "sell"/"close" operations>,\n'
     '  "reason": "<string max 150 chars>",\n'
     '  "trading_strategy": "<string 2-3 sentences>"\n'
     '}'
@@ -312,8 +315,55 @@ def _build_prompt_context(
     news_section: str,
     samples: Optional[List] = None,
     target_symbol: Optional[str] = None,
+    hyperliquid_state: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    positions = portfolio.get("positions", {})
+    base_portfolio = portfolio or {}
+    base_positions = base_portfolio.get("positions") or {}
+    positions: Dict[str, Dict[str, Any]] = {symbol: dict(data) for symbol, data in base_positions.items()}
+
+    hyperliquid_enabled = getattr(account, "hyperliquid_enabled", "false") == "true"
+    environment = getattr(account, "hyperliquid_environment", "paper") or "paper"
+
+    if hyperliquid_enabled and environment in ("testnet", "mainnet"):
+        if not hyperliquid_state:
+            raise ValueError(
+                f"Hyperliquid account {account.id} ({account.name}) is missing exchange state for prompt context"
+            )
+
+        hl_positions = hyperliquid_state.get("positions", []) or []
+        positions = {}
+        for pos in hl_positions:
+            symbol = (pos.get("coin") or "").upper()
+            if not symbol:
+                continue
+
+            quantity = float(pos.get("szi", 0) or 0)
+            entry_px = float(pos.get("entry_px", 0) or 0)
+            current_value = float(pos.get("position_value", 0) or 0)
+
+            positions[symbol] = {
+                "quantity": quantity,
+                "avg_cost": entry_px,
+                "current_value": current_value,
+                "unrealized_pnl": float(pos.get("unrealized_pnl", 0) or 0),
+                "leverage": pos.get("leverage"),
+                "liquidation_price": pos.get("liquidation_px"),
+            }
+
+        portfolio = {
+            "cash": float(hyperliquid_state.get("available_balance", 0) or 0),
+            "frozen_cash": float(hyperliquid_state.get("used_margin", 0) or 0),
+            "total_assets": float(hyperliquid_state.get("total_equity", 0) or 0),
+            "positions": positions,
+        }
+    else:
+        portfolio = {
+            "cash": base_portfolio.get("cash"),
+            "frozen_cash": base_portfolio.get("frozen_cash"),
+            "total_assets": base_portfolio.get("total_assets"),
+            "positions": positions,
+        }
+
     now = datetime.utcnow()
 
     # Legacy format variables (for backward compatibility with existing templates)
@@ -330,6 +380,92 @@ def _build_prompt_context(
     total_account_value = _format_currency(portfolio.get('total_assets'))
     holdings_detail = _build_holdings_detail(positions)
     market_prices = _build_market_prices(prices)
+
+    # Hyperliquid-specific context
+    max_leverage = getattr(account, "max_leverage", 3)
+    default_leverage = getattr(account, "default_leverage", 1)
+
+    if hyperliquid_enabled:
+        trading_environment = f"Platform: Hyperliquid Perpetual Contracts | Environment: {environment.upper()}"
+
+        if environment == "mainnet":
+            real_trading_warning = "⚠️ REAL MONEY TRADING - All decisions execute on live markets"
+            operational_constraints = f"""- Perpetual contract trading with cross margin
+- Maximum position size: ≤ 25% of available balance per trade
+- Leverage range: 1x to {max_leverage}x (default: {default_leverage}x)
+- Margin call threshold: 80% margin usage (CRITICAL - will auto-liquidate)
+- Default stop loss: -10% from entry (adjust based on leverage and volatility)
+- Default take profit: +20% from entry (adjust based on risk/reward)
+- Liquidation protection: NEVER exceed 70% margin usage
+- Risk management: Monitor unrealized PnL and margin usage before each trade"""
+        else:  # testnet
+            real_trading_warning = "Testnet simulation environment (using test funds)"
+            operational_constraints = f"""- Perpetual contract trading with cross margin (testnet mode)
+- Default position size: ≤ 30% of available balance per trade
+- Leverage range: 1x to {max_leverage}x (default: {default_leverage}x)
+- Margin call threshold: 80% margin usage
+- Default stop loss: -8% from entry (adjust based on leverage)
+- Default take profit: +15% from entry
+- Liquidation protection: avoid exceeding 70% margin usage"""
+
+        leverage_constraints = f"- Leverage range: 1x to {max_leverage}x (default: {default_leverage}x)"
+        margin_info = "\nMargin Mode: Cross margin (shared across all positions)"
+    else:
+        trading_environment = "Platform: Paper Trading Simulation"
+        real_trading_warning = "Sandbox environment (no real funds at risk)"
+        operational_constraints = """- No pyramiding or position size increases without explicit exit plan
+- Default risk per trade: ≤ 20% of available cash
+- Default stop loss: -5% from entry (adjust based on volatility)
+- Default take profit: +10% from entry (adjust based on signals)"""
+        leverage_constraints = ""
+        margin_info = ""
+
+    # Process Hyperliquid account state if provided
+    if hyperliquid_state:
+        total_equity = _format_currency(hyperliquid_state.get('total_equity'))
+        available_balance = _format_currency(hyperliquid_state.get('available_balance'))
+        used_margin = _format_currency(hyperliquid_state.get('used_margin', 0))
+        margin_usage_percent = f"{hyperliquid_state.get('margin_usage_percent', 0):.1f}"
+        maintenance_margin = _format_currency(hyperliquid_state.get('maintenance_margin', 0))
+
+        # Build positions detail from Hyperliquid positions
+        hl_positions = hyperliquid_state.get('positions', [])
+        if hl_positions:
+            pos_lines = []
+            for pos in hl_positions:
+                symbol = pos.get('coin', 'UNKNOWN')
+                size = float(pos.get('szi', 0))
+                direction = "Long" if size > 0 else "Short"
+                abs_size = abs(size)
+                entry_px = float(pos.get('entry_px', 0))
+                unrealized_pnl = float(pos.get('unrealized_pnl', 0))
+                leverage = float(pos.get('leverage', 1))
+                max_leverage = float(pos.get('max_leverage', 10))
+                margin_used = float(pos.get('margin_used', 0))
+                position_value = float(pos.get('position_value', 0))
+                roe = float(pos.get('return_on_equity', 0))
+                funding_total = float(pos.get('cum_funding_all_time', 0))
+
+                # Format values
+                pnl_str = f"+${unrealized_pnl:,.2f}" if unrealized_pnl >= 0 else f"-${abs(unrealized_pnl):,.2f}"
+                roe_str = f"+{roe:.2f}%" if roe >= 0 else f"{roe:.2f}%"
+                funding_str = f"+${funding_total:.4f}" if funding_total >= 0 else f"-${abs(funding_total):.4f}"
+
+                pos_lines.append(
+                    f"- {symbol}: {direction} {abs_size:.3f} units @ ${entry_px:,.2f} avg\n"
+                    f"  Current value: ${position_value:,.2f} | Unrealized P&L: {pnl_str} ({roe_str} ROE)\n"
+                    f"  Leverage: {leverage:.0f}x (max {max_leverage:.0f}x) | Margin used: ${margin_used:,.2f} | Funding accrual: {funding_str} total"
+                )
+            positions_detail = "\n".join(pos_lines)
+        else:
+            positions_detail = "No open positions"
+    else:
+        total_equity = "N/A"
+        available_balance = "N/A"
+        used_margin = "N/A"
+        margin_usage_percent = "0"
+        maintenance_margin = "N/A"
+        positions_detail = "No open positions"
 
     return {
         # Legacy variables (for Default prompt and backward compatibility)
@@ -351,8 +487,24 @@ def _build_prompt_context(
         "total_return_percent": total_return_percent,
         "available_cash": available_cash,
         "total_account_value": total_account_value,
-        "holdings_detail": holdings_detail,
+        "holdings_detail": positions_detail if hyperliquid_enabled else holdings_detail,
         "market_prices": market_prices,
+        # Hyperliquid-specific variables
+        "trading_environment": trading_environment,
+        "real_trading_warning": real_trading_warning,
+        "operational_constraints": operational_constraints,
+        "leverage_constraints": leverage_constraints,
+        "margin_info": margin_info,
+        "environment": environment,
+        "max_leverage": max_leverage,
+        "default_leverage": default_leverage,
+        # Hyperliquid account state (dynamic from API)
+        "total_equity": total_equity,
+        "available_balance": available_balance,
+        "used_margin": used_margin,
+        "margin_usage_percent": margin_usage_percent,
+        "maintenance_margin": maintenance_margin,
+        "positions_detail": positions_detail,
     }
 
 
@@ -472,6 +624,7 @@ def call_ai_for_decision(
     samples: Optional[List] = None,
     target_symbol: Optional[str] = None,
     symbols: Optional[List[str]] = None,
+    hyperliquid_state: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict]:
     """Call AI model API to get trading decision
 
@@ -483,6 +636,7 @@ def call_ai_for_decision(
         samples: Legacy single-symbol samples (deprecated, use symbols instead)
         target_symbol: Legacy single symbol (deprecated, use symbols instead)
         symbols: List of symbols to include sampling data for (preferred method)
+        hyperliquid_state: Optional Hyperliquid account state for real trading
     """
     # Check if this is a default API key
     if _is_default_api_key(account.api_key):
@@ -509,11 +663,11 @@ def call_ai_for_decision(
         # New multi-symbol approach
         from services.sampling_pool import sampling_pool
         sampling_data = _build_multi_symbol_sampling_data(symbols, sampling_pool)
-        context = _build_prompt_context(account, portfolio, prices, news_section, None, None)
+        context = _build_prompt_context(account, portfolio, prices, news_section, None, None, hyperliquid_state)
         context["sampling_data"] = sampling_data
     else:
         # Legacy single-symbol approach (backward compatibility)
-        context = _build_prompt_context(account, portfolio, prices, news_section, samples, target_symbol)
+        context = _build_prompt_context(account, portfolio, prices, news_section, samples, target_symbol, hyperliquid_state)
 
     try:
         prompt = template.template_text.format_map(SafeDict(context))
@@ -835,6 +989,12 @@ def save_ai_decision(db: Session, account: Account, decision: Dict, portfolio: D
                 if total_balance > 0:
                     prev_portion = symbol_value / total_balance
 
+        # Get Hyperliquid environment for decision tagging
+        hyperliquid_enabled = getattr(account, "hyperliquid_enabled", "false") == "true"
+        hyperliquid_environment = None
+        if hyperliquid_enabled:
+            hyperliquid_environment = getattr(account, "hyperliquid_environment", None)
+
         # Create decision log entry
         decision_log = AIDecisionLog(
             account_id=account.id,
@@ -848,7 +1008,8 @@ def save_ai_decision(db: Session, account: Account, decision: Dict, portfolio: D
             order_id=order_id,
             prompt_snapshot=prompt_snapshot,
             reasoning_snapshot=reasoning_snapshot,
-            decision_snapshot=decision_snapshot_structured or raw_decision_snapshot
+            decision_snapshot=decision_snapshot_structured or raw_decision_snapshot,
+            hyperliquid_environment=hyperliquid_environment
         )
 
         db.add(decision_log)

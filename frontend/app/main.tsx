@@ -25,13 +25,15 @@ const resolveWsUrl = () => {
 
 import Header from '@/components/layout/Header'
 import Sidebar from '@/components/layout/Sidebar'
-import Portfolio from '@/components/portfolio/Portfolio'
 import ComprehensiveView from '@/components/portfolio/ComprehensiveView'
 import SystemLogs from '@/components/layout/SystemLogs'
 import PromptManager from '@/components/prompt/PromptManager'
 import TraderManagement from '@/components/trader/TraderManagement'
+import { HyperliquidPage } from '@/components/hyperliquid'
+import HyperliquidView from '@/components/hyperliquid/HyperliquidView'
 import { AIDecision, getAccounts } from '@/lib/api'
 import { ArenaDataProvider } from '@/contexts/ArenaDataContext'
+import { TradingModeProvider, useTradingMode } from '@/contexts/TradingModeContext'
 
 interface User {
   id: number
@@ -62,14 +64,15 @@ interface Order { id: number; order_no: string; symbol: string; name: string; ma
 interface Trade { id: number; order_id: number; account_id: number; symbol: string; name: string; market: string; side: string; price: number; quantity: number; commission: number; trade_time: string }
 
 const PAGE_TITLES: Record<string, string> = {
-  portfolio: 'Crypto Paper Trading',
   comprehensive: 'Hyper Alpha Arena',
   'system-logs': 'System Logs',
   'prompt-management': 'Prompt Templates',
   'trader-management': 'AI Trader Management',
+  'hyperliquid': 'Hyperliquid Trading',
 }
 
 function App() {
+  const { tradingMode } = useTradingMode()
   const [user, setUser] = useState<User | null>(null)
   const [account, setAccount] = useState<Account | null>(null)
   const [overview, setOverview] = useState<Overview | null>(null)
@@ -78,7 +81,9 @@ function App() {
   const [trades, setTrades] = useState<Trade[]>([])
   const [aiDecisions, setAiDecisions] = useState<AIDecision[]>([])
   const [allAssetCurves, setAllAssetCurves] = useState<any[]>([])
+  const [hyperliquidRefreshKey, setHyperliquidRefreshKey] = useState(0)
   const [currentPage, setCurrentPage] = useState<string>('comprehensive')
+  const tradingModeRef = useRef(tradingMode)
 
   // Temporary: Check URL hash for page routing
   useEffect(() => {
@@ -91,6 +96,13 @@ function App() {
   const wsRef = useRef<WebSocket | null>(null)
   const [accounts, setAccounts] = useState<any[]>([])
   const [accountsLoading, setAccountsLoading] = useState<boolean>(true)
+
+  useEffect(() => {
+    tradingModeRef.current = tradingMode
+    if (tradingMode !== 'paper') {
+      setHyperliquidRefreshKey(prev => prev + 1)
+    }
+  }, [tradingMode])
 
   useEffect(() => {
     let reconnectTimer: NodeJS.Timeout | null = null
@@ -106,7 +118,12 @@ function App() {
         const handleOpen = () => {
           console.log('WebSocket connected')
           // Start with hardcoded default user for paper trading
-          ws!.send(JSON.stringify({ type: 'bootstrap', username: 'default', initial_capital: 10000 }))
+          ws!.send(JSON.stringify({
+            type: 'bootstrap',
+            username: 'default',
+            initial_capital: 10000,
+            trading_mode: tradingMode
+          }))
         }
         
         const handleMessage = (e: MessageEvent) => {
@@ -118,26 +135,46 @@ function App() {
               }
               if (msg.account) {
                 setAccount(msg.account)
-                // Only request snapshot if we have an account
-                ws!.send(JSON.stringify({ type: 'get_snapshot' }))
+                // Only request snapshot for paper mode
+                if (tradingMode === 'paper') {
+                  ws!.send(JSON.stringify({
+                    type: 'get_snapshot',
+                    trading_mode: tradingMode
+                  }))
+                }
               }
               // refresh accounts list once bootstrapped
               refreshAccounts()
             } else if (msg.type === 'snapshot') {
-              setOverview(msg.overview)
-              setPositions(msg.positions)
-              setOrders(msg.orders)
-              setTrades(msg.trades || [])
-              setAiDecisions(msg.ai_decisions || [])
-              setAllAssetCurves(msg.all_asset_curves || [])
+              // Process snapshot data (backend already filters by trading mode)
+              if (msg.overview) setOverview(msg.overview)
+              if (msg.positions) setPositions(msg.positions)
+              if (msg.orders) setOrders(msg.orders)
+              if (msg.trades) setTrades(msg.trades)
+              if (msg.ai_decisions) setAiDecisions(msg.ai_decisions)
+              if (msg.all_asset_curves) setAllAssetCurves(msg.all_asset_curves)
+              const currentMode = tradingModeRef.current
+              const messageMode = msg.trading_mode as string | undefined
+              if (
+                currentMode !== 'paper' &&
+                (messageMode === undefined || messageMode === currentMode)
+              ) {
+                setHyperliquidRefreshKey(prev => prev + 1)
+              }
             } else if (msg.type === 'trades') {
               setTrades(msg.trades || [])
             } else if (msg.type === 'order_filled') {
               toast.success('Order filled')
-              ws!.send(JSON.stringify({ type: 'get_snapshot' }))
+              ws!.send(JSON.stringify({
+                type: 'get_snapshot',
+                trading_mode: tradingMode
+              }))
             } else if (msg.type === 'order_pending') {
               toast('Order placed, waiting for fill', { icon: '⏳' })
-              ws!.send(JSON.stringify({ type: 'get_snapshot' }))
+              ws!.send(JSON.stringify({
+                type: 'get_snapshot',
+                trading_mode: tradingMode
+              }))
             } else if (msg.type === 'user_switched') {
               setUser(msg.user)
             } else if (msg.type === 'account_switched') {
@@ -156,6 +193,24 @@ function App() {
             } else if (msg.type === 'asset_curve_update') {
               // Real-time asset curve update
               setAllAssetCurves(msg.data || [])
+              const currentMode = tradingModeRef.current
+              const messageMode = msg.trading_mode as string | undefined
+              if (
+                currentMode !== 'paper' &&
+                (messageMode === undefined || messageMode === currentMode)
+              ) {
+                setHyperliquidRefreshKey(prev => prev + 1)
+              }
+            } else if (msg.type === 'asset_curve_data') {
+              setAllAssetCurves(msg.data || [])
+              const currentMode = tradingModeRef.current
+              const messageMode = msg.trading_mode as string | undefined
+              if (
+                currentMode !== 'paper' &&
+                (messageMode === undefined || messageMode === currentMode)
+              ) {
+                setHyperliquidRefreshKey(prev => prev + 1)
+              }
             } else if (msg.type === 'error') {
               console.error(msg.message)
               toast.error(msg.message || 'Order error')
@@ -246,6 +301,45 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountRefreshTrigger])
 
+  // Refresh data when trading mode changes
+  useEffect(() => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && account) {
+      console.log(`Trading mode changed to ${tradingMode}, requesting snapshot...`)
+      wsRef.current.send(JSON.stringify({
+        type: 'get_snapshot',
+        trading_mode: tradingMode
+      }))
+      // Also refresh asset curve data
+      wsRef.current.send(JSON.stringify({
+        type: 'get_asset_curve',
+        timeframe: '5m',
+        trading_mode: tradingMode
+      }))
+    }
+  }, [tradingMode, account])
+
+  // Auto-refresh data every 30 seconds
+  useEffect(() => {
+    const refreshInterval = setInterval(() => {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && account) {
+        console.log(`Auto-refresh: requesting data for ${tradingMode} mode`)
+        wsRef.current.send(JSON.stringify({
+          type: 'get_snapshot',
+          trading_mode: tradingMode
+        }))
+        wsRef.current.send(JSON.stringify({
+          type: 'get_asset_curve',
+          timeframe: '5m',
+          trading_mode: tradingMode
+        }))
+      } else {
+        console.log('Auto-refresh skipped: WebSocket not ready or no account')
+      }
+    }, 30000) // 30 seconds
+
+    return () => clearInterval(refreshInterval)
+  }, [account, tradingMode])
+
   const placeOrder = (payload: any) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       console.warn('WS not connected, cannot place order')
@@ -292,58 +386,62 @@ function App() {
   const handleAccountUpdated = () => {
     // Increment refresh trigger to force AccountSelector to refresh
     setAccountRefreshTrigger(prev => prev + 1)
-    
+
     // Also refresh the current data snapshot
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'get_snapshot' }))
+      wsRef.current.send(JSON.stringify({
+        type: 'get_snapshot',
+        trading_mode: tradingMode
+      }))
     }
   }
 
-  if (!user || !account || !overview) return <div className="p-8">Connecting to trading server...</div>
+  // For non-paper modes, create minimal state to avoid loading screen
+  const effectiveOverview = overview || (tradingMode !== 'paper' ? {
+    account: { id: 1, user_id: 1, name: 'Hyperliquid Account', account_type: 'AI', initial_capital: 0, current_cash: 0, frozen_cash: 0 },
+    total_assets: 0,
+    positions_value: 0
+  } : null)
+
+  if (!user || !account || (!effectiveOverview && tradingMode === 'paper')) return <div className="p-8">Connecting to trading server...</div>
 
   const renderMainContent = () => {
     const refreshData = () => {
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: 'get_snapshot' }))
+        wsRef.current.send(JSON.stringify({
+          type: 'get_snapshot',
+          trading_mode: tradingMode
+        }))
       }
     }
 
     return (
       <main className="flex-1 p-4 overflow-hidden">
-        {currentPage === 'portfolio' && (
-          <Portfolio
-            overview={overview}
-            positions={positions}
-            orders={orders}
-            trades={trades}
-            aiDecisions={aiDecisions}
-            allAssetCurves={allAssetCurves}
-            wsRef={wsRef}
-            onSwitchAccount={switchAccount}
-            onRefreshData={refreshData}
-            accountRefreshTrigger={accountRefreshTrigger}
-            accounts={accounts}
-            loadingAccounts={accountsLoading}
-          />
-        )}
-        
+
         {currentPage === 'comprehensive' && (
-          <ComprehensiveView
-            overview={overview}
-            positions={positions}
-            orders={orders}
-            trades={trades}
-            aiDecisions={aiDecisions}
-            allAssetCurves={allAssetCurves}
-            wsRef={wsRef}
-            onSwitchUser={switchUser}
-            onSwitchAccount={switchAccount}
-            onRefreshData={refreshData}
-            accountRefreshTrigger={accountRefreshTrigger}
-            accounts={accounts}
-            loadingAccounts={accountsLoading}
-            onPageChange={setCurrentPage}
-          />
+          tradingMode === 'paper' ? (
+            <ComprehensiveView
+              overview={effectiveOverview}
+              positions={positions}
+              orders={orders}
+              trades={trades}
+              aiDecisions={aiDecisions}
+              allAssetCurves={allAssetCurves}
+              wsRef={wsRef}
+              onSwitchUser={switchUser}
+              onSwitchAccount={switchAccount}
+              onRefreshData={refreshData}
+              accountRefreshTrigger={accountRefreshTrigger}
+              accounts={accounts}
+              loadingAccounts={accountsLoading}
+              onPageChange={setCurrentPage}
+            />
+          ) : (
+            <HyperliquidView
+              wsRef={wsRef}
+              refreshKey={hyperliquidRefreshKey}
+            />
+          )
         )}
 
         {currentPage === 'system-logs' && (
@@ -357,11 +455,15 @@ function App() {
         {currentPage === 'trader-management' && (
           <TraderManagement />
         )}
+
+        {currentPage === 'hyperliquid' && (
+          <HyperliquidPage accountId={account?.id || 1} />
+        )}
       </main>
     )
   }
 
-  const pageTitle = PAGE_TITLES[currentPage] ?? PAGE_TITLES.portfolio
+  const pageTitle = PAGE_TITLES[currentPage] ?? PAGE_TITLES.comprehensive
 
   return (
     <div className="h-screen flex overflow-hidden">
@@ -375,7 +477,7 @@ function App() {
           title={pageTitle}
           currentUser={user}
           currentAccount={account}
-          showAccountSelector={currentPage === 'portfolio' || currentPage === 'comprehensive'}
+          showAccountSelector={currentPage === 'comprehensive'}
           onUserChange={switchUser}
         />
         {renderMainContent()}
@@ -386,9 +488,11 @@ function App() {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ArenaDataProvider>
-      <Toaster position="top-right" />
-      <App />
-    </ArenaDataProvider>
+    <TradingModeProvider>
+      <ArenaDataProvider>
+        <Toaster position="top-right" />
+        <App />
+      </ArenaDataProvider>
+    </TradingModeProvider>
   </React.StrictMode>,
 )

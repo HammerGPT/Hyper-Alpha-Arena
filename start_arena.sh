@@ -143,6 +143,11 @@ if ! .venv/bin/python -c "import uvicorn" 2>/dev/null; then
     fi
 fi
 
+# Load environment variables from .env file
+if [ -f ".env" ]; then
+    export $(cat .env | grep -v '^#' | xargs)
+fi
+
 # Start service in background
 nohup .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8802 > ../arena.log 2>&1 &
 echo $! > ../arena.pid

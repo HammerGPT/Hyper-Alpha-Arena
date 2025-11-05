@@ -445,10 +445,11 @@ export interface ArenaTradesResponse {
   trades: ArenaTrade[]
 }
 
-export async function getArenaTrades(params?: { limit?: number; account_id?: number }): Promise<ArenaTradesResponse> {
+export async function getArenaTrades(params?: { limit?: number; account_id?: number; trading_mode?: string }): Promise<ArenaTradesResponse> {
   const search = new URLSearchParams()
   if (params?.limit) search.append('limit', params.limit.toString())
   if (params?.account_id) search.append('account_id', params.account_id.toString())
+  if (params?.trading_mode) search.append('trading_mode', params.trading_mode)
   const query = search.toString()
   const response = await apiRequest(`/arena/trades${query ? `?${query}` : ''}`)
   return response.json()
@@ -482,10 +483,11 @@ export interface ArenaModelChatResponse {
   entries: ArenaModelChatEntry[]
 }
 
-export async function getArenaModelChat(params?: { limit?: number; account_id?: number }): Promise<ArenaModelChatResponse> {
+export async function getArenaModelChat(params?: { limit?: number; account_id?: number; trading_mode?: string }): Promise<ArenaModelChatResponse> {
   const search = new URLSearchParams()
   if (params?.limit) search.append('limit', params.limit.toString())
   if (params?.account_id) search.append('account_id', params.account_id.toString())
+  if (params?.trading_mode) search.append('trading_mode', params.trading_mode)
   const query = search.toString()
   const response = await apiRequest(`/arena/model-chat${query ? `?${query}` : ''}`)
   return response.json()
@@ -522,9 +524,10 @@ export interface ArenaPositionsResponse {
   accounts: ArenaPositionsAccount[]
 }
 
-export async function getArenaPositions(params?: { account_id?: number }): Promise<ArenaPositionsResponse> {
+export async function getArenaPositions(params?: { account_id?: number; trading_mode?: string }): Promise<ArenaPositionsResponse> {
   const search = new URLSearchParams()
   if (params?.account_id) search.append('account_id', params.account_id.toString())
+  if (params?.trading_mode) search.append('trading_mode', params.trading_mode)
   const query = search.toString()
   const response = await apiRequest(`/arena/positions${query ? `?${query}` : ''}`)
   return response.json()

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
   LineChart,
   Line,
@@ -11,6 +11,7 @@ import {
 import { Card } from '@/components/ui/card'
 import { getModelLogo, getModelChartLogo, getModelColor } from './logoAssets'
 import FlipNumber from './FlipNumber'
+import { useTradingMode } from '@/contexts/TradingModeContext'
 
 interface AssetCurveData {
   timestamp?: number
@@ -48,33 +49,37 @@ export default function AssetCurve({
   highlightAccountId,
   onHighlightAccountChange
 }: AssetCurveProps) {
+  const { tradingMode } = useTradingMode()
+  const prevTradingMode = useRef(tradingMode)
   const timeframe: Timeframe = DEFAULT_TIMEFRAME
   const [data, setData] = useState<AssetCurveData[]>(initialData || [])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isInitialized, setIsInitialized] = useState(false)
-  const cacheRef = useState(new Map<Timeframe, TimeframeCacheEntry>())[0]
+  const cacheRef = useState(new Map<string, TimeframeCacheEntry>())[0]
   const [liveAccountTotals, setLiveAccountTotals] = useState<Map<number, number>>(new Map())
   const [logoPulseMap, setLogoPulseMap] = useState<Map<number, number>>(new Map())
   const [hoveredAccountId, setHoveredAccountId] = useState<number | null>(null)
 
   const storeCache = useCallback((tf: Timeframe, nextData: AssetCurveData[]) => {
-    cacheRef.set(tf, {
+    const cacheKey = `${tf}_${tradingMode}`
+    cacheRef.set(cacheKey, {
       data: nextData,
       lastFetched: Date.now(),
       initialized: true,
     })
-  }, [cacheRef])
+  }, [cacheRef, tradingMode])
 
   const primeFromCache = useCallback((tf: Timeframe) => {
-    const cached = cacheRef.get(tf)
+    const cacheKey = `${tf}_${tradingMode}`
+    const cached = cacheRef.get(cacheKey)
     if (!cached) return false
     setData(cached.data)
     setLoading(false)
     setError(null)
     setIsInitialized(prev => prev || cached.initialized)
     return true
-  }, [cacheRef])
+  }, [cacheRef, tradingMode])
 
   // Listen for WebSocket asset curve updates
   useEffect(() => {
@@ -138,9 +143,20 @@ export default function AssetCurve({
     }
   }, [wsRef, timeframe, storeCache])
 
-  // Request data when timeframe changes
+  // Clear data when trading mode changes
   useEffect(() => {
-    const cached = cacheRef.get(timeframe)
+    if (prevTradingMode.current !== null && prevTradingMode.current !== tradingMode) {
+      setData([])
+      setLiveAccountTotals(new Map())
+      cacheRef.clear()
+    }
+    prevTradingMode.current = tradingMode
+  }, [tradingMode, cacheRef])
+
+  // Request data when timeframe or trading_mode changes
+  useEffect(() => {
+    const cacheKey = `${timeframe}_${tradingMode}`
+    const cached = cacheRef.get(cacheKey)
     const isFresh = cached ? Date.now() - cached.lastFetched < CACHE_STALE_MS : false
     const hadCache = primeFromCache(timeframe)
 
@@ -152,13 +168,14 @@ export default function AssetCurve({
       wsRef.current.send(JSON.stringify({
         type: 'get_asset_curve',
         timeframe,
+        trading_mode: tradingMode,
       }))
     } else if (!hadCache && initialData && !isInitialized) {
       setData(initialData)
       setIsInitialized(true)
       storeCache(timeframe, initialData)
     }
-  }, [timeframe, wsRef, initialData, isInitialized, primeFromCache, storeCache, cacheRef])
+  }, [timeframe, tradingMode, wsRef, initialData, isInitialized, primeFromCache, storeCache, cacheRef])
 
   if (!data || data.length === 0) {
     return (
