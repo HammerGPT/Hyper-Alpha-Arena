@@ -119,18 +119,33 @@ def _get_hyperliquid_positions(db: Session, account_id: Optional[int], environme
                 unrealized_pnl = p.get("unrealized_pnl", 0)
                 total_unrealized += unrealized_pnl
 
+                szi = float(p.get("szi", 0) or 0)
+                entry_px = float(p.get("entry_px", 0) or 0)
+                position_value = float(p.get("position_value", 0) or 0)
+                notional = abs(szi) * entry_px
+                avg_cost = entry_px
+                current_price = position_value / abs(szi) if szi != 0 else entry_px
+
                 position_items.append({
                     "id": 0,  # Hyperliquid positions don't have local DB ID
-                    "symbol": p.get("coin", ""),
-                    "name": p.get("coin", ""),
+                    "symbol": p.get("coin", "") or "",
+                    "name": p.get("coin", "") or "",
                     "market": "HYPERLIQUID_PERP",
-                    "side": "LONG" if p.get("szi", 0) > 0 else "SHORT",
-                    "quantity": abs(p.get("szi", 0)),
-                    "avg_cost": p.get("entry_px", 0),
-                    "current_price": p.get("position_value", 0) / abs(p.get("szi", 1)) if p.get("szi", 0) != 0 else 0,
-                    "notional": abs(p.get("szi", 0)) * p.get("entry_px", 0),
-                    "current_value": p.get("position_value", 0),
-                    "unrealized_pnl": unrealized_pnl,
+                    "side": "LONG" if szi > 0 else "SHORT",
+                    "quantity": abs(szi),
+                    "avg_cost": avg_cost,
+                    "current_price": current_price,
+                    "notional": notional,
+                    "current_value": position_value,
+                    "unrealized_pnl": float(unrealized_pnl),
+                    "leverage": p.get("leverage"),
+                    "margin_used": float(p.get("margin_used", 0) or 0),
+                    "return_on_equity": float(p.get("return_on_equity", 0) or 0),
+                    "percentage": float(p.get("percentage", 0) or 0),
+                    "margin_mode": p.get("margin_mode", "cross"),
+                    "liquidation_px": float(p.get("liquidation_px", 0) or 0),
+                    "max_leverage": p.get("max_leverage"),
+                    "leverage_type": p.get("leverage_type"),
                 })
 
             # Calculate total return
@@ -151,11 +166,15 @@ def _get_hyperliquid_positions(db: Session, account_id: Optional[int], environme
                 "account_id": account.id,
                 "account_name": account.name,
                 "model": account.model,
+                "environment": environment,
                 "total_unrealized_pnl": total_unrealized,
                 "available_cash": available_balance,
+                "used_margin": used_margin,
                 "positions_value": positions_value,  # Add positions_value from Hyperliquid data
                 "positions": position_items,
                 "total_assets": total_equity,
+                "margin_usage_percent": account_state.get("margin_usage_percent", 0),
+                "margin_mode": "cross",
                 "initial_capital": initial_capital,
                 "total_return": total_return,
             })

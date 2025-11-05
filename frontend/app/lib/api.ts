@@ -505,18 +505,30 @@ export interface ArenaPositionItem {
   notional: number
   current_value: number
   unrealized_pnl: number
+  leverage?: number | null
+  margin_used?: number | null
+  return_on_equity?: number | null
+  percentage?: number | null
+  margin_mode?: string | null
+  liquidation_px?: number | null
+  max_leverage?: number | null
+  leverage_type?: string | null
 }
 
 export interface ArenaPositionsAccount {
   account_id: number
   account_name: string
   model?: string | null
+  environment?: string | null
   total_unrealized_pnl: number
   available_cash: number
+  used_margin?: number | null
   positions: ArenaPositionItem[]
   total_assets: number
   initial_capital: number
   total_return?: number | null
+  margin_usage_percent?: number | null
+  margin_mode?: string | null
 }
 
 export interface ArenaPositionsResponse {
@@ -530,7 +542,77 @@ export async function getArenaPositions(params?: { account_id?: number; trading_
   if (params?.trading_mode) search.append('trading_mode', params.trading_mode)
   const query = search.toString()
   const response = await apiRequest(`/arena/positions${query ? `?${query}` : ''}`)
-  return response.json()
+  const data = await response.json()
+
+  const accounts = Array.isArray(data.accounts)
+    ? data.accounts.map((account: any) => ({
+        account_id: Number(account.account_id),
+        account_name: account.account_name ?? '',
+        model: account.model ?? null,
+        environment: account.environment ?? null,
+        total_unrealized_pnl: Number(account.total_unrealized_pnl ?? 0),
+        available_cash: Number(account.available_cash ?? 0),
+        positions_value: Number(account.positions_value ?? account.used_margin ?? 0),
+        used_margin: account.used_margin !== undefined ? Number(account.used_margin) : null,
+        total_assets: Number(account.total_assets ?? 0),
+        initial_capital: Number(account.initial_capital ?? 0),
+        total_return:
+          account.total_return !== undefined && account.total_return !== null
+            ? Number(account.total_return)
+            : null,
+        margin_usage_percent:
+          account.margin_usage_percent !== undefined && account.margin_usage_percent !== null
+            ? Number(account.margin_usage_percent)
+            : null,
+        margin_mode: account.margin_mode ?? null,
+        positions: Array.isArray(account.positions)
+          ? account.positions.map((pos: any, idx: number) => ({
+              id: pos.id ?? idx,
+              symbol: pos.symbol ?? '',
+              name: pos.name ?? '',
+              market: pos.market ?? '',
+              side: pos.side ?? '',
+              quantity: Number(pos.quantity ?? 0),
+              avg_cost: Number(pos.avg_cost ?? 0),
+              current_price: Number(pos.current_price ?? 0),
+              notional: Number(pos.notional ?? 0),
+              current_value: Number(pos.current_value ?? 0),
+              unrealized_pnl: Number(pos.unrealized_pnl ?? 0),
+              leverage:
+                pos.leverage !== undefined && pos.leverage !== null
+                  ? Number(pos.leverage)
+                  : null,
+              margin_used:
+                pos.margin_used !== undefined && pos.margin_used !== null
+                  ? Number(pos.margin_used)
+                  : null,
+              return_on_equity:
+                pos.return_on_equity !== undefined && pos.return_on_equity !== null
+                  ? Number(pos.return_on_equity)
+                  : null,
+              percentage:
+                pos.percentage !== undefined && pos.percentage !== null
+                  ? Number(pos.percentage)
+                  : null,
+              margin_mode: pos.margin_mode ?? null,
+              liquidation_px:
+                pos.liquidation_px !== undefined && pos.liquidation_px !== null
+                  ? Number(pos.liquidation_px)
+                  : null,
+              max_leverage:
+                pos.max_leverage !== undefined && pos.max_leverage !== null
+                  ? Number(pos.max_leverage)
+                  : null,
+              leverage_type: pos.leverage_type ?? null,
+            }))
+          : [],
+      }))
+    : []
+
+  return {
+    generated_at: data.generated_at ?? new Date().toISOString(),
+    accounts,
+  }
 }
 
 export interface ArenaAnalyticsAccount {
