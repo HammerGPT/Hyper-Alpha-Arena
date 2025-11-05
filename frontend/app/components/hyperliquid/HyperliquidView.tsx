@@ -15,6 +15,7 @@ export default function HyperliquidView({ wsRef, refreshKey = 0 }: HyperliquidVi
   const [loading, setLoading] = useState(true)
   const [positionsData, setPositionsData] = useState<any>(null)
   const [chartRefreshKey, setChartRefreshKey] = useState(0)
+  const environment = tradingMode === 'testnet' || tradingMode === 'mainnet' ? tradingMode : undefined
 
   // Load data from APIs
   useEffect(() => {
@@ -55,6 +56,7 @@ export default function HyperliquidView({ wsRef, refreshKey = 0 }: HyperliquidVi
             <HyperliquidAssetChart
               accountId={firstAccountId}
               refreshTrigger={chartRefreshKey}
+              environment={environment}
             />
           ) : (
             <div className="bg-card border border-border rounded-lg h-full flex items-center justify-center">

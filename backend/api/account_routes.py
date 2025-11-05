@@ -5,7 +5,7 @@ Account and Asset Curve API Routes (Cleaned)
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import List
+from typing import List, Optional
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import logging
@@ -494,12 +494,18 @@ async def update_account_settings(account_id: int, payload: dict, db: Session = 
 async def get_asset_curve(
     timeframe: str = "5m",
     trading_mode: str = "paper",
+    environment: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """Get asset curve data for all accounts with specified timeframe and trading mode"""
     try:
         from services.asset_curve_calculator import get_all_asset_curves_data_new
-        data = get_all_asset_curves_data_new(db, timeframe=timeframe, trading_mode=trading_mode)
+        data = get_all_asset_curves_data_new(
+            db,
+            timeframe=timeframe,
+            trading_mode=trading_mode,
+            environment=environment,
+        )
         return data
     except Exception as e:
         logger.error(f"Error fetching asset curve data: {str(e)}")

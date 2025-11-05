@@ -188,7 +188,12 @@ async def broadcast_model_chat_update(decision_data: dict):
         logging.error(f"Failed to broadcast model chat update: {e}")
 
 
-def get_all_asset_curves_data(db: Session, timeframe: str = "1h", trading_mode: str = "paper"):
+def get_all_asset_curves_data(
+    db: Session,
+    timeframe: str = "1h",
+    trading_mode: str = "paper",
+    environment: Optional[str] = None,
+):
     """Get timeframe-based asset curve data for all accounts - WebSocket version
 
     Uses the new algorithm that draws curves by accounts and creates all-time lists.
@@ -197,7 +202,7 @@ def get_all_asset_curves_data(db: Session, timeframe: str = "1h", trading_mode: 
         timeframe: Time period for the curve, options: "5m", "1h", "1d"
         trading_mode: Trading mode filter, options: "paper", "testnet", "mainnet"
     """
-    return get_all_asset_curves_data_new(db, timeframe, trading_mode)
+    return get_all_asset_curves_data_new(db, timeframe, trading_mode, environment)
 
 
 async def _send_snapshot_optimized(db: Session, account_id: int):
@@ -545,7 +550,12 @@ async def _send_hyperliquid_snapshot(db: Session, account_id: int, environment: 
                 }
                 for d in ai_decisions
             ],
-            "all_asset_curves": get_all_asset_curves_data(db, "1h"),  # Include asset curves for consistency
+            "all_asset_curves": get_all_asset_curves_data(
+                db,
+                "1h",
+                trading_mode=environment,
+                environment=environment,
+            ),
             "hyperliquid_state": {
                 "environment": environment,
                 "total_equity": account_state.get("total_equity", 0),
@@ -848,15 +858,22 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Get asset curve data with specific timeframe and trading mode
                     timeframe = msg.get("timeframe", "1h")
                     trading_mode = msg.get("trading_mode", "paper")
+                    environment = msg.get("environment")
                     if timeframe not in ["5m", "1h", "1d"]:
                         await websocket.send_text(json.dumps({"type": "error", "message": "Invalid timeframe. Must be 5m, 1h, or 1d"}))
                         continue
 
-                    asset_curves = get_all_asset_curves_data(db, timeframe, trading_mode)
+                    asset_curves = get_all_asset_curves_data(
+                        db,
+                        timeframe,
+                        trading_mode,
+                        environment=environment,
+                    )
                     await websocket.send_text(json.dumps({
                         "type": "asset_curve_data",
                         "timeframe": timeframe,
                         "trading_mode": trading_mode,
+                        "environment": environment,
                         "data": asset_curves
                     }))
                 elif kind == "place_order":

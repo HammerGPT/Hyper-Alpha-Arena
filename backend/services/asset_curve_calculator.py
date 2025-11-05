@@ -97,15 +97,28 @@ def _get_bucketed_snapshots(
     return rows
 
 
-def get_all_asset_curves_data_new(db: Session, timeframe: str = "1h", trading_mode: str = "paper") -> List[Dict]:
+def get_all_asset_curves_data_new(
+    db: Session,
+    timeframe: str = "1h",
+    trading_mode: str = "paper",
+    environment: Optional[str] = None,
+) -> List[Dict]:
     """
     Build asset curve data for all active accounts using cached SQL aggregation.
     """
     bucket_minutes = TIMEFRAME_BUCKET_MINUTES.get(timeframe, TIMEFRAME_BUCKET_MINUTES["5m"])
 
     # Handle Hyperliquid mode with 5-minute bucketing
-    if trading_mode == "hyperliquid":
-        return _build_hyperliquid_asset_curve(db, bucket_minutes)
+    hyperliquid_modes = {"hyperliquid", "testnet", "mainnet"}
+    if trading_mode in hyperliquid_modes:
+        effective_environment = environment
+        if effective_environment not in {"testnet", "mainnet"} and trading_mode in {"testnet", "mainnet"}:
+            effective_environment = trading_mode
+        return _build_hyperliquid_asset_curve(
+            db,
+            bucket_minutes,
+            environment=effective_environment,
+        )
 
     # For other non-paper modes, return empty data for now
     if trading_mode != "paper":
@@ -179,7 +192,11 @@ def get_all_asset_curves_data_new(db: Session, timeframe: str = "1h", trading_mo
     return result
 
 
-def _build_hyperliquid_asset_curve(db: Session, bucket_minutes: int) -> List[Dict]:
+def _build_hyperliquid_asset_curve(
+    db: Session,
+    bucket_minutes: int,
+    environment: Optional[str] = None,
+) -> List[Dict]:
     """Build asset curve for Hyperliquid accounts with 5-minute bucketing"""
     bucket_seconds = bucket_minutes * 60
     if bucket_seconds <= 0:
@@ -190,10 +207,16 @@ def _build_hyperliquid_asset_curve(db: Session, bucket_minutes: int) -> List[Dic
 
     try:
         # Get active Hyperliquid accounts from main DB
-        accounts = db.query(Account).filter(
+        account_query = db.query(Account).filter(
             Account.hyperliquid_enabled == "true",
-            Account.is_active == "true"
-        ).all()
+            Account.is_active == "true",
+        )
+
+        env_filter_value = environment if environment in {"testnet", "mainnet"} else None
+        if env_filter_value:
+            account_query = account_query.filter(Account.hyperliquid_environment == env_filter_value)
+
+        accounts = account_query.all()
 
         if not accounts:
             return []
@@ -204,31 +227,37 @@ def _build_hyperliquid_asset_curve(db: Session, bucket_minutes: int) -> List[Dic
         time_seconds = cast(func.extract('epoch', HyperliquidAccountSnapshot.created_at), Integer)
         bucket_index_expr = cast(func.floor(time_seconds / bucket_seconds), Integer)
 
-        bucket_subquery = (
-            snapshot_db.query(
-                HyperliquidAccountSnapshot.account_id.label("account_id"),
-                bucket_index_expr.label("bucket_index"),
-                func.max(HyperliquidAccountSnapshot.created_at).label("latest_created_at"),
-            )
-            .group_by(HyperliquidAccountSnapshot.account_id, bucket_index_expr)
-            .subquery()
+        bucket_query = snapshot_db.query(
+            HyperliquidAccountSnapshot.account_id.label("account_id"),
+            bucket_index_expr.label("bucket_index"),
+            func.max(HyperliquidAccountSnapshot.created_at).label("latest_created_at"),
         )
+        if env_filter_value:
+            bucket_query = bucket_query.filter(HyperliquidAccountSnapshot.environment == env_filter_value)
+
+        bucket_subquery = bucket_query.group_by(
+            HyperliquidAccountSnapshot.account_id,
+            bucket_index_expr,
+        ).subquery()
 
         snapshot_alias = aliased(HyperliquidAccountSnapshot)
-        rows = (
-            snapshot_db.query(
-                snapshot_alias.account_id,
-                snapshot_alias.total_equity,
-                snapshot_alias.created_at,
-            )
-            .join(
-                bucket_subquery,
-                (snapshot_alias.account_id == bucket_subquery.c.account_id)
-                & (snapshot_alias.created_at == bucket_subquery.c.latest_created_at),
-            )
-            .order_by(snapshot_alias.created_at.asc(), snapshot_alias.account_id.asc())
-            .all()
+        rows_query = snapshot_db.query(
+            snapshot_alias.account_id,
+            snapshot_alias.total_equity,
+            snapshot_alias.created_at,
+        ).join(
+            bucket_subquery,
+            (snapshot_alias.account_id == bucket_subquery.c.account_id)
+            & (snapshot_alias.created_at == bucket_subquery.c.latest_created_at),
         )
+
+        if env_filter_value:
+            rows_query = rows_query.filter(snapshot_alias.environment == env_filter_value)
+
+        rows = rows_query.order_by(
+            snapshot_alias.created_at.asc(),
+            snapshot_alias.account_id.asc(),
+        ).all()
 
         result: List[Dict] = []
         seen_accounts = set()

@@ -13,8 +13,9 @@ import {
   ResponsiveContainer
 } from 'recharts'
 import { Card } from '@/components/ui/card'
-import { getModelLogo, getModelChartLogo, getModelColor } from '../portfolio/logoAssets'
+import { getModelChartLogo, getModelColor } from '../portfolio/logoAssets'
 import FlipNumber from '../portfolio/FlipNumber'
+import type { HyperliquidEnvironment } from '@/lib/types/hyperliquid'
 
 interface HyperliquidAssetData {
   timestamp: number
@@ -27,9 +28,14 @@ interface HyperliquidAssetData {
 interface HyperliquidAssetChartProps {
   accountId: number
   refreshTrigger?: number
+  environment?: HyperliquidEnvironment
 }
 
-export default function HyperliquidAssetChart({ accountId, refreshTrigger }: HyperliquidAssetChartProps) {
+export default function HyperliquidAssetChart({
+  accountId,
+  refreshTrigger,
+  environment,
+}: HyperliquidAssetChartProps) {
   const [data, setData] = useState<HyperliquidAssetData[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -41,7 +47,15 @@ export default function HyperliquidAssetChart({ accountId, refreshTrigger }: Hyp
       setLoading(true)
       setError(null)
 
-      const response = await fetch('/api/account/asset-curve?timeframe=5m&trading_mode=hyperliquid')
+      const params = new URLSearchParams({
+        timeframe: '5m',
+        trading_mode: 'hyperliquid',
+      })
+      if (environment) {
+        params.set('environment', environment)
+      }
+
+      const response = await fetch(`/api/account/asset-curve?${params.toString()}`)
       if (!response.ok) {
         throw new Error('Failed to fetch asset curve data')
       }
@@ -54,7 +68,7 @@ export default function HyperliquidAssetChart({ accountId, refreshTrigger }: Hyp
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [environment])
 
   useEffect(() => {
     fetchData()

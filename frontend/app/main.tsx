@@ -165,15 +165,29 @@ function App() {
               setTrades(msg.trades || [])
             } else if (msg.type === 'order_filled') {
               toast.success('Order filled')
+              const env = tradingMode === 'testnet' || tradingMode === 'mainnet' ? tradingMode : undefined
               ws!.send(JSON.stringify({
                 type: 'get_snapshot',
                 trading_mode: tradingMode
               }))
+              ws!.send(JSON.stringify({
+                type: 'get_asset_curve',
+                timeframe: '5m',
+                trading_mode: tradingMode,
+                ...(env ? { environment: env } : {})
+              }))
             } else if (msg.type === 'order_pending') {
               toast('Order placed, waiting for fill', { icon: '⏳' })
+              const env = tradingMode === 'testnet' || tradingMode === 'mainnet' ? tradingMode : undefined
               ws!.send(JSON.stringify({
                 type: 'get_snapshot',
                 trading_mode: tradingMode
+              }))
+              ws!.send(JSON.stringify({
+                type: 'get_asset_curve',
+                timeframe: '5m',
+                trading_mode: tradingMode,
+                ...(env ? { environment: env } : {})
               }))
             } else if (msg.type === 'user_switched') {
               setUser(msg.user)
@@ -305,6 +319,7 @@ function App() {
   useEffect(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && account) {
       console.log(`Trading mode changed to ${tradingMode}, requesting snapshot...`)
+      const env = tradingMode === 'testnet' || tradingMode === 'mainnet' ? tradingMode : undefined
       wsRef.current.send(JSON.stringify({
         type: 'get_snapshot',
         trading_mode: tradingMode
@@ -313,7 +328,8 @@ function App() {
       wsRef.current.send(JSON.stringify({
         type: 'get_asset_curve',
         timeframe: '5m',
-        trading_mode: tradingMode
+        trading_mode: tradingMode,
+        ...(env ? { environment: env } : {})
       }))
     }
   }, [tradingMode, account])
@@ -323,6 +339,7 @@ function App() {
     const refreshInterval = setInterval(() => {
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && account) {
         console.log(`Auto-refresh: requesting data for ${tradingMode} mode`)
+        const env = tradingMode === 'testnet' || tradingMode === 'mainnet' ? tradingMode : undefined
         wsRef.current.send(JSON.stringify({
           type: 'get_snapshot',
           trading_mode: tradingMode
@@ -330,7 +347,8 @@ function App() {
         wsRef.current.send(JSON.stringify({
           type: 'get_asset_curve',
           timeframe: '5m',
-          trading_mode: tradingMode
+          trading_mode: tradingMode,
+          ...(env ? { environment: env } : {})
         }))
       } else {
         console.log('Auto-refresh skipped: WebSocket not ready or no account')
