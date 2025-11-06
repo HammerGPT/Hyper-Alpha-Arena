@@ -69,71 +69,45 @@ Hyper Alpha Arena is a production-ready AI trading platform where Large Language
 
 ### Prerequisites
 
-- **Node.js** 18+ ([Download](https://nodejs.org/))
-- **Python** 3.11+ ([Download](https://python.org/))
-- **PostgreSQL** 14+ ([Download](https://www.postgresql.org/download/))
-  - Linux: Automatically installed by startup script
-  - macOS: Auto-installed via Homebrew or manual install
-  - Windows: Manual installation required (see [Installation Guide](#installation))
+- **Docker Desktop** ([Download](https://www.docker.com/products/docker-desktop))
+  - Windows: Docker Desktop for Windows
+  - macOS: Docker Desktop for Mac
+  - Linux: Docker Engine ([Install Guide](https://docs.docker.com/engine/install/))
 
 ### Installation
 
-#### 🍎 macOS/Linux
-
 ```bash
+# Clone the repository
 git clone https://github.com/HammerGPT/Hyper-Alpha-Arena.git
 cd Hyper-Alpha-Arena
 
-# Make script executable and start the application
-chmod +x start_arena.sh
-./start_arena.sh
+# Start the application
+docker-compose up -d
 ```
 
-#### 🪟 Windows
+The application will be available at **http://localhost:8802**
 
-```powershell
-git clone https://github.com/HammerGPT/Hyper-Alpha-Arena.git
-cd Hyper-Alpha-Arena
+### Managing the Application
 
-.\start_arena.ps1
-```
-
-**Note**: If you encounter PowerShell execution policy issues, run:
-```powershell
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
-
-### Running the Application
-
-The startup script automatically handles all setup and runs on port 8802:
-
-#### 🍎 macOS/Linux
 ```bash
-# Start the application
-./start_arena.sh
+# View logs
+docker-compose logs -f
 
 # Stop the application
-./start_arena.sh stop
+docker-compose down
+
+# Restart the application
+docker-compose restart
+
+# Update to latest version
+git pull origin main
+docker-compose up -d --build
 ```
 
-#### 🪟 Windows
-```powershell
-# Start the application
-.\start_arena.ps1
-
-# Stop the application
-.\start_arena.ps1 stop
-```
-
-The startup script will:
-- Auto-create Python virtual environment and install dependencies
-- Auto-install pnpm if not present (no sudo required)
-- Build and deploy frontend automatically
-- Start the backend service on port 8802
-- Initialize the trading strategy manager
-- Enable real-time price monitoring and auto-rebuild
-
-**Access the application**: Open http://localhost:8802 in your browser
+**Important Notes:**
+- All data (databases, configurations, trading history) is persisted in Docker volumes
+- Data will be preserved when you stop/restart containers
+- Only `docker-compose down -v` will delete data (don't use `-v` flag unless you want to reset everything)
 
 ### First-Time Setup
 
@@ -287,113 +261,24 @@ The platform automatically handles model-specific configurations and parameter d
 
 ### Common Issues
 
-#### PostgreSQL Database Issues
-
-**Problem**: "PostgreSQL not found" or "connection failed" during startup
-**Solution**:
-
-The application uses PostgreSQL for better concurrency handling. The startup script will attempt to install it automatically on Linux, but you may need to install it manually on some systems.
-
-**Linux (Ubuntu/Debian)**:
-```bash
-sudo apt-get update
-sudo apt-get install postgresql postgresql-contrib
-sudo systemctl start postgresql
-sudo systemctl enable postgresql
-```
-
-**Linux (CentOS/RHEL)**:
-```bash
-sudo yum install postgresql-server postgresql-contrib
-sudo postgresql-setup initdb
-sudo systemctl enable postgresql
-sudo systemctl start postgresql
-```
-
-**macOS**:
-```bash
-# Using Homebrew
-brew install postgresql@14
-brew services start postgresql@14
-
-# Or download PostgreSQL.app from https://postgresapp.com/
-```
-
-**Windows**:
-```powershell
-# Using winget
-winget install PostgreSQL.PostgreSQL
-
-# Or download installer from https://www.postgresql.org/download/windows/
-```
-
-After installation, restart the application with `./start_arena.sh` (Linux/macOS) or `.\start_arena.ps1` (Windows).
-
-**Problem**: "fe_sendauth: no password supplied" or authentication errors
-**Solution**:
-
-This means PostgreSQL is installed but requires authentication configuration. The application will still work if databases are already created. If you see this error on first install:
-
-1. Allow local connections without password (for development):
-   ```bash
-   # Edit PostgreSQL config (location varies by system)
-   sudo nano /etc/postgresql/*/main/pg_hba.conf
-
-   # Change this line:
-   local   all             all                                     peer
-   # To:
-   local   all             all                                     trust
-
-   # Restart PostgreSQL
-   sudo systemctl restart postgresql
-   ```
-
-2. Or manually create the database:
-   ```bash
-   sudo -u postgres psql
-   CREATE USER alpha_user WITH PASSWORD 'alpha_pass';
-   CREATE DATABASE alpha_arena OWNER alpha_user;
-   CREATE DATABASE alpha_snapshots OWNER alpha_user;
-   \q
-   ```
-
-**Note**: If you see PostgreSQL warnings during startup but the service starts successfully, you can safely ignore them. The application will create tables automatically on first run.
-
-#### Other Common Issues
-
-**Problem**: Windows PowerShell execution policy error
-**Solution**:
-```powershell
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
-
-**Problem**: "此时不应有 ..." error on Windows
-**Solution**: Ensure you're using PowerShell (not Command Prompt):
-```powershell
-.\start_arena.ps1
-```
-
 **Problem**: Port 8802 already in use
 **Solution**:
-- Linux/macOS: `./start_arena.sh stop`
-- Windows: `.\start_arena.ps1 stop` (run from project root)
-
-**Problem**: Virtual environment not found
-**Solution**: Create the virtual environment manually:
 ```bash
-# Linux/macOS
-cd backend && python -m venv .venv && source .venv/bin/activate && pip install -e .
-
-# Windows
-cd backend && python -m venv .venv && .venv\Scripts\activate && pip install -e .
+docker-compose down
+docker-compose up -d
 ```
 
-**Problem**: Frontend build fails
-**Solution**: Clear cache and reinstall:
+**Problem**: Cannot connect to Docker daemon
+**Solution**: Make sure Docker Desktop is running
+
+**Problem**: Database connection errors
+**Solution**: Wait for PostgreSQL container to be healthy (check with `docker-compose ps`)
+
+**Problem**: Want to reset all data
+**Solution**:
 ```bash
-rm -rf node_modules package-lock.json  # Linux/macOS
-rmdir /s node_modules && del package-lock.json  # Windows
-pnpm install
+docker-compose down -v  # This will delete all data!
+docker-compose up -d
 ```
 
 ## Contributing

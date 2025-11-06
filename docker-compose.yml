@@ -1,23 +1,59 @@
 version: '3.8'
 
 services:
-  app:
-    build: .
-    container_name: usmover
-    restart: unless-stopped
-    ports:
-      - "5611:5611" 
+  postgres:
+    image: postgres:14-alpine
+    container_name: hyper-arena-postgres
+    environment:
+      POSTGRES_USER: alpha_user
+      POSTGRES_PASSWORD: alpha_pass
+      POSTGRES_DB: alpha_arena
     volumes:
-      - ./data:/app/data 
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.usmover.rule=Host(`oaa.finan.club`)"
-      - "traefik.http.routers.usmover.entrypoints=websecure"
-      - "traefik.http.routers.usmover.tls.certresolver=letsencrypt"
-      - "traefik.http.services.usmover.loadbalancer.server.port=5611"
-    networks:
-      - traefik
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alpha_user -d alpha_arena"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hyper-arena-app
+    environment:
+      # Database connection
+      DATABASE_URL: postgresql://alpha_user:alpha_pass@postgres:5432/alpha_arena
+      SNAPSHOT_DATABASE_URL: postgresql://alpha_user:alpha_pass@postgres:5432/alpha_snapshots
+
+      # Load additional environment variables from .env file
+      # Users should create .env file for API keys and other secrets
+    env_file:
+      - .env
+    ports:
+      - "8802:8802"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      # Mount backend code for development (optional, can be removed for production)
+      - ./backend:/app/backend
+      # Mount logs
+      - ./logs:/app/logs
+      # Mount data for encryption key persistence
+      - app_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  app_data:
+    driver: local
 
 networks:
-  traefik:
-    external: true
+  default:
+    name: hyper-arena-network

@@ -13,19 +13,28 @@ logger = logging.getLogger(__name__)
 
 def get_encryption_key() -> bytes:
     """
-    Get encryption key from environment variable
+    Get encryption key from file or environment variable
 
     Returns:
         Encryption key as bytes
 
     Raises:
-        ValueError: If HYPERLIQUID_ENCRYPTION_KEY not set
+        ValueError: If HYPERLIQUID_ENCRYPTION_KEY not found
     """
+    # Try to read from Docker persistent file first
+    key_file = '/app/data/.encryption_key'
+    if os.path.exists(key_file):
+        with open(key_file, 'r') as f:
+            key = f.read().strip()
+            if key:
+                return key.encode()
+
+    # Fallback to environment variable
     key = os.getenv('HYPERLIQUID_ENCRYPTION_KEY')
     if not key:
         raise ValueError(
-            "HYPERLIQUID_ENCRYPTION_KEY not set in environment. "
-            "Generate one with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+            "HYPERLIQUID_ENCRYPTION_KEY not found. "
+            "Docker should auto-generate this on first startup."
         )
     return key.encode()
 

@@ -6,8 +6,8 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
 
-# Snapshot database file
-SNAPSHOT_DATABASE_URL = "postgresql://alpha_user:alpha_pass@localhost/alpha_snapshots"
+# Snapshot database URL from environment or default
+SNAPSHOT_DATABASE_URL = os.environ.get('SNAPSHOT_DATABASE_URL', "postgresql://alpha_user:alpha_pass@localhost/alpha_snapshots")
 
 # Create engine for snapshot database
 snapshot_engine = create_engine(SNAPSHOT_DATABASE_URL)

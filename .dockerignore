@@ -1,0 +1,58 @@
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Python
+backend/.venv
+backend/__pycache__
+backend/**/__pycache__
+backend/**/*.pyc
+backend/**/*.pyo
+backend/**/*.pyd
+backend/.Python
+backend/*.so
+backend/*.egg
+backend/*.egg-info
+backend/dist
+backend/build
+
+# Node
+frontend/node_modules
+frontend/.pnpm-store
+frontend/dist
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+arena.log
+arena.pid
+
+# Database
+*.db
+*.db-journal
+data/
+
+# Environment
+.env.local
+.env.*.local
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
