@@ -357,36 +357,7 @@ def handle_price_update(symbol: str, price: float, event_time: Optional[datetime
 
     print(f"Global handle_price_update called: {symbol} = {price}")
 
-    # Direct strategy execution with timer check
-    try:
-        with SessionLocal() as db:
-            rows = (
-                db.query(AccountStrategyConfig, Account)
-                .join(Account, AccountStrategyConfig.account_id == Account.id)
-                .all()
-            )
-            print(f"Found {len(rows)} strategies to check")
-
-            for strategy, account in rows:
-                if strategy.enabled != "true":
-                    continue
-
-                # Simple timer check: only trigger if enough time passed
-                if strategy.last_trigger_at:
-                    last_trigger_at = _as_aware(strategy.last_trigger_at)
-                    time_diff = (event_time - last_trigger_at).total_seconds()
-                    if time_diff < strategy.trigger_interval:
-                        continue
-
-                is_hyper = getattr(account, "hyperliquid_enabled", "false") == "true"
-                print(f"Triggering strategy for account {strategy.account_id} (hyper={is_hyper})")
-                _execute_strategy_direct(strategy.account_id, symbol, event_time, db, is_hyper)
-
-    except Exception as e:
-        print(f"Error in direct strategy execution: {e}")
-        logger.error(f"Error in direct strategy execution: {e}")
-
-    # Also call the strategy manager for sampling
+    # Use strategy manager for proper trigger logic (price change + time interval)
     paper_strategy_manager.handle_price_update(symbol, price, event_time)
     hyper_strategy_manager.handle_price_update(symbol, price, event_time)
 
