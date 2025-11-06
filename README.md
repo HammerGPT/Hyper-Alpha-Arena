@@ -16,7 +16,7 @@ Hyper Alpha Arena is an advanced AI-powered cryptocurrency trading platform wher
   - Testnet: Safe testing environment with test funds
   - Mainnet: Production trading with real capital (use with caution)
 
-**Current Status**: v0.4.0 - Both paper trading and Hyperliquid real trading fully operational.
+**Current Status**: v0.5.0 - Major update with complete Hyperliquid DEX integration for real perpetual contract trading.
 
 ### Project Origin
 
@@ -24,7 +24,7 @@ This project is based on [open-alpha-arena](https://github.com/etrobot/open-alph
 
 ## Features
 
-### Current Features (v0.4.0)
+### Current Features (v0.5.0)
 
 #### Paper Trading Features
 - **Multi-Model LLM Support**: OpenAI API compatible models (GPT-5, Claude, Deepseek, etc.)
@@ -37,7 +37,7 @@ This project is based on [open-alpha-arena](https://github.com/etrobot/open-alph
 - **Real-time Market Data**: Live cryptocurrency price feeds from multiple exchanges via ccxt
 - **AI Trader Management**: Create and manage multiple AI trading agents with independent configurations
 
-#### Hyperliquid Real Trading Features (NEW in v0.4.0)
+#### Hyperliquid Real Trading Features (🔥 NEW in v0.5.0)
 - **Perpetual Contract Trading**: Real order execution on Hyperliquid DEX
   - Market and limit orders with 1-50x leverage support
   - Long and short positions with automatic liquidation price calculation
@@ -170,8 +170,10 @@ The startup script will:
 
 ### First-Time Setup
 
+#### For Paper Trading (Risk-Free Testing)
+
 1. Open http://localhost:8802
-2. Navigate to AI Traders section
+2. Navigate to **AI Traders** section
 3. Create your first AI trader:
    - Name: e.g., "GPT-5 Trader"
    - Model: Select from dropdown (gpt-5-mini, claude-sonnet-4.5, etc.)
@@ -180,7 +182,64 @@ The startup script will:
 4. Configure trading strategy:
    - Trigger Mode: Real-time (recommended for active trading)
    - Enable Strategy: Toggle to activate
-5. Monitor logs in System Logs section to verify setup
+5. Monitor logs in **System Logs** section to verify setup
+
+#### For Hyperliquid Real Trading (⚠️ Use with Caution)
+
+**Prerequisites:**
+- A Hyperliquid account with API access
+- Your private key (starts with 0x...)
+- Test funds in testnet OR real funds in mainnet
+
+**Step 1: Get Your Hyperliquid Private Key**
+
+1. **Testnet (Recommended for Testing)**:
+   - Visit: https://app.hyperliquid-testnet.xyz/
+   - Create an account and export your private key
+   - Request testnet funds from the faucet
+
+2. **Mainnet (Real Money)**:
+   - Visit: https://app.hyperliquid.xyz/
+   - Create an account or use existing wallet
+   - Export your private key from your wallet
+   - ⚠️ **WARNING**: This is your real money wallet - keep private key secure!
+
+**Step 2: Configure in Hyper Alpha Arena**
+
+1. Open http://localhost:8802
+2. Navigate to **Hyperliquid** page in the sidebar
+3. Click **Environment Switcher** to select Testnet or Mainnet
+4. In the **Configuration Panel**:
+   - Enter your Hyperliquid private key (will be encrypted and stored securely)
+   - Set maximum leverage (1-50x, recommended: 5x for beginners)
+   - Click **Save Configuration**
+5. Your balance and positions will load automatically
+
+**Step 3: Configure AI Trader for Hyperliquid**
+
+1. Navigate to **AI Traders** section
+2. Create or edit an AI trader
+3. In the configuration:
+   - Enable **Hyperliquid Trading**: Toggle ON
+   - Select **Environment**: Testnet or Mainnet
+   - Choose **Prompt Template**: Select "Hyperliquid Pro" (includes leverage education)
+   - Configure trading strategy triggers
+4. The AI will now trade perpetual contracts on Hyperliquid
+
+**Step 4: Monitor Your Trading**
+
+1. **Dashboard**: View real-time P&L, positions, and margin usage
+2. **System Logs**: Monitor AI decisions and order executions
+3. **Hyperliquid Page**: Check detailed position information and liquidation prices
+4. **Safety**: System auto-pauses trading if margin usage exceeds 80%
+
+**Safety Tips:**
+- ✅ Always test on testnet first with at least 1 week of observation
+- ✅ Start with low leverage (1x-3x) until you understand the system
+- ✅ Monitor margin usage regularly - liquidations can happen fast
+- ✅ Use stop-loss in your AI prompts to limit downside risk
+- ❌ Never use maximum leverage (50x) - extremely high liquidation risk
+- ❌ Don't leave trading unmonitored for extended periods
 
 ## Supported Models
 
@@ -304,130 +363,92 @@ The platform automatically handles model-specific configurations and parameter d
 
 ## Roadmap
 
-### Phase 1: Paper Trading Infrastructure ✅ (Completed)
-- [✅] Hyperliquid market data integration (read-only via ccxt)
-- [✅] Real-time price feeds from multiple exchanges
-- [✅] AI decision engine with multi-model support (GPT-5, Claude, Deepseek)
-- [✅] Simulated order matching and execution engine
-- [✅] Comprehensive logging and monitoring system with 60s refresh intervals
-- [✅] Manual AI trade trigger API with force operation support
-- [✅] Prompt template management system with Hyperliquid-specific templates
+### Phase 1: Foundation & Paper Trading ✅ (Completed - v0.3.0)
+- [✅] Multi-model LLM support (GPT-5, Claude, Deepseek)
+- [✅] Paper trading engine with order matching
+- [✅] Real-time market data integration via CCXT
+- [✅] AI decision engine with prompt templates
+- [✅] System logging and monitoring
+- [✅] Basic UI with portfolio tracking
 
-### Phase 2: Hyperliquid Real Trading ✅ (Completed - v0.4.0)
-- [✅] Hyperliquid testnet trading with real order execution
-- [✅] Hyperliquid mainnet trading support with environment isolation
-- [✅] Private key encryption and secure storage (Fernet)
-- [✅] Perpetual contract trading (long/short) with 1-50x leverage
-- [✅] Real-time position tracking and P&L calculation
-- [✅] AI-driven leverage-aware trading with risk management
-- [✅] Margin usage monitoring and liquidation warnings
-- [✅] Environment validation to prevent cross-environment operations
-- [✅] Position and account snapshot history in database
-- [✅] Automated trading scheduler for Hyperliquid accounts
+### Phase 2: Hyperliquid Integration ✅ (Completed - v0.5.0)
+- [✅] **Hyperliquid testnet trading** - Safe testing with test funds
+- [✅] **Hyperliquid mainnet trading** - Real perpetual contract execution
+- [✅] **Private key encryption** - Fernet-based secure storage
+- [✅] **Environment isolation** - Strict testnet/mainnet separation
+- [✅] **Perpetual contracts** - Long/short with 1-50x leverage
+- [✅] **AI-driven leverage trading** - Intelligent risk management
+- [✅] **Real-time position tracking** - Live P&L and margin monitoring
+- [✅] **Liquidation warnings** - Auto-pause at 80% margin usage
+- [✅] **Complete frontend UI** - Hyperliquid page with all trading features
+- [✅] **Position management** - Balance cards, order forms, position tables
+- [✅] **Asset curve visualization** - Performance charts for real trading
+- [✅] **Prompt template system** - Hyperliquid-specific AI prompts
+- [✅] **Database snapshots** - Historical position and balance tracking
 
-### Phase 3: Frontend UI Development 🔄 (In Progress)
-- [ ] Hyperliquid account configuration interface
-- [ ] Real-time balance and margin usage display
-- [ ] Position management table with P&L visualization
-- [ ] Manual order placement form with liquidation calculator
-- [ ] Environment switcher with safety confirmations
-- [ ] AI decision logs enhanced with leverage parameters
+### Phase 3: Enhancement & Optimization 🔄 (In Progress - v0.6.0)
+- [🔄] Advanced order types (stop-loss, take-profit, trailing stops)
+- [ ] Multi-timeframe analysis for AI decision-making
+- [ ] Portfolio rebalancing across paper and real accounts
+- [ ] Enhanced risk analytics dashboard
+- [ ] Trade execution quality metrics
+- [ ] Backtesting framework with historical data
 
-### Phase 4: Trading Enhancement (Medium Term)
-- [ ] Advanced order types (stop-loss, take-profit, trailing stops)
-- [ ] Multiple exchange support (Binance, Bybit, OKX) for spot trading
-- [ ] Historical data backtesting framework
-- [ ] Advanced portfolio management and rebalancing
-- [ ] Trading strategy optimization and A/B testing
-- [ ] Risk analytics dashboard
+### Phase 4: Multi-Exchange Expansion 📋 (Planned - v0.7.0)
+- [ ] Binance spot and futures trading
+- [ ] Bybit perpetual contracts
+- [ ] OKX derivatives trading
+- [ ] Exchange aggregation for best execution
+- [ ] Cross-exchange arbitrage detection
 
-### Phase 5: Advanced Features (Long Term)
-- [ ] User-submitted AI agents marketplace
-- [ ] On-chain trade verification and transparency
-- [ ] Advanced analytics dashboard with custom metrics
-- [ ] Public API for third-party integrations and webhooks
-- [ ] Multi-user support with role-based access control
+### Phase 5: Advanced Features 🚀 (Long Term - v1.0.0+)
+- [ ] AI agent marketplace and strategy sharing
+- [ ] Multi-user support with role-based access
 - [ ] Mobile app for trade monitoring
+- [ ] Public API for third-party integrations
+- [ ] On-chain trade verification
+- [ ] Advanced portfolio analytics
 
 ## Key Improvements Over Original Project
 
-### Core Trading Enhancements
-1. **Hyperliquid Real Trading Integration** (NEW in v0.4.0):
-   - Complete perpetual contract trading system with CCXT integration
-   - Testnet and mainnet support with strict environment isolation
-   - 1-50x leverage support with AI-driven leverage selection
+### 🔥 Major Enhancements in v0.5.0
+
+1. **Complete Hyperliquid DEX Integration**:
+   - Full perpetual contract trading on testnet and mainnet
+   - 1-50x leverage support with AI-driven selection
    - Real-time position tracking and P&L calculation
-   - Private key encryption (Fernet) for secure storage
-   - Margin usage monitoring with automatic trading pause at 80% usage
-   - Liquidation price warnings and risk management
-   - Position and account snapshot history in database
+   - Fernet encryption for private key security
+   - Environment isolation to prevent accidental cross-environment trades
+   - Margin monitoring with auto-pause at 80% usage
+   - Complete frontend UI with balance cards, order forms, and position tables
 
-2. **LLM API Compatibility**:
-   - Fixed parameter issues for GPT-5, o1, and Deepseek models
-   - Proper max_completion_tokens handling for modern LLMs
-   - Temperature restriction support for reasoning models
+2. **Advanced AI Decision Engine**:
+   - Multi-model LLM support (GPT-5, Claude, Deepseek, etc.)
+   - Hyperliquid-specific prompt templates with leverage education
+   - Intelligent leverage selection based on market confidence
+   - Visual template editor with real-time preview
+   - Account-specific prompt binding system
 
-3. **Prompt Template Management System**:
-   - Hyperliquid-specific templates with leverage education
-   - Visual template editor with real-time multi-symbol preview
-   - Account-specific prompt binding with automatic fallback
-   - Default, Pro, and Hyperliquid templates optimized for different risk profiles
-   - Template versioning and one-click restore functionality
-
-### Performance & Reliability
-4. **Performance Optimization**:
-   - 10x faster account operations (5s to 0.5s)
-   - 95% reduction in API call frequency (from 3s to 60s intervals)
-   - Improved caching and state management
-
-5. **System Logging & Monitoring**:
-   - In-memory log collector (500 entries with automatic rotation)
-   - Auto-categorization (price updates, AI decisions, Hyperliquid orders, errors)
-   - Frontend dashboard with filtering and 60-second auto-refresh
-   - Price snapshot tracking with database persistence
-   - Hyperliquid order execution logs with environment tags
-
-6. **Critical Bug Fixes**:
-   - Fixed race condition in trading strategy manager
-   - Resolved state management issues preventing real-time triggers
-   - Corrected API trailing slash issues
-   - Fixed FastAPI type annotation errors for Python 3.8+ compatibility
-   - Improved JSON parsing with better error handling and regex fallback
-
-### Feature Additions
-7. **Real-time Trading Triggers**:
-   - Event-driven strategy execution with three configurable modes
-   - Real-time: Execute on every market update
-   - Interval: Execute at fixed time intervals (5 minutes default)
-   - Tick batch: Execute after N price updates
-
-8. **Database Enhancements**:
-   - Added Hyperliquid-specific tables (account snapshots, position history)
-   - Extended Account table with 6 Hyperliquid configuration fields
-   - Extended Order table with 6 perpetual contract fields
-   - AI decision logs with prompt snapshots, reasoning chain, and leverage parameters
-
-9. **Enhanced UI**:
-   - Improved interface inspired by Alpha Arena
-   - Modern design patterns with Radix UI and Tailwind CSS
+3. **Enhanced Performance & Reliability**:
+   - 10x faster account operations (5s → 0.5s)
+   - 95% reduction in API call frequency for better stability
+   - Comprehensive system logging with auto-categorization
    - Real-time WebSocket updates for portfolio and positions
+   - Price caching with automatic expiry management
 
-10. **Market Data Integration**:
-    - Real-time price feeds from multiple exchanges via ccxt
-    - Multi-symbol sampling pool for intraday data
-    - Price cache with automatic expiry management
+4. **Professional Trading Features**:
+   - Real-time/Interval/Tick-batch trading triggers
+   - Multi-symbol sampling pool for historical data
+   - Asset curve visualization for performance tracking
+   - Automated trading scheduler for both paper and real trading
+   - Manual trade trigger API for testing and debugging
 
-11. **Manual Trade Trigger API**:
-    - New endpoint for programmatic AI trading control
-    - Force operation support for testing and debugging
-
-### Security & Safety
-12. **Security Features**:
-    - Private key encryption using Fernet (cryptography library)
-    - Environment validation on every Hyperliquid API call
-    - Separate storage for testnet and mainnet private keys
-    - Automatic trading pause when margin usage exceeds 80%
-    - Position checks before environment switching
+5. **Security & Safety**:
+   - Private key encryption using Fernet
+   - Environment validation on every API call
+   - Separate storage for testnet and mainnet keys
+   - Liquidation warnings and risk alerts
+   - Position snapshot history in database
 
 ## Troubleshooting
 
@@ -494,13 +515,45 @@ Please star and fork this repository to stay updated with development progress.
 ### Original Project
 - Open Alpha Arena: https://github.com/etrobot/open-alpha-arena
 
-## Community
+## Community & Support
 
-This project is developed and maintained by **Heliki AI Community**.
+### Join Our AI Trading Community
 
-- Website: https://www.heliki.com/
-- Focus: AI-powered trading tools and practical applications
-- Community: 2+ years of AI trading research and development
+This project is developed and maintained by **Heliki AI Community** - a group of AI enthusiasts and traders exploring the intersection of artificial intelligence and quantitative finance.
+
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/9a5e5e8f-6c1f-4f9e-b8e5-7c3d5c3b8f4a" alt="Heliki AI Community" width="400"/>
+</div>
+
+**🌐 Official Website**: [https://www.heliki.com/](https://www.heliki.com/)
+
+**🐦 Follow on Twitter/X**: [@GptHammer3309](https://x.com/GptHammer3309)
+- Latest updates on Hyper Alpha Arena development
+- AI trading insights and strategy discussions
+- Community events and challenges
+- Technical support and Q&A
+
+**💡 What We Offer**:
+- 2+ years of AI trading research and development
+- Practical AI-powered trading tools and frameworks
+- Active community discussions on LLM applications in finance
+- Regular updates on quantitative trading strategies
+
+**🎯 Get Involved**:
+- ⭐ Star this repository to stay updated
+- 🐛 Report bugs and issues on GitHub
+- 💬 Join discussions and share your trading strategies
+- 🤝 Contribute code, documentation, or ideas
+
+### Premium AI Trading Resources
+
+For advanced AI trading strategies, exclusive tools, and in-depth market analysis:
+- **Premium Membership**: Access to proprietary AI models and trading signals
+- **Private Discord**: Real-time discussions with experienced AI traders
+- **Custom Strategies**: Personalized AI trading strategy development
+- **Priority Support**: Direct technical support and consultation
+
+Visit [Heliki.com](https://www.heliki.com/) for more information.
 
 ## License
 
