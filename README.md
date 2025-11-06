@@ -206,12 +206,15 @@ The startup script will:
 
 ## Supported Models
 
-Hyper Alpha Arena supports any OpenAI API compatible language model, including:
+Hyper Alpha Arena supports any OpenAI API compatible language model. **For best results, we recommend using Deepseek** for its cost-effectiveness and strong performance in trading scenarios.
 
+Supported models include:
+- **Deepseek** (Recommended): Excellent cost-performance ratio for trading decisions
 - **OpenAI**: GPT-5 series, o1 series, GPT-4o, GPT-4
 - **Anthropic**: Claude (via compatible endpoints)
-- **Deepseek**: Cost-effective alternative
 - **Custom APIs**: Any OpenAI-compatible endpoint
+
+**Important Note for Hyperliquid Trading**: Currently, we recommend using **one AI model per Hyperliquid wallet address** to maintain accurate performance statistics. Multi-model support for the same wallet address will be available in a future update.
 
 The platform automatically handles model-specific configurations and parameter differences.
 
@@ -243,27 +246,25 @@ The platform automatically handles model-specific configurations and parameter d
 - [✅] **Database snapshots** - Historical position and balance tracking
 
 ### Phase 3: Enhancement & Optimization 🔄 (In Progress - v0.6.0)
-- [🔄] Advanced order types (stop-loss, take-profit, trailing stops)
+- [🔄] Multi-model account management and performance tracking
+- [ ] Multiple trading pair support (currently BTC-focused)
+- [ ] Enhanced prompt template UI with visual editor
+- [ ] Advanced order types (stop-loss, take-profit, trailing stops)
 - [ ] Multi-timeframe analysis for AI decision-making
-- [ ] Portfolio rebalancing across paper and real accounts
 - [ ] Enhanced risk analytics dashboard
-- [ ] Trade execution quality metrics
-- [ ] Backtesting framework with historical data
 
-### Phase 4: Multi-Exchange Expansion 📋 (Planned - v0.7.0)
+### Phase 4: Trading Platform Expansion 📋 (Planned - v0.7.0)
 - [ ] Binance spot and futures trading
 - [ ] Bybit perpetual contracts
 - [ ] OKX derivatives trading
 - [ ] Exchange aggregation for best execution
-- [ ] Cross-exchange arbitrage detection
 
 ### Phase 5: Advanced Features 🚀 (Long Term - v1.0.0+)
 - [ ] AI agent marketplace and strategy sharing
 - [ ] Multi-user support with role-based access
+- [ ] Backtesting framework with historical data
 - [ ] Mobile app for trade monitoring
-- [ ] Public API for third-party integrations
-- [ ] On-chain trade verification
-- [ ] Advanced portfolio analytics
+- [ ] Advanced portfolio analytics and reporting
 
 ## Key Improvements Over Original Project
 
@@ -421,7 +422,8 @@ Please star and fork this repository to stay updated with development progress.
 
 ### Join Our AI Trading Community
 
-This project is developed and maintained by **Heliki AI Community** - a group of AI enthusiasts and traders exploring the intersection of artificial intelligence and quantitative finance.
+This project is developed and maintained by **Heliki AI Community**.
+
 <div align="center">
   <img src="https://github.com/user-attachments/assets/82f748a0-2d2f-412d-9eb8-f46f543688d5" alt="Heliki AI Community" width="400"/>
 </div>
@@ -431,8 +433,9 @@ This project is developed and maintained by **Heliki AI Community** - a group of
 **🐦 Contact me on Twitter/X**: [@GptHammer3309](https://x.com/GptHammer3309)
 - Latest updates on Hyper Alpha Arena development
 - AI trading insights and strategy discussions
-- Community events and challenges
 - Technical support and Q&A
+
+**学习更多AI量化交易技术，请加入知识星球**
 
 
 ## License

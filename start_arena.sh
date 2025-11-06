@@ -158,7 +158,7 @@ if command -v systemctl &> /dev/null; then
             sudo systemctl start postgresql
         fi
     elif ! command -v psql &> /dev/null; then
-        echo "⚠️  PostgreSQL not found. Installing..."
+        echo "WARNING: PostgreSQL not found. Installing..."
         if command -v apt-get &> /dev/null; then
             # Debian/Ubuntu
             sudo apt-get update && sudo apt-get install -y postgresql postgresql-contrib
@@ -174,11 +174,11 @@ elif [[ "$OSTYPE" == "darwin"* ]]; then
     # macOS
     if ! command -v psql &> /dev/null; then
         if command -v brew &> /dev/null; then
-            echo "⚠️  PostgreSQL not found. Installing via Homebrew..."
+            echo "WARNING: PostgreSQL not found. Installing via Homebrew..."
             brew install postgresql@14
             brew services start postgresql@14
         else
-            echo "❌ ERROR: Homebrew not found. Please install PostgreSQL manually:"
+            echo "ERROR: Homebrew not found. Please install PostgreSQL manually:"
             echo "   Visit: https://postgresapp.com/ or run: brew install postgresql"
             exit 1
         fi
@@ -198,7 +198,7 @@ fi
 echo "Setting up PostgreSQL databases and tables..."
 .venv/bin/python database/init_postgresql.py
 if [ $? -ne 0 ]; then
-    echo "⚠️  Database initialization encountered issues, but will continue..."
+    echo "WARNING: Database initialization encountered issues, but will continue..."
     echo "   The application will attempt to create tables on first run."
 fi
 
@@ -219,12 +219,12 @@ echo ""
 
 # Check if service is running
 if curl -s http://127.0.0.1:8802/api/health > /dev/null 2>&1; then
-    echo "✅ Service started successfully!"
+    echo "Service started successfully!"
     echo "   - Backend API: http://localhost:8802"
     echo "   - Health Check: http://localhost:8802/api/health"
     echo "   - System Logs API: http://localhost:8802/api/system-logs"
     echo ""
-    echo "📊 System Log Features:"
+    echo "System Log Features:"
     echo "   - View logs: GET /api/system-logs"
     echo "   - Get stats: GET /api/system-logs/stats"
     echo "   - Clear logs: DELETE /api/system-logs"
@@ -232,12 +232,12 @@ if curl -s http://127.0.0.1:8802/api/health > /dev/null 2>&1; then
     echo "View live logs: tail -f arena.log"
     echo "Stop service: ./start_arena.sh stop"
 else
-    echo "❌ Service failed to start. Check logs:"
+    echo "ERROR: Service failed to start. Check logs:"
     echo "   tail -f arena.log"
 fi
 
 echo ""
 echo "Database changes applied:"
-echo "✅ Added prompt_snapshot column to ai_decision_logs"
-echo "✅ Added reasoning_snapshot column to ai_decision_logs"
-echo "✅ Added decision_snapshot column to ai_decision_logs"
+echo "  - Added prompt_snapshot column to ai_decision_logs"
+echo "  - Added reasoning_snapshot column to ai_decision_logs"
+echo "  - Added decision_snapshot column to ai_decision_logs"

@@ -174,15 +174,27 @@ try {
     $pgInstalled = $true
 }
 catch {
-    Write-Host "⚠️  PostgreSQL not found on system PATH." -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "Please install PostgreSQL:" -ForegroundColor Yellow
-    Write-Host "  1. Download from: https://www.postgresql.org/download/windows/" -ForegroundColor Cyan
-    Write-Host "  2. Or use: winget install PostgreSQL.PostgreSQL" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Red
+    Write-Host "ERROR: PostgreSQL is not installed!" -ForegroundColor Red
+    Write-Host "========================================" -ForegroundColor Red
     Write-Host ""
-    Write-Host "After installation, restart this script." -ForegroundColor Yellow
+    Write-Host "This application requires PostgreSQL database." -ForegroundColor Yellow
     Write-Host ""
-    Read-Host "Press Enter to continue anyway (database may not work)"
+    Write-Host "Please install PostgreSQL first:" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  Option 1 - Using winget (recommended):" -ForegroundColor Cyan
+    Write-Host "    winget install PostgreSQL.PostgreSQL" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  Option 2 - Download installer:" -ForegroundColor Cyan
+    Write-Host "    https://www.postgresql.org/download/windows/" -ForegroundColor White
+    Write-Host ""
+    Write-Host "After installation:" -ForegroundColor Yellow
+    Write-Host "  1. Restart your terminal/PowerShell" -ForegroundColor White
+    Write-Host "  2. Run this script again: .\start_arena.ps1" -ForegroundColor White
+    Write-Host ""
+    Read-Host "Press Enter to exit"
+    exit 1
 }
 
 if ($pgInstalled) {
@@ -199,8 +211,8 @@ if ($pgInstalled) {
     Write-Host "Setting up PostgreSQL databases and tables..." -ForegroundColor Yellow
     & $venvPython "database\init_postgresql.py"
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "⚠️  Database initialization encountered issues, but will continue..." -ForegroundColor Yellow
-        Write-Host "   The application will attempt to create tables on first run." -ForegroundColor Gray
+        Write-Host "WARNING: Database initialization encountered issues." -ForegroundColor Yellow
+        Write-Host "The application will attempt to create tables on first run." -ForegroundColor Gray
     }
 }
 
@@ -227,7 +239,7 @@ $backendProcess = Start-Process @processArgs
 # Wait for service to start with retry logic
 Write-Host "Waiting for service to start..." -ForegroundColor Yellow
 $retryCount = 0
-$maxRetries = 60
+$maxRetries = 20
 
 do {
     $retryCount++
