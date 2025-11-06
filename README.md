@@ -1,6 +1,6 @@
  # <img width="40" height="40" alt="logo_app" src="https://github.com/user-attachments/assets/911ba846-a08b-4e3e-b119-ec1e78347288" style="vertical-align: middle;" /> Hyper Alpha Arena
 
-> An open-source AI-powered cryptocurrency trading platform supporting both paper trading simulation and real perpetual contract trading on Hyperliquid DEX.
+> An open-source AI-powered cryptocurrency trading platform for autonomous trading with Large Language Models. Deploy AI trading strategies with both paper trading simulation and real perpetual contract trading on Hyperliquid DEX.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![GitHub stars](https://img.shields.io/github/stars/HammerGPT/Hyper-Alpha-Arena)](https://github.com/HammerGPT/Hyper-Alpha-Arena/stargazers)
@@ -8,7 +8,7 @@
 
 ## Overview
 
-Hyper Alpha Arena is an advanced AI-powered cryptocurrency trading platform where Large Language Models (LLMs) autonomously execute trading strategies. Inspired by [nof1 Alpha Arena](https://nof1.ai), this platform enables AI models like GPT-5, Claude, Deepseek, and others to make intelligent trading decisions based on real-time market data.
+Hyper Alpha Arena is a production-ready AI trading platform where Large Language Models (LLMs) autonomously execute cryptocurrency trading strategies. Inspired by [nof1 Alpha Arena](https://nof1.ai), this platform enables AI models like GPT-5, Claude, and Deepseek to make intelligent trading decisions based on real-time market data and execute trades automatically.
 
 **Trading Modes:**
 - **Paper Trading**: Risk-free simulation with real market data for strategy development and testing
@@ -71,6 +71,10 @@ Hyper Alpha Arena is an advanced AI-powered cryptocurrency trading platform wher
 
 - **Node.js** 18+ ([Download](https://nodejs.org/))
 - **Python** 3.11+ ([Download](https://python.org/))
+- **PostgreSQL** 14+ ([Download](https://www.postgresql.org/download/))
+  - Linux: Automatically installed by startup script
+  - macOS: Auto-installed via Homebrew or manual install
+  - Windows: Manual installation required (see [Installation Guide](#installation))
 
 ### Installation
 
