@@ -81,8 +81,10 @@ Hyper Alpha Arena is a production-ready AI trading platform where Large Language
 git clone https://github.com/HammerGPT/Hyper-Alpha-Arena.git
 cd Hyper-Alpha-Arena
 
-# Start the application
-docker-compose up -d
+# Start the application (choose one command based on your Docker version)
+docker compose up -d        # For newer Docker Desktop (recommended)
+# OR
+docker-compose up -d       # For older Docker versions or standalone docker-compose
 ```
 
 The application will be available at **http://localhost:8802**
@@ -91,17 +93,17 @@ The application will be available at **http://localhost:8802**
 
 ```bash
 # View logs
-docker-compose logs -f
+docker compose logs -f        # (or docker-compose logs -f)
 
 # Stop the application
-docker-compose down
+docker compose down          # (or docker-compose down)
 
 # Restart the application
-docker-compose restart
+docker compose restart       # (or docker-compose restart)
 
 # Update to latest version
 git pull origin main
-docker-compose up -d --build
+docker compose up -d --build # (or docker-compose up -d --build)
 ```
 
 **Important Notes:**
