@@ -6,6 +6,7 @@ Automatically creates databases and tables for Hyper Alpha Arena
 
 import sys
 import logging
+import os
 from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
@@ -20,11 +21,46 @@ MAIN_DB_NAME = "alpha_arena"
 SNAPSHOT_DB_NAME = "alpha_snapshots"
 
 
+def try_connect_postgres():
+    """Try to connect to PostgreSQL with different authentication methods"""
+    # Get password from environment if provided
+    env_password = os.environ.get('PGPASSWORD', '')
+
+    # Try different connection strings in order
+    connection_attempts = [
+        ("no password (trust mode)", f"postgresql://postgres@{DB_HOST}/postgres"),
+        ("default password", f"postgresql://postgres:postgres@{DB_HOST}/postgres"),
+    ]
+
+    # Add environment password if provided
+    if env_password:
+        connection_attempts.insert(0, ("environment password", f"postgresql://postgres:{env_password}@{DB_HOST}/postgres"))
+
+    for method, conn_string in connection_attempts:
+        try:
+            logger.info(f"Trying to connect with {method}...")
+            engine = create_engine(conn_string, isolation_level="AUTOCOMMIT")
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            logger.info(f"✓ Connected successfully with {method}")
+            return engine
+        except OperationalError as e:
+            logger.debug(f"Failed with {method}: {e}")
+            continue
+
+    return None
+
+
 def create_postgres_user_and_databases():
     """Create PostgreSQL user and databases if they don't exist"""
     try:
-        # Connect to PostgreSQL default database
-        admin_engine = create_engine(f"postgresql://postgres@{DB_HOST}/postgres", isolation_level="AUTOCOMMIT")
+        # Try to connect with different methods
+        admin_engine = try_connect_postgres()
+
+        if not admin_engine:
+            logger.error("Could not connect to PostgreSQL with any method")
+            logger.error("Please provide postgres password via PGPASSWORD environment variable")
+            return False
 
         with admin_engine.connect() as conn:
             # Check if user exists

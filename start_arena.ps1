@@ -167,13 +167,40 @@ catch {
 # Initialize PostgreSQL databases
 Write-Host "Initializing PostgreSQL databases..." -ForegroundColor Yellow
 
-# Check if PostgreSQL is installed
+# Smart detection of PostgreSQL installation (not relying on PATH)
+$pgPaths = @(
+    "C:\Program Files\PostgreSQL\17\bin",
+    "C:\Program Files\PostgreSQL\16\bin",
+    "C:\Program Files\PostgreSQL\15\bin",
+    "C:\Program Files\PostgreSQL\14\bin",
+    "C:\Program Files (x86)\PostgreSQL\17\bin",
+    "C:\Program Files (x86)\PostgreSQL\16\bin",
+    "C:\Program Files (x86)\PostgreSQL\15\bin",
+    "C:\Program Files (x86)\PostgreSQL\14\bin"
+)
+
 $pgInstalled = $false
+$psqlPath = $null
+
+# Try to find psql in PATH first
 try {
     $null = Get-Command psql -ErrorAction Stop
     $pgInstalled = $true
+    $psqlPath = "psql"
 }
 catch {
+    # Search common installation paths
+    foreach ($path in $pgPaths) {
+        if (Test-Path "$path\psql.exe") {
+            $pgInstalled = $true
+            $psqlPath = "$path\psql.exe"
+            Write-Host "Found PostgreSQL at: $path" -ForegroundColor Green
+            break
+        }
+    }
+}
+
+if (-not $pgInstalled) {
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Red
     Write-Host "ERROR: PostgreSQL is not installed!" -ForegroundColor Red
@@ -197,23 +224,39 @@ catch {
     exit 1
 }
 
-if ($pgInstalled) {
-    # Check if PostgreSQL service is running
-    $pgService = Get-Service -Name "postgresql*" -ErrorAction SilentlyContinue
-    if ($pgService) {
-        if ($pgService.Status -ne "Running") {
-            Write-Host "Starting PostgreSQL service..." -ForegroundColor Yellow
-            Start-Service $pgService.Name
-        }
+# Check if PostgreSQL service is running
+$pgService = Get-Service -Name "postgresql*" -ErrorAction SilentlyContinue
+if ($pgService) {
+    if ($pgService.Status -ne "Running") {
+        Write-Host "Starting PostgreSQL service..." -ForegroundColor Yellow
+        Start-Service $pgService.Name
     }
+}
 
-    # Run database initialization script
-    Write-Host "Setting up PostgreSQL databases and tables..." -ForegroundColor Yellow
+# Run database initialization script (will try multiple auth methods)
+Write-Host "Setting up PostgreSQL databases and tables..." -ForegroundColor Yellow
+& $venvPython "database\init_postgresql.py"
+
+# If initialization failed, ask for password
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "Could not connect to PostgreSQL automatically." -ForegroundColor Yellow
+    Write-Host "Please enter your PostgreSQL 'postgres' user password:" -ForegroundColor Yellow
+    Write-Host "(If you used winget install, try password: postgres)" -ForegroundColor Gray
+    $pgPassword = Read-Host "Password" -AsSecureString
+    $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($pgPassword)
+    $env:PGPASSWORD = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+
+    Write-Host "Retrying database initialization with provided password..." -ForegroundColor Yellow
     & $venvPython "database\init_postgresql.py"
+
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "WARNING: Database initialization encountered issues." -ForegroundColor Yellow
+        Write-Host "WARNING: Database initialization failed." -ForegroundColor Yellow
         Write-Host "The application will attempt to create tables on first run." -ForegroundColor Gray
     }
+
+    # Clear password from environment
+    Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue
 }
 
 # Kill any existing process on port 8802
