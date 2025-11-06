@@ -148,6 +148,60 @@ if [ -f ".env" ]; then
     export $(cat .env | grep -v '^#' | xargs)
 fi
 
+# Initialize PostgreSQL databases
+echo "Initializing PostgreSQL databases..."
+if command -v systemctl &> /dev/null; then
+    # Check if PostgreSQL is installed and running (Linux with systemd)
+    if systemctl list-units --type=service --all | grep -q postgresql; then
+        if ! systemctl is-active --quiet postgresql; then
+            echo "Starting PostgreSQL service..."
+            sudo systemctl start postgresql
+        fi
+    elif ! command -v psql &> /dev/null; then
+        echo "⚠️  PostgreSQL not found. Installing..."
+        if command -v apt-get &> /dev/null; then
+            # Debian/Ubuntu
+            sudo apt-get update && sudo apt-get install -y postgresql postgresql-contrib
+        elif command -v yum &> /dev/null; then
+            # CentOS/RHEL
+            sudo yum install -y postgresql-server postgresql-contrib
+            sudo postgresql-setup initdb
+        fi
+        sudo systemctl enable postgresql
+        sudo systemctl start postgresql
+    fi
+elif [[ "$OSTYPE" == "darwin"* ]]; then
+    # macOS
+    if ! command -v psql &> /dev/null; then
+        if command -v brew &> /dev/null; then
+            echo "⚠️  PostgreSQL not found. Installing via Homebrew..."
+            brew install postgresql@14
+            brew services start postgresql@14
+        else
+            echo "❌ ERROR: Homebrew not found. Please install PostgreSQL manually:"
+            echo "   Visit: https://postgresapp.com/ or run: brew install postgresql"
+            exit 1
+        fi
+    else
+        # Ensure PostgreSQL is running on macOS
+        if ! pgrep -x postgres > /dev/null; then
+            if command -v brew &> /dev/null; then
+                brew services start postgresql@14 || brew services start postgresql
+            else
+                pg_ctl -D /usr/local/var/postgres start
+            fi
+        fi
+    fi
+fi
+
+# Run database initialization script
+echo "Setting up PostgreSQL databases and tables..."
+.venv/bin/python database/init_postgresql.py
+if [ $? -ne 0 ]; then
+    echo "⚠️  Database initialization encountered issues, but will continue..."
+    echo "   The application will attempt to create tables on first run."
+fi
+
 # Start service in background
 nohup .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8802 > ../arena.log 2>&1 &
 echo $! > ../arena.pid

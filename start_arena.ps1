@@ -164,6 +164,46 @@ catch {
     }
 }
 
+# Initialize PostgreSQL databases
+Write-Host "Initializing PostgreSQL databases..." -ForegroundColor Yellow
+
+# Check if PostgreSQL is installed
+$pgInstalled = $false
+try {
+    $null = Get-Command psql -ErrorAction Stop
+    $pgInstalled = $true
+}
+catch {
+    Write-Host "⚠️  PostgreSQL not found on system PATH." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Please install PostgreSQL:" -ForegroundColor Yellow
+    Write-Host "  1. Download from: https://www.postgresql.org/download/windows/" -ForegroundColor Cyan
+    Write-Host "  2. Or use: winget install PostgreSQL.PostgreSQL" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "After installation, restart this script." -ForegroundColor Yellow
+    Write-Host ""
+    Read-Host "Press Enter to continue anyway (database may not work)"
+}
+
+if ($pgInstalled) {
+    # Check if PostgreSQL service is running
+    $pgService = Get-Service -Name "postgresql*" -ErrorAction SilentlyContinue
+    if ($pgService) {
+        if ($pgService.Status -ne "Running") {
+            Write-Host "Starting PostgreSQL service..." -ForegroundColor Yellow
+            Start-Service $pgService.Name
+        }
+    }
+
+    # Run database initialization script
+    Write-Host "Setting up PostgreSQL databases and tables..." -ForegroundColor Yellow
+    & $venvPython "database\init_postgresql.py"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "⚠️  Database initialization encountered issues, but will continue..." -ForegroundColor Yellow
+        Write-Host "   The application will attempt to create tables on first run." -ForegroundColor Gray
+    }
+}
+
 # Kill any existing process on port 8802
 Write-Host "Checking for existing processes on port 8802..." -ForegroundColor Yellow
 $processes = Get-NetTCPConnection -LocalPort 8802 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess
