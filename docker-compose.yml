@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:14-alpine
@@ -29,11 +27,6 @@ services:
       # Database connection
       DATABASE_URL: postgresql://alpha_user:alpha_pass@postgres:5432/alpha_arena
       SNAPSHOT_DATABASE_URL: postgresql://alpha_user:alpha_pass@postgres:5432/alpha_snapshots
-
-      # Load additional environment variables from .env file
-      # Users should create .env file for API keys and other secrets
-    env_file:
-      - .env
     ports:
       - "8802:8802"
     depends_on:
