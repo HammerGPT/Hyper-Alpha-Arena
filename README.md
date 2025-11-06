@@ -454,6 +454,80 @@ The platform automatically handles model-specific configurations and parameter d
 
 ### Common Issues
 
+#### PostgreSQL Database Issues
+
+**Problem**: "PostgreSQL not found" or "connection failed" during startup
+**Solution**:
+
+The application uses PostgreSQL for better concurrency handling. The startup script will attempt to install it automatically on Linux, but you may need to install it manually on some systems.
+
+**Linux (Ubuntu/Debian)**:
+```bash
+sudo apt-get update
+sudo apt-get install postgresql postgresql-contrib
+sudo systemctl start postgresql
+sudo systemctl enable postgresql
+```
+
+**Linux (CentOS/RHEL)**:
+```bash
+sudo yum install postgresql-server postgresql-contrib
+sudo postgresql-setup initdb
+sudo systemctl enable postgresql
+sudo systemctl start postgresql
+```
+
+**macOS**:
+```bash
+# Using Homebrew
+brew install postgresql@14
+brew services start postgresql@14
+
+# Or download PostgreSQL.app from https://postgresapp.com/
+```
+
+**Windows**:
+```powershell
+# Using winget
+winget install PostgreSQL.PostgreSQL
+
+# Or download installer from https://www.postgresql.org/download/windows/
+```
+
+After installation, restart the application with `./start_arena.sh` (Linux/macOS) or `.\start_arena.ps1` (Windows).
+
+**Problem**: "fe_sendauth: no password supplied" or authentication errors
+**Solution**:
+
+This means PostgreSQL is installed but requires authentication configuration. The application will still work if databases are already created. If you see this error on first install:
+
+1. Allow local connections without password (for development):
+   ```bash
+   # Edit PostgreSQL config (location varies by system)
+   sudo nano /etc/postgresql/*/main/pg_hba.conf
+
+   # Change this line:
+   local   all             all                                     peer
+   # To:
+   local   all             all                                     trust
+
+   # Restart PostgreSQL
+   sudo systemctl restart postgresql
+   ```
+
+2. Or manually create the database:
+   ```bash
+   sudo -u postgres psql
+   CREATE USER alpha_user WITH PASSWORD 'alpha_pass';
+   CREATE DATABASE alpha_arena OWNER alpha_user;
+   CREATE DATABASE alpha_snapshots OWNER alpha_user;
+   \q
+   ```
+
+**Note**: If you see PostgreSQL warnings during startup but the service starts successfully, you can safely ignore them. The application will create tables automatically on first run.
+
+#### Other Common Issues
+
 **Problem**: Windows PowerShell execution policy error
 **Solution**:
 ```powershell
