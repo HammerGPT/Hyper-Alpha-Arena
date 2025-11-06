@@ -24,7 +24,6 @@ backend/build
 # Node
 frontend/node_modules
 frontend/.pnpm-store
-frontend/dist
 
 # IDE
 .vscode
