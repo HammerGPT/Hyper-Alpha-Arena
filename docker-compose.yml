@@ -33,8 +33,6 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      # Mount backend code for development (optional, can be removed for production)
-      - ./backend:/app/backend
       # Mount logs
       - ./logs:/app/logs
       # Mount data for encryption key persistence
