@@ -422,8 +422,7 @@ Please star and fork this repository to stay updated with development progress.
 
 ### Join Our AI Trading Community
 
-This project is developed and maintained by **Heliki AI Community**.
-
+**学习更多AI量化交易技术，请加入知识星球🔽**
 <div align="center">
   <img src="https://github.com/user-attachments/assets/82f748a0-2d2f-412d-9eb8-f46f543688d5" alt="Heliki AI Community" width="400"/>
 </div>
@@ -434,8 +433,6 @@ This project is developed and maintained by **Heliki AI Community**.
 - Latest updates on Hyper Alpha Arena development
 - AI trading insights and strategy discussions
 - Technical support and Q&A
-
-**学习更多AI量化交易技术，请加入知识星球**
 
 
 ## License
