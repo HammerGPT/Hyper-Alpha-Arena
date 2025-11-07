@@ -20,6 +20,7 @@ export interface HyperliquidBalance {
   marginUsagePercent: number;
   maintenanceMargin: number;
   lastUpdated: string;
+  walletAddress?: string;
 }
 
 export interface HyperliquidPosition {

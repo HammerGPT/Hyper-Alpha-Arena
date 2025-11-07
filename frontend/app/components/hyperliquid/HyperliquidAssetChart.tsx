@@ -23,18 +23,21 @@ interface HyperliquidAssetData {
   account_id: number
   total_equity: number
   username: string
+  wallet_address?: string | null
 }
 
 interface HyperliquidAssetChartProps {
   accountId: number
   refreshTrigger?: number
   environment?: HyperliquidEnvironment
+  walletAddress?: string
 }
 
 export default function HyperliquidAssetChart({
   accountId,
   refreshTrigger,
   environment,
+  walletAddress,
 }: HyperliquidAssetChartProps) {
   const [data, setData] = useState<HyperliquidAssetData[]>([])
   const [loading, setLoading] = useState(true)
@@ -55,6 +58,10 @@ export default function HyperliquidAssetChart({
         params.set('environment', environment)
       }
 
+      if (walletAddress) {
+        params.set('wallet_address', walletAddress)
+      }
+
       const response = await fetch(`/api/account/asset-curve?${params.toString()}`)
       if (!response.ok) {
         throw new Error('Failed to fetch asset curve data')
@@ -68,7 +75,7 @@ export default function HyperliquidAssetChart({
     } finally {
       setLoading(false)
     }
-  }, [environment])
+  }, [environment, walletAddress])
 
   useEffect(() => {
     fetchData()
@@ -237,7 +244,7 @@ export default function HyperliquidAssetChart({
     return (
       <Card className="h-full flex items-center justify-center">
         <div className="text-muted-foreground">
-          No Hyperliquid data available. Start trading to see your equity curve.
+          No Hyperliquid snapshot data yet.
         </div>
       </Card>
     )

@@ -311,6 +311,7 @@ class AIDecisionLog(Base):
 
     # Hyperliquid environment tracking
     hyperliquid_environment = Column(String(20), nullable=True)  # "testnet" | "mainnet" | null (paper)
+    wallet_address = Column(String(100), nullable=True, index=True)
 
     # Relationships
     account = relationship("Account")
@@ -362,6 +363,7 @@ class HyperliquidAccountSnapshot(Base):
     id = Column(Integer, primary_key=True, index=True)
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
     environment = Column(String(20), nullable=False, index=True)  # "testnet" | "mainnet"
+    wallet_address = Column(String(100), nullable=True, index=True)
     snapshot_time = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
 
     # Account state
@@ -384,6 +386,7 @@ class HyperliquidPosition(Base):
     id = Column(Integer, primary_key=True, index=True)
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
     environment = Column(String(20), nullable=False, index=True)  # "testnet" | "mainnet"
+    wallet_address = Column(String(100), nullable=True, index=True)
     snapshot_time = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
 
     symbol = Column(String(20), nullable=False)
@@ -401,6 +404,31 @@ class HyperliquidPosition(Base):
 
     account = relationship("Account")
     order = relationship("Order")
+
+
+class HyperliquidExchangeAction(Base):
+    """Track every POST /exchange action for Hyperliquid accounts"""
+    __tablename__ = "hyperliquid_exchange_actions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False, index=True)
+    environment = Column(String(20), nullable=False, index=True)
+    wallet_address = Column(String(100), nullable=False, index=True)
+    action_type = Column(String(50), nullable=False)  # e.g., create_order, set_leverage
+    status = Column(String(20), nullable=False, default="success")  # success | error
+    symbol = Column(String(20), nullable=True)
+    side = Column(String(10), nullable=True)
+    leverage = Column(Integer, nullable=True)
+    size = Column(DECIMAL(24, 12), nullable=True)
+    price = Column(DECIMAL(18, 6), nullable=True)
+    notional = Column(DECIMAL(26, 10), nullable=True)
+    request_weight = Column(Integer, nullable=False, default=1)
+    request_payload = Column(Text, nullable=True)
+    response_payload = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
+
+    account = relationship("Account")
 
 
 # CRYPTO market trading configuration constants

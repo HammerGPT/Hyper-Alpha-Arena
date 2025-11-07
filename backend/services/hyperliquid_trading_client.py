@@ -17,7 +17,8 @@ from decimal import Decimal
 import ccxt
 from sqlalchemy.orm import Session
 
-from database.models import Account
+from database.connection import SessionLocal
+from database.models import Account, HyperliquidExchangeAction
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,61 @@ class HyperliquidTradingClient:
         except Exception as e:
             logger.error(f"Failed to initialize Hyperliquid exchange: {e}")
             raise
+
+    def _serialize_payload(self, payload: Optional[Any]) -> Optional[str]:
+        if payload is None:
+            return None
+        try:
+            return json.dumps(payload, default=str)
+        except Exception:
+            return str(payload)
+
+    def _record_exchange_action(
+        self,
+        action_type: str,
+        status: str,
+        symbol: Optional[str] = None,
+        side: Optional[str] = None,
+        leverage: Optional[int] = None,
+        size: Optional[float] = None,
+        price: Optional[float] = None,
+        request_payload: Optional[Any] = None,
+        response_payload: Optional[Any] = None,
+        error_message: Optional[str] = None,
+        request_weight: int = 1,
+    ) -> None:
+        session = SessionLocal()
+        try:
+            size_decimal = Decimal(str(size)) if size is not None else None
+            price_decimal = Decimal(str(price)) if price is not None else None
+            notional_decimal = (
+                size_decimal * price_decimal if size_decimal is not None and price_decimal is not None else None
+            )
+
+            entry = HyperliquidExchangeAction(
+                account_id=self.account_id,
+                environment=self.environment,
+                wallet_address=self.wallet_address,
+                action_type=action_type,
+                status=status,
+                symbol=symbol,
+                side=side,
+                leverage=leverage,
+                size=size_decimal,
+                price=price_decimal,
+                notional=notional_decimal,
+                request_weight=request_weight,
+                request_payload=self._serialize_payload(request_payload),
+                response_payload=self._serialize_payload(response_payload),
+                error_message=error_message[:2000] if error_message else None,
+            )
+            session.add(entry)
+            session.commit()
+        except Exception as log_err:
+            session.rollback()
+            logger.warning(f"Failed to record Hyperliquid exchange action ({action_type}): {log_err}")
+        finally:
+            session.close()
 
     def _validate_environment(self, db: Session) -> bool:
         """
@@ -173,6 +229,7 @@ class HyperliquidTradingClient:
                 'maintenance_margin': used_margin * 0.5,  # Estimate: maintenance = 50% of initial
                 'margin_usage_percent': margin_usage_percent,
                 'withdrawal_available': available_balance,
+                'wallet_address': self.wallet_address,
                 'timestamp': int(time.time() * 1000)
             }
 
@@ -320,6 +377,8 @@ class HyperliquidTradingClient:
             f"size={size} leverage={leverage}x type={order_type} reduce_only={reduce_only}"
         )
 
+        action_payload: Optional[Dict[str, Any]] = None
+
         try:
             # Set leverage before placing order (if different from current)
             try:
@@ -360,6 +419,15 @@ class HyperliquidTradingClient:
                 f"CCXT order params: symbol={ccxt_symbol} type={ccxt_type} "
                 f"side={ccxt_side} amount={ccxt_amount} price={ccxt_price} params={params}"
             )
+
+            action_payload = {
+                'symbol': ccxt_symbol,
+                'side': ccxt_side,
+                'amount': ccxt_amount,
+                'price': ccxt_price,
+                'order_type': ccxt_type,
+                'params': params
+            }
 
             # Place order via CCXT
             order = self.exchange.create_order(
@@ -441,6 +509,7 @@ class HyperliquidTradingClient:
                 'filled_amount': filled_amount,
                 'average_price': average_price,
                 'raw_order': order,  # Full CCXT response for debugging
+                'wallet_address': self.wallet_address,
                 'timestamp': int(time.time() * 1000)
             }
 
@@ -453,9 +522,34 @@ class HyperliquidTradingClient:
                 f"filled={filled_amount}/{size} avg_price={average_price}"
             )
 
+            self._record_exchange_action(
+                action_type="create_order",
+                status="success" if status != 'error' else 'error',
+                symbol=symbol,
+                side=ccxt_side,
+                leverage=leverage,
+                size=ccxt_amount,
+                price=ccxt_price,
+                request_payload=action_payload,
+                response_payload=order,
+                error_message=result.get('error'),
+            )
+
             return result
 
         except Exception as e:
+            self._record_exchange_action(
+                action_type="create_order",
+                status="error",
+                symbol=symbol,
+                side="buy" if is_buy else "sell",
+                leverage=leverage,
+                size=size,
+                price=price,
+                request_payload=locals().get('action_payload'),
+                response_payload=None,
+                error_message=str(e),
+            )
             logger.error(f"Failed to place order: {e}", exc_info=True)
             return {
                 'status': 'error',

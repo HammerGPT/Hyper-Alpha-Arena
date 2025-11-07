@@ -511,6 +511,8 @@ def place_ai_driven_hyperliquid_order(account_ids: Optional[Iterable[int]] = Non
             except Exception as client_err:
                 logger.error(f"Failed to get Hyperliquid client for {account.name}: {client_err}")
                 continue
+            wallet_address = getattr(client, "wallet_address", None)
+            decision_kwargs = {"wallet_address": wallet_address}
 
             # Get real account state from Hyperliquid
             try:
@@ -598,17 +600,17 @@ def place_ai_driven_hyperliquid_order(account_ids: Optional[Iterable[int]] = Non
             # Validate decision
             if operation not in ["buy", "sell", "hold", "close"]:
                 logger.warning(f"Invalid operation '{operation}' from AI for {account.name}")
-                save_ai_decision(db, account, decision, portfolio, executed=False)
+                save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
                 continue
 
             if operation == "hold":
                 logger.info(f"AI decided to HOLD for {account.name}")
-                save_ai_decision(db, account, decision, portfolio, executed=True)
+                save_ai_decision(db, account, decision, portfolio, executed=True, **decision_kwargs)
                 continue
 
             if symbol not in SUPPORTED_SYMBOLS:
                 logger.warning(f"Invalid symbol '{symbol}' from AI for {account.name}")
-                save_ai_decision(db, account, decision, portfolio, executed=False)
+                save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
                 continue
 
             # Validate leverage
@@ -622,15 +624,31 @@ def place_ai_driven_hyperliquid_order(account_ids: Optional[Iterable[int]] = Non
 
             if target_portion <= 0 or target_portion > 1:
                 logger.warning(f"Invalid target_portion {target_portion} from AI for {account.name}")
-                save_ai_decision(db, account, decision, portfolio, executed=False)
+                save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
                 continue
 
             # Get current price
             price = prices.get(symbol)
             if not price or price <= 0:
                 logger.warning(f"Invalid price for {symbol} for {account.name}")
-                save_ai_decision(db, account, decision, portfolio, executed=False)
+                save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
                 continue
+
+            # Clamp AI-provided price bands to +/-5% of market price
+            upper_bound = price * 1.05
+            lower_bound = price * 0.95
+
+            if max_price is not None and max_price > upper_bound:
+                logger.warning(
+                    f"AI max_price {max_price} exceeds +5% band from market {price}; clamping to {upper_bound}"
+                )
+                max_price = upper_bound
+
+            if min_price is not None and min_price < lower_bound:
+                logger.warning(
+                    f"AI min_price {min_price} below -5% band from market {price}; clamping to {lower_bound}"
+                )
+                min_price = lower_bound
 
             # Execute order based on operation
             order_result = None
@@ -640,10 +658,12 @@ def place_ai_driven_hyperliquid_order(account_ids: Optional[Iterable[int]] = Non
                 order_value = available_balance * target_portion
                 quantity = round(order_value / price, 6)
 
-                if quantity <= 0.0001:  # Minimum size check
-                    logger.warning(f"Calculated BUY quantity too small ({quantity}) for {symbol}, skipping")
-                    save_ai_decision(db, account, decision, portfolio, executed=False)
-                    continue
+                price_to_use = max_price if max_price is not None else price
+                if abs(price_to_use - price) / price > 0.05:
+                    logger.warning(
+                        f"BUY price {price_to_use} deviates >5% from market {price}; using market price"
+                    )
+                    price_to_use = price
 
                 logger.info(
                     f"[HYPERLIQUID {environment.upper()}] Placing BUY order: "
@@ -656,7 +676,7 @@ def place_ai_driven_hyperliquid_order(account_ids: Optional[Iterable[int]] = Non
                     is_buy=True,
                     size=quantity,
                     order_type="market",
-                    price=max_price,
+                    price=price_to_use,
                     leverage=leverage,
                     reduce_only=False
                 )
@@ -666,10 +686,12 @@ def place_ai_driven_hyperliquid_order(account_ids: Optional[Iterable[int]] = Non
                 order_value = available_balance * target_portion
                 quantity = round(order_value / price, 6)
 
-                if quantity <= 0.0001:  # Minimum size check
-                    logger.info(f"Calculated SELL quantity too small ({quantity}) for {symbol}, skipping")
-                    save_ai_decision(db, account, decision, portfolio, executed=False)
-                    continue
+                price_to_use = min_price if min_price is not None else price
+                if abs(price_to_use - price) / price > 0.05:
+                    logger.warning(
+                        f"SELL price {price_to_use} deviates >5% from market {price}; using market price"
+                    )
+                    price_to_use = price
 
                 logger.info(
                     f"[HYPERLIQUID {environment.upper()}] Placing SELL order: "
@@ -682,7 +704,7 @@ def place_ai_driven_hyperliquid_order(account_ids: Optional[Iterable[int]] = Non
                     is_buy=False,
                     size=quantity,
                     order_type="market",
-                    price=min_price,
+                    price=price_to_use,
                     leverage=leverage,
                     reduce_only=False
                 )
@@ -697,7 +719,7 @@ def place_ai_driven_hyperliquid_order(account_ids: Optional[Iterable[int]] = Non
 
                 if not position_to_close:
                     logger.info(f"No position to close for {symbol} for {account.name}")
-                    save_ai_decision(db, account, decision, portfolio, executed=False)
+                    save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
                     continue
 
                 position_size = abs(position_to_close['szi'])
@@ -736,7 +758,7 @@ def place_ai_driven_hyperliquid_order(account_ids: Optional[Iterable[int]] = Non
                         f"[HYPERLIQUID] Order executed successfully for {account.name}: "
                         f"{operation.upper()} {symbol} order_id={order_id}"
                     )
-                    save_ai_decision(db, account, decision, portfolio, executed=True)
+                    save_ai_decision(db, account, decision, portfolio, executed=True, **decision_kwargs)
 
                     # Create Hyperliquid trade record
                     try:
@@ -749,6 +771,7 @@ def place_ai_driven_hyperliquid_order(account_ids: Optional[Iterable[int]] = Non
                             trade_record = HyperliquidTrade(
                                 account_id=account.id,
                                 environment=environment,
+                                wallet_address=wallet_address,
                                 symbol=symbol,
                                 side=operation,
                                 quantity=Decimal(str(order_result.get('filled_amount', 0))),
@@ -772,7 +795,7 @@ def place_ai_driven_hyperliquid_order(account_ids: Optional[Iterable[int]] = Non
                         f"[HYPERLIQUID] Order placed (resting) for {account.name}: "
                         f"{operation.upper()} {symbol} order_id={order_id}"
                     )
-                    save_ai_decision(db, account, decision, portfolio, executed=True)
+                    save_ai_decision(db, account, decision, portfolio, executed=True, **decision_kwargs)
 
                 else:
                     error_msg = order_result.get('error', 'Unknown error')
@@ -780,10 +803,10 @@ def place_ai_driven_hyperliquid_order(account_ids: Optional[Iterable[int]] = Non
                         f"[HYPERLIQUID] Order failed for {account.name}: "
                         f"{operation.upper()} {symbol} - {error_msg}"
                     )
-                    save_ai_decision(db, account, decision, portfolio, executed=False)
+                    save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
             else:
                 logger.error(f"No order result received for {account.name}")
-                save_ai_decision(db, account, decision, portfolio, executed=False)
+                save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
 
         except Exception as account_err:
             logger.error(f"Error processing Hyperliquid account {account.name}: {account_err}", exc_info=True)

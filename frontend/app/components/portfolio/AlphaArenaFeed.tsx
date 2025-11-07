@@ -22,6 +22,7 @@ interface AlphaArenaFeedProps {
   wsRef?: React.MutableRefObject<WebSocket | null>
   selectedAccount?: number | 'all'
   onSelectedAccountChange?: (accountId: number | 'all') => void
+  walletAddress?: string
 }
 
 type FeedTab = 'trades' | 'model-chat' | 'positions'
@@ -55,6 +56,7 @@ export default function AlphaArenaFeed({
   wsRef,
   selectedAccount: selectedAccountProp,
   onSelectedAccountChange,
+  walletAddress,
 }: AlphaArenaFeedProps) {
   const { getData, updateData } = useArenaData()
   const { tradingMode } = useTradingMode()
@@ -94,8 +96,9 @@ export default function AlphaArenaFeed({
   const activeAccount = useMemo(() => selectedAccountProp ?? internalSelectedAccount, [selectedAccountProp, internalSelectedAccount])
   const cacheKey: CacheKey = useMemo(() => {
     const accountKey = activeAccount === 'all' ? 'all' : String(activeAccount)
-    return `${accountKey}_${tradingMode}`
-  }, [activeAccount, tradingMode])
+    const walletKey = walletAddress ? walletAddress.toLowerCase() : 'nowallet'
+    return `${accountKey}_${tradingMode}_${walletKey}`
+  }, [activeAccount, tradingMode, walletAddress])
 
   // Initialize from global state on mount or account change
   useEffect(() => {
@@ -131,6 +134,13 @@ export default function AlphaArenaFeed({
         const shouldProcess = activeAccount === 'all' || !msgAccountId || msgAccountId === activeAccount
 
         if (!shouldProcess) return
+
+        const messageWallet: string | undefined =
+          msg.trade?.wallet_address || msg.decision?.wallet_address || undefined
+        if (walletAddress) {
+          if (!messageWallet) return
+          if (messageWallet.toLowerCase() !== walletAddress.toLowerCase()) return
+        }
 
         if (msg.type === 'trade_update' && msg.trade) {
           // Prepend new trade to the list
@@ -204,14 +214,19 @@ export default function AlphaArenaFeed({
     return () => {
       wsRef.current?.removeEventListener('message', handleMessage)
     }
-  }, [wsRef, activeAccount, cacheKey, writeCache])
+  }, [wsRef, activeAccount, cacheKey, walletAddress, writeCache])
 
   // Individual loaders for each data type
   const loadTradesData = useCallback(async () => {
     try {
       setLoadingTrades(true)
       const accountId = activeAccount === 'all' ? undefined : activeAccount
-      const tradeRes = await getArenaTrades({ limit: DEFAULT_LIMIT, account_id: accountId, trading_mode: tradingMode })
+      const tradeRes = await getArenaTrades({
+        limit: DEFAULT_LIMIT,
+        account_id: accountId,
+        trading_mode: tradingMode,
+        wallet_address: walletAddress,
+      })
       const newTrades = tradeRes.trades || []
       setTrades(newTrades)
       updateData(cacheKey, { trades: newTrades })
@@ -234,13 +249,18 @@ export default function AlphaArenaFeed({
       setLoadingTrades(false)
       return null
     }
-  }, [activeAccount, cacheKey, updateData, tradingMode])
+  }, [activeAccount, cacheKey, updateData, tradingMode, walletAddress])
 
   const loadModelChatData = useCallback(async () => {
     try {
       setLoadingModelChat(true)
       const accountId = activeAccount === 'all' ? undefined : activeAccount
-      const chatRes = await getArenaModelChat({ limit: MODEL_CHAT_LIMIT, account_id: accountId, trading_mode: tradingMode })
+      const chatRes = await getArenaModelChat({
+        limit: MODEL_CHAT_LIMIT,
+        account_id: accountId,
+        trading_mode: tradingMode,
+        wallet_address: walletAddress,
+      })
       const newModelChat = chatRes.entries || []
       setModelChat(newModelChat)
       updateData(cacheKey, { modelChat: newModelChat })
@@ -266,7 +286,7 @@ export default function AlphaArenaFeed({
       setLoadingModelChat(false)
       return null
     }
-  }, [activeAccount, cacheKey, updateData, tradingMode])
+  }, [activeAccount, cacheKey, updateData, tradingMode, walletAddress])
 
   const loadPositionsData = useCallback(async () => {
     try {

@@ -37,7 +37,9 @@ export default function HyperliquidView({ wsRef, refreshKey = 0 }: HyperliquidVi
 
   // Calculate aggregated totals from positions data
   // Get first account ID for chart (Hyperliquid typically has one account per user)
-  const firstAccountId = positionsData?.accounts?.[0]?.account_id
+  const firstAccount = positionsData?.accounts?.[0]
+  const firstAccountId = firstAccount?.account_id
+  const walletAddress = firstAccount?.wallet_address ?? undefined
 
   if (loading && !positionsData) {
     return (
@@ -57,6 +59,7 @@ export default function HyperliquidView({ wsRef, refreshKey = 0 }: HyperliquidVi
               accountId={firstAccountId}
               refreshTrigger={chartRefreshKey}
               environment={environment}
+              walletAddress={walletAddress}
             />
           ) : (
             <div className="bg-card border border-border rounded-lg h-full flex items-center justify-center">
@@ -75,7 +78,7 @@ export default function HyperliquidView({ wsRef, refreshKey = 0 }: HyperliquidVi
       {/* Right Panel - Feed */}
       <div className="col-span-2 flex flex-col min-h-0">
         <div className="flex-1 min-h-0 border border-border rounded-lg bg-card shadow-sm px-4 py-3">
-          <AlphaArenaFeed wsRef={wsRef} />
+          <AlphaArenaFeed wsRef={wsRef} walletAddress={walletAddress} />
         </div>
       </div>
     </div>

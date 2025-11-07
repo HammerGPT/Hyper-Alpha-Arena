@@ -167,6 +167,7 @@ def _get_hyperliquid_positions(db: Session, account_id: Optional[int], environme
                 "account_name": account.name,
                 "model": account.model,
                 "environment": environment,
+                "wallet_address": client.wallet_address,
                 "total_unrealized_pnl": total_unrealized,
                 "available_cash": available_balance,
                 "used_margin": used_margin,
@@ -341,9 +342,16 @@ def get_completed_trades(
     limit: int = Query(100, ge=1, le=500),
     account_id: Optional[int] = None,
     trading_mode: Optional[str] = Query(None, regex="^(paper|testnet|mainnet)$"),
+    wallet_address: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     """Return recent trades across all AI accounts, filtered by trading mode."""
+    if wallet_address and trading_mode not in ("testnet", "mainnet"):
+        return {
+            "generated_at": datetime.utcnow().isoformat(),
+            "accounts": [],
+            "trades": [],
+        }
     if trading_mode in ("testnet", "mainnet"):
         snapshot_db = SnapshotSessionLocal()
         try:
@@ -351,6 +359,8 @@ def get_completed_trades(
             query = query.filter(HyperliquidTrade.environment == trading_mode)
             if account_id:
                 query = query.filter(HyperliquidTrade.account_id == account_id)
+            if wallet_address:
+                query = query.filter(HyperliquidTrade.wallet_address == wallet_address)
 
             hyper_trades = query.limit(limit).all()
         finally:
@@ -401,6 +411,7 @@ def get_completed_trades(
                     "notional": notional,
                     "commission": commission,
                     "trade_time": trade.trade_time.isoformat() if trade.trade_time else None,
+                    "wallet_address": trade.wallet_address,
                 }
             )
 
@@ -471,6 +482,7 @@ def get_completed_trades(
                 "notional": notional,
                 "commission": float(trade.commission),
                 "trade_time": trade.trade_time.isoformat() if trade.trade_time else None,
+                "wallet_address": None,
             }
         )
 
@@ -492,6 +504,7 @@ def get_model_chat(
     limit: int = Query(60, ge=1, le=200),
     account_id: Optional[int] = None,
     trading_mode: Optional[str] = Query(None, regex="^(paper|testnet|mainnet)$"),
+    wallet_address: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     """Return recent AI decision logs as chat-style summaries, filtered by trading mode."""
@@ -503,6 +516,9 @@ def get_model_chat(
 
     if account_id:
         query = query.filter(AIDecisionLog.account_id == account_id)
+
+    if wallet_address:
+        query = query.filter(AIDecisionLog.wallet_address == wallet_address)
 
     # Filter by trading mode based on hyperliquid_environment field
     if trading_mode:
@@ -578,6 +594,7 @@ def get_model_chat(
                 "prompt_snapshot": log.prompt_snapshot,
                 "reasoning_snapshot": log.reasoning_snapshot,
                 "decision_snapshot": log.decision_snapshot,
+                "wallet_address": log.wallet_address,
             }
         )
 

@@ -76,6 +76,7 @@ export async function getHyperliquidBalance(
     marginUsagePercent: data.margin_usage_percent ?? 0,
     withdrawalAvailable: data.withdrawal_available ?? 0,
     lastUpdated: data.timestamp ? new Date(data.timestamp).toISOString() : undefined,
+    walletAddress: data.wallet_address ?? undefined,
   };
 }
 

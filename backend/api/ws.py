@@ -193,6 +193,7 @@ def get_all_asset_curves_data(
     timeframe: str = "1h",
     trading_mode: str = "paper",
     environment: Optional[str] = None,
+    wallet_address: Optional[str] = None,
 ):
     """Get timeframe-based asset curve data for all accounts - WebSocket version
 
@@ -202,7 +203,13 @@ def get_all_asset_curves_data(
         timeframe: Time period for the curve, options: "5m", "1h", "1d"
         trading_mode: Trading mode filter, options: "paper", "testnet", "mainnet"
     """
-    return get_all_asset_curves_data_new(db, timeframe, trading_mode, environment)
+    return get_all_asset_curves_data_new(
+        db,
+        timeframe,
+        trading_mode,
+        environment,
+        wallet_address=wallet_address,
+    )
 
 
 async def _send_snapshot_optimized(db: Session, account_id: int):

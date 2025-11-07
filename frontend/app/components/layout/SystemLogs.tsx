@@ -41,6 +41,34 @@ interface SamplingPoolData {
   }
 }
 
+interface HyperliquidActionEntry {
+  id: number
+  timestamp: string | null
+  account_id: number
+  environment: string
+  wallet_address: string
+  action_type: string
+  status: string
+  symbol?: string | null
+  side?: string | null
+  leverage?: number | null
+  size?: number | null
+  price?: number | null
+  notional?: number | null
+  request_weight: number
+  error_message?: string | null
+  request_payload?: string | null
+  response_payload?: string | null
+}
+
+interface HyperliquidActionStats {
+  total: number
+  last24h: number
+  success: number
+  error: number
+  request_weight_sum: number
+}
+
 export default function SystemLogs() {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [stats, setStats] = useState<LogStats | null>(null)
@@ -49,6 +77,8 @@ export default function SystemLogs() {
   const [selectedCategory, setSelectedCategory] = useState<string>('all')
   const [selectedLevel, setSelectedLevel] = useState<string>('all')
   const [activeTab, setActiveTab] = useState<string>('logs')
+  const [hyperliquidActions, setHyperliquidActions] = useState<HyperliquidActionEntry[]>([])
+  const [hyperliquidStats, setHyperliquidStats] = useState<HyperliquidActionStats | null>(null)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const refreshIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
@@ -91,6 +121,18 @@ export default function SystemLogs() {
     }
   }
 
+  const fetchHyperliquidActions = async () => {
+    try {
+      const response = await fetch('/api/hyperliquid/actions/?limit=100')
+      const data = await response.json()
+      setHyperliquidActions(data.entries || [])
+      setHyperliquidStats(data.stats || null)
+    } catch (error) {
+      console.error('Failed to fetch Hyperliquid actions:', error)
+      toast.error('Failed to fetch Hyperliquid actions')
+    }
+  }
+
   // Clear logs
   const clearLogs = async () => {
     if (!confirm('Are you sure you want to clear all logs?')) return
@@ -114,6 +156,8 @@ export default function SystemLogs() {
           fetchStats()
         } else if (activeTab === 'sampling') {
           fetchSamplingPool()
+        } else if (activeTab === 'hyperliquid') {
+          fetchHyperliquidActions()
         }
       }, 60000) // Refresh every 60 seconds
     } else {
@@ -131,14 +175,16 @@ export default function SystemLogs() {
   }, [autoRefresh, selectedCategory, selectedLevel, activeTab])
 
   // Initial load
-  useEffect(() => {
-    if (activeTab === 'logs') {
-      fetchLogs()
-      fetchStats()
-    } else if (activeTab === 'sampling') {
-      fetchSamplingPool()
-    }
-  }, [selectedCategory, selectedLevel, activeTab])
+useEffect(() => {
+  if (activeTab === 'logs') {
+    fetchLogs()
+    fetchStats()
+  } else if (activeTab === 'sampling') {
+    fetchSamplingPool()
+  } else if (activeTab === 'hyperliquid') {
+    fetchHyperliquidActions()
+  }
+}, [selectedCategory, selectedLevel, activeTab])
 
   // Level icon and color
   const getLevelIcon = (level: string) => {
@@ -213,6 +259,8 @@ export default function SystemLogs() {
                 fetchStats()
               } else if (activeTab === 'sampling') {
                 fetchSamplingPool()
+              } else if (activeTab === 'hyperliquid') {
+                fetchHyperliquidActions()
               }
             }}
           >
@@ -283,9 +331,10 @@ export default function SystemLogs() {
 
       {/* Main Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="logs">System Logs</TabsTrigger>
           <TabsTrigger value="sampling">Sampling Pool</TabsTrigger>
+          <TabsTrigger value="hyperliquid">Hyperliquid Actions</TabsTrigger>
         </TabsList>
 
         <TabsContent value="logs" className="space-y-4">
@@ -457,6 +506,106 @@ export default function SystemLogs() {
                           </div>
                         </CardContent>
                       </Card>
+                    ))}
+                  </div>
+                )}
+              </ScrollArea>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="hyperliquid" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                Hyperliquid Action Summary
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {hyperliquidStats ? (
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Total Requests</p>
+                    <p className="text-2xl font-bold">{hyperliquidStats.total}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Last 24h</p>
+                    <p className="text-2xl font-bold">{hyperliquidStats.last24h}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Success</p>
+                    <p className="text-2xl font-bold text-green-500">{hyperliquidStats.success}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Errors</p>
+                    <p className="text-2xl font-bold text-red-500">{hyperliquidStats.error}</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-muted-foreground">No stats available</div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Latest Actions ({hyperliquidActions.length})</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Request weight total: {hyperliquidStats?.request_weight_sum ?? 0}
+              </p>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="h-[600px] pr-4">
+                {hyperliquidActions.length === 0 ? (
+                  <div className="text-center text-muted-foreground py-8">
+                    No Hyperliquid actions recorded yet
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {hyperliquidActions.map((action) => (
+                      <div key={action.id} className="border rounded-lg p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold uppercase text-sm">{action.action_type}</span>
+                            <Badge variant={action.status === 'success' ? 'outline' : 'destructive'}>
+                              {action.status.toUpperCase()}
+                            </Badge>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {action.timestamp ? formatTimestamp(action.timestamp) : 'N/A'}
+                          </div>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {action.environment.toUpperCase()} · {action.wallet_address}
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-sm">
+                          {action.symbol && (
+                            <div>
+                              <span className="text-muted-foreground">Symbol:</span> {action.symbol}
+                            </div>
+                          )}
+                          {action.side && (
+                            <div>
+                              <span className="text-muted-foreground">Side:</span> {action.side.toUpperCase()}
+                            </div>
+                          )}
+                          {action.size !== null && action.size !== undefined && (
+                            <div>
+                              <span className="text-muted-foreground">Size:</span> {action.size}
+                            </div>
+                          )}
+                          {action.price !== null && action.price !== undefined && (
+                            <div>
+                              <span className="text-muted-foreground">Price:</span> ${action.price}
+                            </div>
+                          )}
+                        </div>
+                        {action.error_message && (
+                          <div className="text-xs text-red-500 bg-red-500/10 p-2 rounded">
+                            {action.error_message}
+                          </div>
+                        )}
+                      </div>
                     ))}
                   </div>
                 )}

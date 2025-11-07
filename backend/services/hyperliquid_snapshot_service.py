@@ -88,6 +88,7 @@ class HyperliquidSnapshotService:
             snapshot = HyperliquidAccountSnapshot(
                 account_id=account.id,
                 environment=environment,
+                wallet_address=client.wallet_address,
                 total_equity=account_state["total_equity"],
                 available_balance=account_state["available_balance"],
                 used_margin=account_state["used_margin"],

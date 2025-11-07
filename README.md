@@ -111,6 +111,49 @@ docker compose up -d --build # (or docker-compose up -d --build)
 - Data will be preserved when you stop/restart containers
 - Only `docker-compose down -v` will delete data (don't use `-v` flag unless you want to reset everything)
 
+### Upgrading from Previous Versions
+
+**For v0.4.x or earlier users upgrading to v0.5.0+:**
+
+Due to significant database schema changes (wallet address tracking for multi-model support), we recommend two approaches:
+
+#### Option 1: Clean Installation (Recommended for Most Users)
+
+```bash
+# ⚠️ This will delete all historical data
+docker-compose down -v
+git pull origin main
+docker-compose up -d
+```
+
+**Why clean installation?**
+- Old trading records don't have wallet addresses and won't appear in wallet-specific views
+- Simpler and faster than running migration scripts
+- Guaranteed compatibility with the new version
+
+#### Option 2: Preserve Historical Data (Advanced Users)
+
+If you must keep historical data, run migration scripts manually:
+
+```bash
+cd backend
+source .venv/bin/activate
+
+# Run all migrations
+python database/migrations/add_wallet_address_to_ai_decision_logs.py
+python database/migrations/add_wallet_address_to_hyperliquid_trades.py
+python database/migrations/add_wallet_address_to_hyperliquid_tables.py
+python database/migrations/add_wallet_address_to_snapshot_tables.py
+
+# Restart containers
+docker-compose restart
+```
+
+**Important Limitations:**
+- Historical records without wallet addresses will not display in wallet-specific views (Hyperliquid page, asset charts)
+- The data remains in the database but is filtered out by the new UI
+- Only new trades after migration will have wallet address tracking
+
 ### First-Time Setup
 
 #### For Paper Trading (Risk-Free Testing)

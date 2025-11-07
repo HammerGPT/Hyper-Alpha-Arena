@@ -942,7 +942,15 @@ def call_ai_for_decision(
         return None
 
 
-def save_ai_decision(db: Session, account: Account, decision: Dict, portfolio: Dict, executed: bool = False, order_id: Optional[int] = None) -> None:
+def save_ai_decision(
+    db: Session,
+    account: Account,
+    decision: Dict,
+    portfolio: Dict,
+    executed: bool = False,
+    order_id: Optional[int] = None,
+    wallet_address: Optional[str] = None,
+) -> None:
     """Save AI decision to the decision log"""
     try:
         operation = decision.get("operation", "").lower() if decision.get("operation") else ""
@@ -1009,7 +1017,8 @@ def save_ai_decision(db: Session, account: Account, decision: Dict, portfolio: D
             prompt_snapshot=prompt_snapshot,
             reasoning_snapshot=reasoning_snapshot,
             decision_snapshot=decision_snapshot_structured or raw_decision_snapshot,
-            hyperliquid_environment=hyperliquid_environment
+            hyperliquid_environment=hyperliquid_environment,
+            wallet_address=wallet_address,
         )
 
         db.add(decision_log)
@@ -1054,7 +1063,8 @@ def save_ai_decision(db: Session, account: Account, decision: Dict, portfolio: D
                 "order_id": decision_log.order_id,
                 "prompt_snapshot": decision_log.prompt_snapshot,
                 "reasoning_snapshot": decision_log.reasoning_snapshot,
-                "decision_snapshot": decision_log.decision_snapshot
+                "decision_snapshot": decision_log.decision_snapshot,
+                "wallet_address": decision_log.wallet_address,
             }))
         except Exception as broadcast_err:
             # Don't fail the save operation if broadcast fails

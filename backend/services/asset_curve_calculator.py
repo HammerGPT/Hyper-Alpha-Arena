@@ -102,6 +102,7 @@ def get_all_asset_curves_data_new(
     timeframe: str = "1h",
     trading_mode: str = "paper",
     environment: Optional[str] = None,
+    wallet_address: Optional[str] = None,
 ) -> List[Dict]:
     """
     Build asset curve data for all active accounts using cached SQL aggregation.
@@ -118,6 +119,7 @@ def get_all_asset_curves_data_new(
             db,
             bucket_minutes,
             environment=effective_environment,
+            wallet_address=wallet_address,
         )
 
     # For other non-paper modes, return empty data for now
@@ -196,6 +198,7 @@ def _build_hyperliquid_asset_curve(
     db: Session,
     bucket_minutes: int,
     environment: Optional[str] = None,
+    wallet_address: Optional[str] = None,
 ) -> List[Dict]:
     """Build asset curve for Hyperliquid accounts with 5-minute bucketing"""
     bucket_seconds = bucket_minutes * 60
@@ -234,6 +237,8 @@ def _build_hyperliquid_asset_curve(
         )
         if env_filter_value:
             bucket_query = bucket_query.filter(HyperliquidAccountSnapshot.environment == env_filter_value)
+        if wallet_address:
+            bucket_query = bucket_query.filter(HyperliquidAccountSnapshot.wallet_address == wallet_address)
 
         bucket_subquery = bucket_query.group_by(
             HyperliquidAccountSnapshot.account_id,
@@ -245,6 +250,7 @@ def _build_hyperliquid_asset_curve(
             snapshot_alias.account_id,
             snapshot_alias.total_equity,
             snapshot_alias.created_at,
+            snapshot_alias.wallet_address,
         ).join(
             bucket_subquery,
             (snapshot_alias.account_id == bucket_subquery.c.account_id)
@@ -253,6 +259,8 @@ def _build_hyperliquid_asset_curve(
 
         if env_filter_value:
             rows_query = rows_query.filter(snapshot_alias.environment == env_filter_value)
+        if wallet_address:
+            rows_query = rows_query.filter(snapshot_alias.wallet_address == wallet_address)
 
         rows = rows_query.order_by(
             snapshot_alias.created_at.asc(),
@@ -262,7 +270,7 @@ def _build_hyperliquid_asset_curve(
         result: List[Dict] = []
         seen_accounts = set()
 
-        for account_id, total_equity, created_at in rows:
+        for account_id, total_equity, created_at, snap_wallet in rows:
             account = account_map.get(account_id)
             if not account:
                 continue
@@ -276,6 +284,7 @@ def _build_hyperliquid_asset_curve(
                 "account_id": account_id,
                 "username": account.name,
                 "total_equity": float(total_equity),
+                "wallet_address": snap_wallet,
             })
 
         # Add accounts without snapshots with initial capital
@@ -289,6 +298,7 @@ def _build_hyperliquid_asset_curve(
                     "account_id": account.id,
                     "username": account.name,
                     "total_equity": initial_capital,
+                    "wallet_address": wallet_address,
                 })
 
         result.sort(key=lambda item: (item["timestamp"], item["account_id"]))

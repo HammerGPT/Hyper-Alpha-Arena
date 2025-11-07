@@ -437,6 +437,7 @@ export interface ArenaTrade {
   notional: number
   commission: number
   trade_time?: string | null
+  wallet_address?: string | null
 }
 
 export interface ArenaTradesResponse {
@@ -445,11 +446,12 @@ export interface ArenaTradesResponse {
   trades: ArenaTrade[]
 }
 
-export async function getArenaTrades(params?: { limit?: number; account_id?: number; trading_mode?: string }): Promise<ArenaTradesResponse> {
+export async function getArenaTrades(params?: { limit?: number; account_id?: number; trading_mode?: string; wallet_address?: string }): Promise<ArenaTradesResponse> {
   const search = new URLSearchParams()
   if (params?.limit) search.append('limit', params.limit.toString())
   if (params?.account_id) search.append('account_id', params.account_id.toString())
   if (params?.trading_mode) search.append('trading_mode', params.trading_mode)
+  if (params?.wallet_address) search.append('wallet_address', params.wallet_address)
   const query = search.toString()
   const response = await apiRequest(`/arena/trades${query ? `?${query}` : ''}`)
   return response.json()
@@ -476,6 +478,7 @@ export interface ArenaModelChatEntry {
   prompt_snapshot?: string | null
   reasoning_snapshot?: string | null
   decision_snapshot?: string | null
+  wallet_address?: string | null
 }
 
 export interface ArenaModelChatResponse {
@@ -483,11 +486,12 @@ export interface ArenaModelChatResponse {
   entries: ArenaModelChatEntry[]
 }
 
-export async function getArenaModelChat(params?: { limit?: number; account_id?: number; trading_mode?: string }): Promise<ArenaModelChatResponse> {
+export async function getArenaModelChat(params?: { limit?: number; account_id?: number; trading_mode?: string; wallet_address?: string }): Promise<ArenaModelChatResponse> {
   const search = new URLSearchParams()
   if (params?.limit) search.append('limit', params.limit.toString())
   if (params?.account_id) search.append('account_id', params.account_id.toString())
   if (params?.trading_mode) search.append('trading_mode', params.trading_mode)
+  if (params?.wallet_address) search.append('wallet_address', params.wallet_address)
   const query = search.toString()
   const response = await apiRequest(`/arena/model-chat${query ? `?${query}` : ''}`)
   return response.json()
@@ -520,6 +524,7 @@ export interface ArenaPositionsAccount {
   account_name: string
   model?: string | null
   environment?: string | null
+  wallet_address?: string | null
   total_unrealized_pnl: number
   available_cash: number
   used_margin?: number | null
@@ -550,6 +555,7 @@ export async function getArenaPositions(params?: { account_id?: number; trading_
         account_name: account.account_name ?? '',
         model: account.model ?? null,
         environment: account.environment ?? null,
+        wallet_address: account.wallet_address ?? null,
         total_unrealized_pnl: Number(account.total_unrealized_pnl ?? 0),
         available_cash: Number(account.available_cash ?? 0),
         positions_value: Number(account.positions_value ?? account.used_margin ?? 0),

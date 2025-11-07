@@ -33,10 +33,14 @@ services:
       postgres:
         condition: service_healthy
     volumes:
+      # Mount backend code for development (excluding static files)
+      - ./backend:/app/backend:delegated
       # Mount logs
       - ./logs:/app/logs
       # Mount data for encryption key persistence
       - app_data:/app/data
+      # Preserve built static files in container
+      - /app/backend/static
     restart: unless-stopped
 
 volumes:

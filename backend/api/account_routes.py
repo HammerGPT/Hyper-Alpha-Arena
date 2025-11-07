@@ -495,6 +495,7 @@ async def get_asset_curve(
     timeframe: str = "5m",
     trading_mode: str = "paper",
     environment: Optional[str] = None,
+    wallet_address: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """Get asset curve data for all accounts with specified timeframe and trading mode"""
@@ -505,6 +506,7 @@ async def get_asset_curve(
             timeframe=timeframe,
             trading_mode=trading_mode,
             environment=environment,
+            wallet_address=wallet_address,
         )
         return data
     except Exception as e:

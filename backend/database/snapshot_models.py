@@ -13,6 +13,7 @@ class HyperliquidAccountSnapshot(SnapshotBase):
     id = Column(Integer, primary_key=True, index=True)
     account_id = Column(Integer, nullable=False, index=True)
     environment = Column(String(20), nullable=False)  # "testnet" | "mainnet"
+    wallet_address = Column(String(100), nullable=True)
 
     # Account state data
     total_equity = Column(DECIMAL(18, 6), nullable=False)
@@ -33,6 +34,7 @@ class HyperliquidTrade(SnapshotBase):
     id = Column(Integer, primary_key=True, index=True)
     account_id = Column(Integer, nullable=False, index=True)
     environment = Column(String(20), nullable=False)  # "testnet" | "mainnet"
+    wallet_address = Column(String(100), nullable=True)
 
     # Trade data
     symbol = Column(String(20), nullable=False)
