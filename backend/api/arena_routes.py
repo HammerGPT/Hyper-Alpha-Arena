@@ -28,6 +28,10 @@ from services.asset_calculator import calc_positions_value
 from services.price_cache import get_cached_price, cache_price
 from services.market_data import get_last_price
 from services.hyperliquid_trading_client import HyperliquidTradingClient
+from services.hyperliquid_cache import (
+    get_cached_account_state,
+    get_cached_positions,
+)
 from utils.encryption import decrypt_private_key
 import logging
 
@@ -97,19 +101,41 @@ def _get_hyperliquid_positions(db: Session, account_id: Optional[int], environme
             continue
 
         try:
-            # Decrypt private key
-            private_key = decrypt_private_key(encrypted_key)
+            cached_state = get_cached_account_state(account.id)
+            account_state = cached_state["data"] if cached_state else None
 
-            # Create Hyperliquid client
-            client = HyperliquidTradingClient(
-                account_id=account.id,
-                private_key=private_key,
-                environment=environment
-            )
+            cached_positions = get_cached_positions(account.id)
+            positions_data = cached_positions["data"] if cached_positions else None
 
-            # Get account state and positions from Hyperliquid API
-            account_state = client.get_account_state(db)
-            positions_data = client.get_positions(db)
+            wallet_address = None
+            if isinstance(account_state, dict):
+                wallet_address = account_state.get("wallet_address")
+
+            client: Optional[HyperliquidTradingClient] = None
+            needs_state = account_state is None
+            needs_positions = positions_data is None
+            needs_wallet = wallet_address is None
+
+            if needs_state or needs_positions or needs_wallet:
+                # Decrypt private key and fetch live data as needed
+                private_key = decrypt_private_key(encrypted_key)
+                client = HyperliquidTradingClient(
+                    account_id=account.id,
+                    private_key=private_key,
+                    environment=environment
+                )
+
+                if needs_state:
+                    account_state = client.get_account_state(db)
+                    wallet_address = account_state.get("wallet_address") or client.wallet_address
+                if needs_positions:
+                    positions_data = client.get_positions(db)
+                if wallet_address is None:
+                    wallet_address = client.wallet_address
+
+            if account_state is None or positions_data is None:
+                logger.warning(f"Account {account.id} has no Hyperliquid data available, skipping")
+                continue
 
             # Transform Hyperliquid positions to frontend format
             position_items = []
@@ -167,7 +193,7 @@ def _get_hyperliquid_positions(db: Session, account_id: Optional[int], environme
                 "account_name": account.name,
                 "model": account.model,
                 "environment": environment,
-                "wallet_address": client.wallet_address,
+                "wallet_address": wallet_address,
                 "total_unrealized_pnl": total_unrealized,
                 "available_cash": available_balance,
                 "used_margin": used_margin,

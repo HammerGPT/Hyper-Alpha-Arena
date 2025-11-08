@@ -13,8 +13,12 @@ from services.scheduler import start_scheduler, setup_market_tasks, task_schedul
 from services.market_stream import start_market_stream, stop_market_stream
 from services.market_events import subscribe_price_updates, unsubscribe_price_updates
 from services.asset_snapshot_service import handle_price_update
-from services.trading_commands import AI_TRADING_SYMBOLS
 from services.trading_strategy import start_strategy_manager, stop_strategy_manager
+from services.hyperliquid_symbol_service import (
+    refresh_hyperliquid_symbols,
+    schedule_symbol_refresh_task,
+    build_market_stream_symbols,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +31,10 @@ def initialize_services():
         start_scheduler()
         print("Scheduler started")
         logger.info("Scheduler service started")
+
+        # Refresh Hyperliquid symbol catalog + schedule periodic updates
+        refresh_hyperliquid_symbols()
+        schedule_symbol_refresh_task()
 
         # Set up market-related scheduled tasks
         setup_market_tasks()
@@ -42,8 +50,9 @@ def initialize_services():
         logger.info("Price cache cleanup task started (2-minute interval)")
 
         # Start market data stream and subscribe asset snapshot handler
+        combined_symbols = build_market_stream_symbols()
         print("Starting market data stream...")
-        start_market_stream(AI_TRADING_SYMBOLS, interval_seconds=1.5)
+        start_market_stream(combined_symbols, interval_seconds=1.5)
         print("Market data stream started")
         subscribe_price_updates(handle_price_update)
         print("Asset snapshot handler subscribed")
@@ -62,11 +71,6 @@ def initialize_services():
 
         subscribe_price_updates(strategy_price_wrapper)
         logger.info("Strategy manager subscribed to price updates")
-
-        # Start price snapshot logger (every 60 seconds)
-        from services.system_logger import price_snapshot_logger
-        price_snapshot_logger.start()
-        logger.info("Price snapshot logger started (60-second interval)")
 
         # Start AI trading strategy manager
         print("Starting strategy manager...")
@@ -95,12 +99,10 @@ def shutdown_services():
     """Shut down all services"""
     try:
         from services.scheduler import stop_scheduler
-        from services.system_logger import price_snapshot_logger
         from services.hyperliquid_snapshot_service import hyperliquid_snapshot_service
         stop_strategy_manager()
         stop_market_stream()
         unsubscribe_price_updates(handle_price_update)
-        price_snapshot_logger.stop()
         hyperliquid_snapshot_service.stop()
         stop_scheduler()
         logger.info("All services have been shut down")

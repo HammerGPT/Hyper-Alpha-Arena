@@ -19,6 +19,10 @@ from sqlalchemy.orm import Session
 
 from database.connection import SessionLocal
 from database.models import Account, HyperliquidExchangeAction
+from services.hyperliquid_cache import (
+    update_account_state_cache,
+    update_positions_cache,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -234,10 +238,32 @@ class HyperliquidTradingClient:
             }
 
             logger.debug(f"Account state: equity=${result['total_equity']:.2f}, available=${result['available_balance']:.2f}")
+            update_account_state_cache(self.account_id, result)
+            self._record_exchange_action(
+                action_type="fetch_account_state",
+                status="success",
+                symbol=None,
+                request_payload={
+                    "account_id": self.account_id,
+                    "environment": self.environment,
+                },
+                response_payload=None,
+            )
 
             return result
 
         except Exception as e:
+            self._record_exchange_action(
+                action_type="fetch_account_state",
+                status="error",
+                symbol=None,
+                request_payload={
+                    "account_id": self.account_id,
+                    "environment": self.environment,
+                },
+                response_payload=None,
+                error_message=str(e),
+            )
             logger.error(f"Failed to get account state: {e}", exc_info=True)
             raise
 
@@ -279,31 +305,31 @@ class HyperliquidTradingClient:
             # Transform CCXT positions to our format
             positions = []
             for pos in positions_raw:
-                # Skip positions with zero size
-                if not pos.get('contracts') or float(pos.get('contracts', 0)) == 0:
-                    continue
-
-                # Use correct signed position size from Hyperliquid data
-                position_size = float(pos['info']['position']['szi'])
+                info_position = (pos.get('info') or {}).get('position') or {}
+                raw_size = info_position.get('szi')
+                try:
+                    position_size = float(raw_size)
+                except (TypeError, ValueError):
+                    position_size = 0.0
                 side = pos.get('side', '').capitalize()
 
                 positions.append({
-                    'coin': pos['info']['position']['coin'],
+                    'coin': info_position.get('coin'),
                     'szi': position_size,  # Correct signed size
-                    'entry_px': float(pos['info']['position']['entryPx']),
-                    'position_value': float(pos['info']['position']['positionValue']),
-                    'unrealized_pnl': float(pos['info']['position']['unrealizedPnl']),
-                    'margin_used': float(pos['info']['position']['marginUsed']),
-                    'liquidation_px': float(pos['info']['position']['liquidationPx'] or 0),
-                    'leverage': float(pos['info']['position']['leverage']['value']),
+                    'entry_px': float(info_position.get('entryPx', 0)),
+                    'position_value': float(info_position.get('positionValue', 0)),
+                    'unrealized_pnl': float(info_position.get('unrealizedPnl', 0)),
+                    'margin_used': float(info_position.get('marginUsed', 0)),
+                    'liquidation_px': float(info_position.get('liquidationPx') or 0),
+                    'leverage': float((info_position.get('leverage') or {}).get('value', 0)),
                     'side': side,  # Correct direction from CCXT
 
                     # Hyperliquid specific fields
-                    'return_on_equity': float(pos['info']['position']['returnOnEquity']),
-                    'max_leverage': float(pos['info']['position']['maxLeverage']),
-                    'cum_funding_all_time': float(pos['info']['position']['cumFunding']['allTime']),
-                    'cum_funding_since_open': float(pos['info']['position']['cumFunding']['sinceOpen']),
-                    'leverage_type': pos['info']['position']['leverage']['type'],
+                    'return_on_equity': float(info_position.get('returnOnEquity', 0)),
+                    'max_leverage': float(info_position.get('maxLeverage', 0)),
+                    'cum_funding_all_time': float((info_position.get('cumFunding') or {}).get('allTime', 0)),
+                    'cum_funding_since_open': float((info_position.get('cumFunding') or {}).get('sinceOpen', 0)),
+                    'leverage_type': (info_position.get('leverage') or {}).get('type'),
 
                     # CCXT calculated fields
                     'notional': float(pos.get('notional', 0)),
@@ -313,10 +339,32 @@ class HyperliquidTradingClient:
                 })
 
             logger.debug(f"Found {len(positions)} open positions")
+            update_positions_cache(self.account_id, positions)
+            self._record_exchange_action(
+                action_type="fetch_positions",
+                status="success",
+                symbol=None,
+                request_payload={
+                    "account_id": self.account_id,
+                    "environment": self.environment,
+                },
+                response_payload=None,
+            )
 
             return positions
 
         except Exception as e:
+            self._record_exchange_action(
+                action_type="fetch_positions",
+                status="error",
+                symbol=None,
+                request_payload={
+                    "account_id": self.account_id,
+                    "environment": self.environment,
+                },
+                response_payload=None,
+                error_message=str(e),
+            )
             logger.error(f"Failed to get positions: {e}", exc_info=True)
             raise
 
@@ -384,8 +432,23 @@ class HyperliquidTradingClient:
             try:
                 self.exchange.set_leverage(leverage, f"{symbol}/USDC:USDC")
                 logger.debug(f"Set leverage to {leverage}x for {symbol}")
+                self._record_exchange_action(
+                    action_type="set_leverage",
+                    status="success",
+                    symbol=symbol,
+                    leverage=leverage,
+                    request_payload={"symbol": symbol, "leverage": leverage},
+                )
             except Exception as lev_err:
                 logger.warning(f"Failed to set leverage (may already be set): {lev_err}")
+                self._record_exchange_action(
+                    action_type="set_leverage",
+                    status="error",
+                    symbol=symbol,
+                    leverage=leverage,
+                    request_payload={"symbol": symbol, "leverage": leverage},
+                    error_message=str(lev_err),
+                )
 
             # Prepare CCXT order parameters
             # Hyperliquid perpetual contract format: BASE/QUOTE:SETTLE

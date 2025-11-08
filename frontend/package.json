@@ -24,6 +24,7 @@
     "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
+    "@babel/parser": "^7.28.5",
     "@types/node": "^20.11.20",
     "@types/react": "^19.1.9",
     "@types/react-dom": "^19.1.7",

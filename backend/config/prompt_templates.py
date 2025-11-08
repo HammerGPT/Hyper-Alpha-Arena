@@ -3,7 +3,7 @@ Default and Pro prompt templates for Hyper Alpha Arena.
 """
 
 # Baseline prompt (current behaviour)
-DEFAULT_PROMPT_TEMPLATE = """You are a cryptocurrency trading AI. Use the data below to determine your next action.
+DEFAULT_PROMPT_TEMPLATE = """You are a cryptocurrency trading AI. Use the data below to determine your next actions across every supported symbol.
 
 === TRADING ENVIRONMENT ===
 {trading_environment}
@@ -18,6 +18,9 @@ DEFAULT_PROMPT_TEMPLATE = """You are a cryptocurrency trading AI. Use the data b
 {news_section}
 
 Follow these rules:
+- You must analyze every supported symbol provided in the market data and produce a decision entry for each of them.
+- Multi-symbol output is the default: include one JSON object per symbol in the `decisions` array every time you respond.
+- If a symbol has no actionable setup, include it with `operation: "hold"` and `target_portion_of_balance: 0` to document your assessment.
 - operation must be "buy", "sell", "hold", or "close"
 - For "buy": target_portion_of_balance is the % of available cash to deploy (0.0-1.0)
 - For "sell" or "close": target_portion_of_balance is the % of the current position to exit (0.0-1.0)
@@ -26,10 +29,11 @@ Follow these rules:
 - max_price: For "buy" operations, set maximum acceptable price (slippage protection)
 - min_price: For "sell"/"close" operations, set minimum acceptable price (slippage protection)
 - Price should be current market price +/- your acceptable slippage (typically 1-5%)
+- Provide comprehensive reasoning for every decision, especially when allocating across multiple coins.
 - Never invent trades for symbols that are not in the market data
 - Keep reasoning concise and focused on measurable signals
-
-Respond with ONLY a JSON object using this schema:
+- When making multiple decisions, ensure sum(target_portion_of_balance * leverage) across all entries keeps implied margin usage below 70% and remember the account’s available balance is shared across positions.
+- Respond with ONLY a JSON object containing a `decisions` array shaped per the schema below:
 {output_format}
 """
 
@@ -72,20 +76,23 @@ Operational constraints:
 {leverage_constraints}
 
 Decision requirements:
+- You must analyze every supported symbol in the market snapshot and include one decision object per symbol (use HOLD with target_portion_of_balance=0 if no action is needed).
 - Choose operation: "buy", "sell", "hold", or "close"
 - For "buy": target_portion_of_balance is % of available cash to deploy (0.0-1.0)
 - For "sell" or "close": target_portion_of_balance is % of position to exit (0.0-1.0)
 - For "hold": keep target_portion_of_balance at 0
 - leverage must be an integer between 1 and {max_leverage}
 - Never invent trades for symbols not in the market data
-- Keep reasoning concise and signal-focused
+- Provide comprehensive reasoning for each symbol, especially when distributing exposure across multiple coins, and keep the logic rooted in measurable signals.
+- When proposing multiple trades, ensure sum(target_portion_of_balance * leverage) across all entries keeps total implied margin usage under 70%.
+- Remember the available balance is shared across all positions; plan allocations holistically.
 
 Invalidation conditions (default exit triggers):
 - Long position: "If price closes below entry_price * 0.95 on 1-minute basis"
 - Short position: "If price closes above entry_price * 1.05 on 1-minute basis"
 
 === OUTPUT FORMAT ===
-Respond with ONLY a JSON object using this schema:
+Respond with ONLY a JSON object using this schema (always populate the `decisions` array):
 {output_format}
 
 CRITICAL OUTPUT REQUIREMENTS:
@@ -98,22 +105,37 @@ CRITICAL OUTPUT REQUIREMENTS:
 
 Example of correct output:
 {{
-  "operation": "hold",
-  "symbol": "BTC",
-  "target_portion_of_balance": 0.0,
-  "reason": "Market consolidation with mixed signals",
-  "trading_strategy": "Waiting for clearer directional momentum. Current volatility suggests risk of false breakouts. Will reassess on volume confirmation or technical pattern completion."
+  "decisions": [
+    {{
+      "operation": "buy",
+      "symbol": "BTC",
+      "target_portion_of_balance": 0.25,
+      "leverage": 2,
+      "max_price": 49500,
+      "reason": "BTC reclaiming VWAP with positive funding reset",
+      "trading_strategy": "Scaling into a 2x long while price holds above intraday VWAP. Stop below $48.7k support; target retest of $51k liquidity."
+    }},
+    {{
+      "operation": "sell",
+      "symbol": "ETH",
+      "target_portion_of_balance": 0.15,
+      "min_price": 3150,
+      "reason": "ETH losing momentum vs BTC pair",
+      "trading_strategy": "Trimming ETH exposure into relative weakness. Watching for reclaim of 4h EMA ribbon before re-entering. Will close remaining position if structure improves."
+    }}
+  ]
 }}
 
 FIELD TYPE REQUIREMENTS:
+- decisions: array (one entry per symbol; include HOLD entries with 0 allocation when no action is needed)
 - operation: string (exactly "buy", "sell", "hold", or "close")
 - symbol: string (exactly one of: BTC, ETH, SOL, BNB, XRP, DOGE)
 - target_portion_of_balance: number (float between 0.0 and 1.0)
 - leverage: integer (between 1 and {max_leverage}, required for perpetual contracts)
 - max_price: number (required for "buy" operations - maximum acceptable price for slippage protection)
 - min_price: number (required for "sell"/"close" operations - minimum acceptable price for slippage protection)
-- reason: string (maximum 150 characters)
-- trading_strategy: string (2-3 complete sentences)
+- reason: string describing the core signal(s)
+- trading_strategy: string providing deeper context, including risk management and exit logic
 """
 
 # Hyperliquid-specific prompt template for perpetual contract trading
@@ -140,6 +162,10 @@ Account Leverage Settings:
 
 === OPEN POSITIONS ===
 {positions_detail}
+
+=== SYMBOLS IN PLAY ===
+Monitoring {selected_symbols_count} Hyperliquid contracts (multi-coin decisioning is the default):
+{selected_symbols_detail}
 
 === MARKET DATA ===
 Current prices (USD):
@@ -187,6 +213,8 @@ You are trading real perpetual contracts on Hyperliquid. Key concepts:
 5. Set clear profit targets and stop loss levels
 
 === DECISION REQUIREMENTS ===
+- You must analyze every coin listed above and return decisions for each relevant opportunity (multi-coin output is required every cycle).
+- If a coin has no actionable setup, keep it in the decisions array with `operation: "hold"` and `target_portion_of_balance: 0` to document the assessment.
 - Choose operation: "buy" (long), "sell" (short), "hold", or "close"
 - For "buy" (long): target_portion_of_balance is % of available balance to use (0.0-1.0)
 - For "sell" (short): target_portion_of_balance is % of available balance to use (0.0-1.0)
@@ -194,10 +222,13 @@ You are trading real perpetual contracts on Hyperliquid. Key concepts:
 - For "hold": target_portion_of_balance must be 0
 - leverage: integer 1-{max_leverage} (lower = safer, higher = more risk)
 - Never trade symbols not in the market data
-- Keep reasoning focused on risk/reward and market signals
+- Provide comprehensive reasoning for every decision (especially how each coin fits into the multi-coin allocation and its leverage/risk trade-offs).
+- When making multiple decisions, ensure sum(target_portion_of_balance * leverage) across all entries keeps projected margin usage below 70% so the account retains a safety buffer.
+- Consider that available balance and cross margin are shared across every position you open or extend; size positions holistically.
+- Execution order is critical for Hyperliquid real trades: (1) close positions to free margin, (2) open/extend SELL entries, (3) open/extend BUY entries.
 
 === OUTPUT FORMAT ===
-Respond with ONLY a JSON object using this schema:
+Respond with ONLY a JSON object using this schema (always emitting the `decisions` array even if it is empty):
 {output_format}
 
 CRITICAL OUTPUT REQUIREMENTS:
@@ -208,35 +239,38 @@ CRITICAL OUTPUT REQUIREMENTS:
 - Ensure all JSON fields are properly quoted and formatted
 - Double-check JSON syntax before responding
 
-Example output for opening a long position:
+Example output with multiple simultaneous orders:
 {{
-  "operation": "buy",
-  "symbol": "BTC",
-  "target_portion_of_balance": 0.3,
-  "leverage": 3,
-  "max_price": 49500,
-  "reason": "Strong bullish momentum with support holding at $48k, RSI recovering from oversold",
-  "trading_strategy": "Opening 3x leveraged long position with 30% of balance. Entry at current levels with stop loss at $47.5k (below recent support). Target profit at $52k resistance level. Max price $49.5k allows 3% slippage from current $48k level."
-}}
-
-Example output for closing a position:
-{{
-  "operation": "close",
-  "symbol": "ETH",
-  "target_portion_of_balance": 1.0,
-  "leverage": 1,
-  "min_price": 2580,
-  "reason": "Take profit target reached at +12%, securing gains before resistance",
-  "trading_strategy": "Closing entire position to realize profits. Price reached our $2,650 target and showing signs of resistance. Min price $2,580 allows 3% slippage protection from current level."
+  "decisions": [
+    {{
+      "operation": "buy",
+      "symbol": "BTC",
+      "target_portion_of_balance": 0.3,
+      "leverage": 3,
+      "max_price": 49500,
+      "reason": "Strong bullish momentum with support holding at $48k, RSI recovering from oversold",
+      "trading_strategy": "Opening 3x leveraged long position with 30% balance. Stop below $47.5k swing low, target retest of $52k resistance. Max price keeps slippage within 3%."
+    }},
+    {{
+      "operation": "sell",
+      "symbol": "ETH",
+      "target_portion_of_balance": 0.2,
+      "leverage": 2,
+      "min_price": 3125,
+      "reason": "ETH perp funding flipped elevated negative while momentum weakens",
+      "trading_strategy": "Initiating small short hedge until ETH regains strength vs BTC pair. Stop if ETH closes back above $3.2k structural pivot."
+    }}
+  ]
 }}
 
 FIELD TYPE REQUIREMENTS:
+- decisions: array (one entry per supported symbol; include HOLD entries with zero allocation when you choose not to act)
 - operation: string ("buy" for long, "sell" for short, "hold", or "close")
-- symbol: string (exactly one of: BTC, ETH, SOL, BNB, XRP, DOGE)
+- symbol: string (must match one of: {selected_symbols_csv})
 - target_portion_of_balance: number (float between 0.0 and 1.0)
 - leverage: integer (between 1 and {max_leverage}, REQUIRED field)
 - max_price: number (required for "buy" operations - maximum acceptable price for slippage protection)
 - min_price: number (required for "sell"/"close" operations - minimum acceptable price for slippage protection)
-- reason: string (maximum 150 characters)
-- trading_strategy: string (2-3 complete sentences, must mention leverage and risk considerations)
+- reason: string explaining the key catalyst, risk, or signal (no strict length limit, but stay focused)
+- trading_strategy: string covering entry thesis, leverage reasoning, liquidation awareness, and exit plan
 """

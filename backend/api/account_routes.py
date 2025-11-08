@@ -17,6 +17,7 @@ from services.ai_decision_service import build_chat_completion_endpoints, _extra
 from schemas.account import StrategyConfig, StrategyConfigUpdate
 from repositories.strategy_repo import get_strategy_by_account, upsert_strategy
 from services.trading_strategy import paper_strategy_manager, hyper_strategy_manager
+from services.hyperliquid_cache import get_cached_account_state
 
 logger = logging.getLogger(__name__)
 
@@ -85,18 +86,20 @@ async def list_all_accounts(db: Session = Depends(get_db)):
             # For Hyperliquid accounts, fetch real-time balance
             if hyperliquid_enabled and hyperliquid_environment in ["testnet", "mainnet"]:
                 try:
-                    from services.hyperliquid_environment import get_hyperliquid_client
+                    cached_entry = get_cached_account_state(account.id)
+                    if cached_entry:
+                        account_state = cached_entry["data"]
+                    else:
+                        from services.hyperliquid_environment import get_hyperliquid_client
 
-                    client = get_hyperliquid_client(db, account.id)
-                    account_state = client.get_account_state(db)
+                        client = get_hyperliquid_client(db, account.id)
+                        account_state = client.get_account_state(db)
 
-                    # Use Hyperliquid real balance
-                    current_cash = account_state['available_balance']
-                    frozen_cash = account_state.get('used_margin', 0)
-
-                    logger.info(
-                        f"Account {account.name}: Using Hyperliquid {hyperliquid_environment} balance: "
-                        f"available=${current_cash:.2f}, used_margin=${frozen_cash:.2f}"
+                    current_cash = float(account_state.get('available_balance', current_cash))
+                    frozen_cash = float(account_state.get('used_margin', frozen_cash))
+                    logger.debug(
+                        f"Account {account.name}: Using cached Hyperliquid balance data "
+                        f"(available=${current_cash:.2f}, used_margin=${frozen_cash:.2f})"
                     )
                 except Exception as hl_err:
                     logger.warning(

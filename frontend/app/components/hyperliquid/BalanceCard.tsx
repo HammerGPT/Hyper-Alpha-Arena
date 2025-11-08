@@ -114,6 +114,9 @@ export default function BalanceCard({
 
   const marginStatus = getMarginStatus(balance.marginUsagePercent);
   const StatusIcon = marginStatus.icon;
+  const lastUpdatedLabel = balance.lastUpdated
+    ? new Date(balance.lastUpdated).toLocaleString()
+    : null;
 
   return (
     <Card className="p-6 space-y-6">
@@ -126,6 +129,11 @@ export default function BalanceCard({
           {environment}
         </Badge>
       </div>
+      {lastUpdatedLabel && (
+        <div className="text-xs text-gray-400 -mt-4">
+          Last update: {lastUpdatedLabel}
+        </div>
+      )}
 
       {/* Balance Information */}
       <div className="space-y-3">

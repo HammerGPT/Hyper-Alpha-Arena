@@ -189,7 +189,7 @@ class SystemConfig(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     key = Column(String(100), unique=True, nullable=False)
-    value = Column(String(5000), nullable=True)  # 增加到5000字符以支持长cookie
+    value = Column(Text, nullable=True)
     description = Column(String(500), nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(

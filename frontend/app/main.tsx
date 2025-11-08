@@ -318,7 +318,6 @@ function App() {
   // Refresh data when trading mode changes
   useEffect(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && account) {
-      console.log(`Trading mode changed to ${tradingMode}, requesting snapshot...`)
       const env = tradingMode === 'testnet' || tradingMode === 'mainnet' ? tradingMode : undefined
       wsRef.current.send(JSON.stringify({
         type: 'get_snapshot',
@@ -334,26 +333,24 @@ function App() {
     }
   }, [tradingMode, account])
 
-  // Auto-refresh data every 30 seconds
+  // Auto-refresh via WebSocket every 30 seconds (no console spam)
   useEffect(() => {
     const refreshInterval = setInterval(() => {
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && account) {
-        console.log(`Auto-refresh: requesting data for ${tradingMode} mode`)
-        const env = tradingMode === 'testnet' || tradingMode === 'mainnet' ? tradingMode : undefined
-        wsRef.current.send(JSON.stringify({
-          type: 'get_snapshot',
-          trading_mode: tradingMode
-        }))
-        wsRef.current.send(JSON.stringify({
-          type: 'get_asset_curve',
-          timeframe: '5m',
-          trading_mode: tradingMode,
-          ...(env ? { environment: env } : {})
-        }))
-      } else {
-        console.log('Auto-refresh skipped: WebSocket not ready or no account')
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !account) {
+        return
       }
-    }, 30000) // 30 seconds
+      const env = tradingMode === 'testnet' || tradingMode === 'mainnet' ? tradingMode : undefined
+      wsRef.current.send(JSON.stringify({
+        type: 'get_snapshot',
+        trading_mode: tradingMode
+      }))
+      wsRef.current.send(JSON.stringify({
+        type: 'get_asset_curve',
+        timeframe: '5m',
+        trading_mode: tradingMode,
+        ...(env ? { environment: env } : {})
+      }))
+    }, 30000)
 
     return () => clearInterval(refreshInterval)
   }, [account, tradingMode])

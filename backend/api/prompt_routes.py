@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -188,18 +188,34 @@ def preview_prompt(
         _get_portfolio_data,
         _build_prompt_context,
         SafeDict,
+        SUPPORTED_SYMBOLS,
     )
     from services.market_data import get_last_price
     from services.news_feed import fetch_latest_news
     from services.sampling_pool import sampling_pool
     from database.models import Account
     import logging
+    from services.hyperliquid_symbol_service import (
+        get_selected_symbols as get_hyperliquid_selected_symbols,
+        get_available_symbol_map as get_hyperliquid_symbol_map,
+    )
 
     logger = logging.getLogger(__name__)
 
     prompt_key = payload.get("promptTemplateKey", "default")
     account_ids = payload.get("accountIds", [])
-    symbols = payload.get("symbols", [])
+
+    raw_symbols = [str(sym).upper() for sym in payload.get("symbols", []) if sym]
+    requested_symbols: List[str] = []
+    seen_requested = set()
+    for symbol in raw_symbols:
+        if symbol and symbol not in seen_requested:
+            seen_requested.add(symbol)
+            requested_symbols.append(symbol)
+
+    base_symbol_order = list(SUPPORTED_SYMBOLS.keys())
+    hyper_watchlist = get_hyperliquid_selected_symbols()
+    hyper_symbol_map = get_hyperliquid_symbol_map()
 
     if not account_ids:
         raise HTTPException(status_code=400, detail="At least one account must be selected")
@@ -216,17 +232,6 @@ def preview_prompt(
     except Exception as err:
         logger.warning(f"Failed to fetch news: {err}")
         news_section = "No recent CoinJournal news available."
-
-    # Get current prices
-    prices = {}
-    supported_symbols = ["BTC", "ETH", "SOL", "DOGE", "XRP", "BNB"]
-    for sym in supported_symbols:
-        try:
-            price = get_last_price(sym, "CRYPTO")
-            prices[sym] = price
-        except Exception as err:
-            logger.warning(f"Failed to get price for {sym}: {err}")
-            prices[sym] = 0.0
 
     # Import multi-symbol sampling data builder
     from services.ai_decision_service import _build_multi_symbol_sampling_data
@@ -297,20 +302,42 @@ def preview_prompt(
             # Paper trading mode
             portfolio = _get_portfolio_data(db, account)
 
-        # Build context with multi-symbol sampling data if symbols are specified
-        if symbols:
-            # Build multi-symbol sampling data
-            sampling_data = _build_multi_symbol_sampling_data(symbols, sampling_pool)
-            context = _build_prompt_context(
-                account, portfolio, prices, news_section, None, None, hyperliquid_state
-            )
-            # Override sampling_data with multi-symbol version
-            context["sampling_data"] = sampling_data
+        # Determine active symbols + metadata for this account
+        if hyperliquid_enabled and hyperliquid_environment in ["testnet", "mainnet"]:
+            active_symbols = requested_symbols or hyper_watchlist or base_symbol_order
+            symbol_metadata_map = {}
+            for sym in active_symbols:
+                entry = dict(hyper_symbol_map.get(sym, {}))
+                entry.setdefault("name", sym)
+                symbol_metadata_map[sym] = entry
         else:
-            # No symbol specified, no sampling data
-            context = _build_prompt_context(
-                account, portfolio, prices, news_section, None, None, hyperliquid_state
-            )
+            active_symbols = requested_symbols or base_symbol_order
+            symbol_metadata_map = {sym: SUPPORTED_SYMBOLS.get(sym, sym) for sym in active_symbols}
+
+        if not active_symbols:
+            active_symbols = base_symbol_order
+
+        prices: Dict[str, float] = {}
+        for sym in active_symbols:
+            try:
+                prices[sym] = get_last_price(sym, "CRYPTO")
+            except Exception as err:
+                logger.warning(f"Failed to get price for {sym}: {err}")
+                prices[sym] = 0.0
+
+        sampling_data = _build_multi_symbol_sampling_data(active_symbols, sampling_pool)
+        context = _build_prompt_context(
+            account,
+            portfolio,
+            prices,
+            news_section,
+            None,
+            None,
+            hyperliquid_state,
+            symbol_metadata=symbol_metadata_map,
+            symbol_order=active_symbols,
+        )
+        context["sampling_data"] = sampling_data
 
         try:
             filled_prompt = template.template_text.format_map(SafeDict(context))
@@ -321,7 +348,7 @@ def preview_prompt(
         previews.append({
             "accountId": account.id,
             "accountName": account.name,
-            "symbols": symbols if symbols else [],
+            "symbols": requested_symbols if requested_symbols else [],
             "filledPrompt": filled_prompt,
         })
 

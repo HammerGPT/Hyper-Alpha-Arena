@@ -8,25 +8,42 @@ Provides endpoints for:
 - Manual order placement (for testing)
 - Connection testing
 """
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from typing import Optional, List
 import logging
 
 from database.connection import get_db
+from database.models import HyperliquidExchangeAction
 from services.hyperliquid_environment import (
     setup_hyperliquid_account,
     get_hyperliquid_client,
     switch_hyperliquid_environment,
     get_account_hyperliquid_config,
     disable_hyperliquid_trading,
-    enable_hyperliquid_trading
+    enable_hyperliquid_trading,
+)
+from services.hyperliquid_symbol_service import (
+    get_available_symbols_info,
+    get_selected_symbols,
+    update_selected_symbols,
+    MAX_WATCHLIST_SYMBOLS,
+)
+from services.hyperliquid_cache import (
+    get_cached_account_state,
+    get_cached_positions,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/hyperliquid", tags=["hyperliquid"])
+
+
+def _ts_to_iso(ts: float) -> str:
+    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 # Request/Response Models
@@ -82,6 +99,17 @@ class ManualOrderRequest(BaseModel):
                 "order_type": "market",
                 "leverage": 2,
                 "reduce_only": False
+            }
+        }
+
+
+class HyperliquidSymbolSelectionRequest(BaseModel):
+    symbols: List[str] = Field(default_factory=list, description="Symbols to monitor")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "symbols": ["BTC", "ETH", "SOL"]
             }
         }
 
@@ -182,21 +210,33 @@ async def get_config(
 @router.get("/accounts/{account_id}/balance")
 async def get_balance(
     account_id: int,
+    force_refresh: bool = False,
     db: Session = Depends(get_db)
 ):
     """
-    Get real-time Hyperliquid account balance
+    Get Hyperliquid account balance.
 
-    Returns:
-    - Total equity
-    - Available balance
-    - Used margin
-    - Margin usage percentage
-    - Current environment
+    Unless force_refresh is True, this endpoint returns the most recent cached
+    snapshot captured by the backend. This avoids excessive direct calls to
+    Hyperliquid when rendering dashboards.
     """
     try:
+        if not force_refresh:
+            cached_entry = get_cached_account_state(account_id)
+            if cached_entry:
+                payload = dict(cached_entry["data"])
+                payload["source"] = "cache"
+                payload["cached_at"] = _ts_to_iso(cached_entry["timestamp"])
+                return payload
+
         client = get_hyperliquid_client(db, account_id)
         balance = client.get_account_state(db)
+        balance["source"] = "live"
+        ts_ms = balance.get("timestamp")
+        if isinstance(ts_ms, (int, float)):
+            balance["cached_at"] = _ts_to_iso(ts_ms / 1000.0)
+        else:
+            balance["cached_at"] = datetime.now(tz=timezone.utc).isoformat().replace("+00:00", "Z")
         return balance
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -208,27 +248,43 @@ async def get_balance(
 @router.get("/accounts/{account_id}/positions")
 async def get_positions(
     account_id: int,
+    force_refresh: bool = False,
     db: Session = Depends(get_db)
 ):
     """
-    Get all open positions from Hyperliquid
+    Get all open positions for an account.
 
-    Returns list of positions with:
-    - Symbol
-    - Position size (signed: positive=long, negative=short)
-    - Entry price
-    - Current P&L
-    - Liquidation price
-    - Leverage
+    By default, this uses the latest cached snapshot taken by the backend.
+    Set force_refresh=true to fetch directly from Hyperliquid.
     """
     try:
+        if not force_refresh:
+            cached_entry = get_cached_positions(account_id)
+            if cached_entry:
+                account_cache = get_cached_account_state(account_id)
+                environment = (
+                    account_cache["data"].get("environment")
+                    if account_cache and isinstance(account_cache.get("data"), dict)
+                    else "unknown"
+                )
+                return {
+                    'account_id': account_id,
+                    'environment': environment,
+                    'positions': cached_entry["data"],
+                    'count': len(cached_entry["data"]),
+                    'source': 'cache',
+                    'cached_at': _ts_to_iso(cached_entry["timestamp"]),
+                }
+
         client = get_hyperliquid_client(db, account_id)
         positions = client.get_positions(db)
         return {
             'account_id': account_id,
             'environment': client.environment,
             'positions': positions,
-            'count': len(positions)
+            'count': len(positions),
+            'source': 'live',
+            'cached_at': datetime.now(tz=timezone.utc).isoformat().replace("+00:00", "Z"),
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -426,6 +482,96 @@ async def get_account_snapshots(
         'snapshot_count': len(result),
         'snapshots': result
     }
+
+
+@router.get("/symbols/available")
+async def list_available_symbols():
+    """Return cached Hyperliquid tradable symbols (refreshed periodically)."""
+    info = get_available_symbols_info()
+    return {
+        "symbols": info.get("symbols", []),
+        "updated_at": info.get("updated_at"),
+        "max_symbols": MAX_WATCHLIST_SYMBOLS,
+    }
+
+
+@router.get("/symbols/watchlist")
+async def get_symbol_watchlist():
+    """Return the currently configured global Hyperliquid watchlist."""
+    symbols = get_selected_symbols()
+    return {
+        "symbols": symbols,
+        "max_symbols": MAX_WATCHLIST_SYMBOLS,
+    }
+
+
+@router.put("/symbols/watchlist")
+async def update_symbol_watchlist(payload: HyperliquidSymbolSelectionRequest):
+    """Update global Hyperliquid watchlist (max 10 symbols)."""
+    try:
+        symbols = update_selected_symbols(payload.symbols)
+        return {
+            "symbols": symbols,
+            "max_symbols": MAX_WATCHLIST_SYMBOLS,
+        }
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err))
+    except Exception as err:
+        logger.error(f"Failed to update Hyperliquid watchlist: {err}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to update Hyperliquid watchlist")
+
+
+@router.get("/actions/summary")
+async def get_action_summary(
+    window_minutes: int = 1440,
+    account_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Summarize Hyperliquid exchange actions recorded by the backend.
+
+    Parameters:
+    - window_minutes: Lookback window (default 24h)
+    - account_id: Optional filter for a single account
+    """
+    try:
+        cutoff = datetime.utcnow() - timedelta(minutes=window_minutes)
+        query = db.query(
+            HyperliquidExchangeAction.action_type.label("action_type"),
+            func.count(HyperliquidExchangeAction.id).label("count"),
+            func.sum(
+                case((HyperliquidExchangeAction.status == "error", 1), else_=0)
+            ).label("errors"),
+            func.max(HyperliquidExchangeAction.created_at).label("last_ts"),
+        ).filter(HyperliquidExchangeAction.created_at >= cutoff)
+
+        if account_id is not None:
+            query = query.filter(HyperliquidExchangeAction.account_id == account_id)
+
+        rows = query.group_by(HyperliquidExchangeAction.action_type).all()
+        total_actions = sum(row.count for row in rows)
+        latest_event = max((row.last_ts for row in rows if row.last_ts), default=None)
+
+        summary = {
+            "window_minutes": window_minutes,
+            "account_id": account_id,
+            "total_actions": total_actions,
+            "generated_at": datetime.utcnow().replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z"),
+            "latest_action_at": latest_event.isoformat().replace("+00:00", "Z") if latest_event else None,
+            "by_action": [
+                {
+                    "action_type": row.action_type,
+                    "count": row.count,
+                    "errors": int(row.errors or 0),
+                    "last_occurrence": row.last_ts.isoformat().replace("+00:00", "Z") if row.last_ts else None,
+                }
+                for row in rows
+            ],
+        }
+        return summary
+    except Exception as err:
+        logger.error(f"Failed to summarize Hyperliquid actions: {err}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to summarize Hyperliquid actions")
 
 
 @router.get("/health")

@@ -28,7 +28,13 @@ async def get_system_logs(
     - logs: 日志列表
     - total: 返回的日志数量
     """
-    logs = system_logger.get_logs(level=level, category=category, limit=limit)
+    min_level = None if level else "WARNING"
+    logs = system_logger.get_logs(
+        level=level,
+        category=category,
+        limit=limit,
+        min_level=min_level,
+    )
     return {
         "logs": logs,
         "total": len(logs)
@@ -72,7 +78,7 @@ async def get_log_stats() -> Dict[str, Any]:
     - by_level: 按级别分组的统计
     - by_category: 按分类分组的统计
     """
-    all_logs = system_logger.get_logs(limit=500)
+    all_logs = system_logger.get_logs(limit=500, min_level="WARNING")
 
     stats = {
         "total_logs": len(all_logs),

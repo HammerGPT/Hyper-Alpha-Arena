@@ -672,6 +672,42 @@ export async function getArenaAnalytics(params?: { account_id?: number }): Promi
   return response.json()
 }
 
+// Hyperliquid symbol configuration
+export interface HyperliquidSymbolMeta {
+  symbol: string
+  name?: string
+  type?: string
+}
+
+export interface HyperliquidAvailableSymbolsResponse {
+  symbols: HyperliquidSymbolMeta[]
+  updated_at?: string
+  max_symbols: number
+}
+
+export interface HyperliquidWatchlistResponse {
+  symbols: string[]
+  max_symbols: number
+}
+
+export async function getHyperliquidAvailableSymbols(): Promise<HyperliquidAvailableSymbolsResponse> {
+  const response = await apiRequest('/hyperliquid/symbols/available')
+  return response.json()
+}
+
+export async function getHyperliquidWatchlist(): Promise<HyperliquidWatchlistResponse> {
+  const response = await apiRequest('/hyperliquid/symbols/watchlist')
+  return response.json()
+}
+
+export async function updateHyperliquidWatchlist(symbols: string[]): Promise<HyperliquidWatchlistResponse> {
+  const response = await apiRequest('/hyperliquid/symbols/watchlist', {
+    method: 'PUT',
+    body: JSON.stringify({ symbols }),
+  })
+  return response.json()
+}
+
 // Legacy aliases for backward compatibility
 export type AIAccount = TradingAccount
 export type AIAccountCreate = TradingAccountCreate

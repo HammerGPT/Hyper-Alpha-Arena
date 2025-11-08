@@ -201,7 +201,14 @@ docker-compose restart
    - Click **Save Configuration**
 5. Your balance and positions will load automatically
 
-**Step 3: Configure AI Trader for Hyperliquid**
+**Step 3: Configure Market Watchlist (Hyperliquid Trading)**
+
+1. Navigate to **AI Trader Management → Market Watchlist**
+2. Select up to 10 symbols you want the AI to monitor (the order you pick determines the model’s evaluation order)
+3. Save your selection — Hyperliquid prompts, model decisions, and live data will only cover these symbols
+4. You can adjust the list anytime; paper-trading mode continues using its default fixed symbols
+
+**Step 4: Configure AI Trader for Hyperliquid**
 
 1. Navigate to **AI Traders** section
 2. Create or edit an AI trader
@@ -212,7 +219,7 @@ docker-compose restart
    - Configure trading strategy triggers
 4. The AI will now trade perpetual contracts on Hyperliquid
 
-**Step 4: Monitor Your Trading**
+**Step 5: Monitor Your Trading**
 
 1. **Dashboard**: View real-time P&L, positions, and margin usage
 2. **System Logs**: Monitor AI decisions and order executions

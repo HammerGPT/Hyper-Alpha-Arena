@@ -19,6 +19,7 @@ export interface HyperliquidBalance {
   usedMargin: number;
   marginUsagePercent: number;
   maintenanceMargin: number;
+  withdrawalAvailable?: number;
   lastUpdated: string;
   walletAddress?: string;
 }
@@ -32,6 +33,14 @@ export interface HyperliquidPosition {
   marginUsed: number;
   liquidationPx: number; // liquidation price
   leverage: number;
+}
+
+export interface HyperliquidPositionsResponse {
+  positions: HyperliquidPosition[];
+  count: number;
+  environment?: HyperliquidEnvironment | string;
+  source: 'cache' | 'live';
+  cachedAt?: string;
 }
 
 export interface HyperliquidAccountState {
@@ -117,4 +126,20 @@ export interface MarginStatus {
   level: 'healthy' | 'warning' | 'danger';
   color: string;
   message: string;
+}
+
+export interface HyperliquidActionSummaryEntry {
+  actionType: string;
+  count: number;
+  errors: number;
+  lastOccurrence?: string | null;
+}
+
+export interface HyperliquidActionSummary {
+  windowMinutes: number;
+  accountId?: number;
+  totalActions: number;
+  generatedAt: string;
+  latestActionAt?: string | null;
+  byAction: HyperliquidActionSummaryEntry[];
 }

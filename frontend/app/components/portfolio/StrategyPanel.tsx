@@ -3,6 +3,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  getHyperliquidAvailableSymbols,
+  getHyperliquidWatchlist,
+  updateHyperliquidWatchlist,
+} from '@/lib/api'
+import type { HyperliquidSymbolMeta } from '@/lib/api'
 
 interface StrategyConfig {
   price_threshold: number
@@ -59,10 +66,22 @@ export default function StrategyPanel({
 
   // Global settings
   const [samplingInterval, setSamplingInterval] = useState<string>('18')
+  const [availableWatchlistSymbols, setAvailableWatchlistSymbols] = useState<HyperliquidSymbolMeta[]>([])
+  const [watchlistSymbols, setWatchlistSymbols] = useState<string[]>([])
+  const [watchlistLoading, setWatchlistLoading] = useState(true)
+  const [watchlistSaving, setWatchlistSaving] = useState(false)
+  const [watchlistError, setWatchlistError] = useState<string | null>(null)
+  const [watchlistSuccess, setWatchlistSuccess] = useState<string | null>(null)
+  const [maxWatchlistSymbols, setMaxWatchlistSymbols] = useState<number>(10)
 
   const resetMessages = useCallback(() => {
     setError(null)
     setSuccess(null)
+  }, [])
+
+  const resetWatchlistMessages = useCallback(() => {
+    setWatchlistError(null)
+    setWatchlistSuccess(null)
   }, [])
 
   const fetchStrategy = useCallback(async () => {
@@ -93,9 +112,31 @@ export default function StrategyPanel({
     }
   }, [accountId, resetMessages])
 
+  const fetchWatchlistConfig = useCallback(async () => {
+    resetWatchlistMessages()
+    setWatchlistLoading(true)
+    try {
+      const [available, watchlist] = await Promise.all([
+        getHyperliquidAvailableSymbols(),
+        getHyperliquidWatchlist(),
+      ])
+      setAvailableWatchlistSymbols(available.symbols || [])
+      setMaxWatchlistSymbols(watchlist.max_symbols ?? available.max_symbols ?? 10)
+      setWatchlistSymbols(watchlist.symbols || [])
+    } catch (err) {
+      console.error('Failed to load Hyperliquid watchlist', err)
+      setWatchlistError(err instanceof Error ? err.message : 'Unable to load Hyperliquid watchlist.')
+    } finally {
+      setWatchlistLoading(false)
+    }
+  }, [resetWatchlistMessages])
   useEffect(() => {
     fetchStrategy()
   }, [fetchStrategy, refreshKey])
+
+  useEffect(() => {
+    fetchWatchlistConfig()
+  }, [fetchWatchlistConfig, refreshKey])
 
   const accountOptions = useMemo(() => {
     if (!accounts || accounts.length === 0) return []
@@ -110,9 +151,45 @@ export default function StrategyPanel({
     return match?.label ?? accountName
   }, [accountOptions, accountId, accountName])
 
+  const watchlistCount = watchlistSymbols.length
+
   useEffect(() => {
     resetMessages()
   }, [accountId, resetMessages])
+
+  const toggleWatchlistSymbol = useCallback(
+    (symbol: string) => {
+      const symbolUpper = symbol.toUpperCase()
+      resetWatchlistMessages()
+      setWatchlistSymbols((prev) => {
+        if (prev.includes(symbolUpper)) {
+          return prev.filter((entry) => entry !== symbolUpper)
+        }
+        if (prev.length >= maxWatchlistSymbols) {
+          setWatchlistError(`You can monitor up to ${maxWatchlistSymbols} symbols.`)
+          return prev
+        }
+        return [...prev, symbolUpper]
+      })
+    },
+    [maxWatchlistSymbols, resetWatchlistMessages]
+  )
+
+  const handleSaveWatchlist = useCallback(async () => {
+    resetWatchlistMessages()
+    try {
+      setWatchlistSaving(true)
+      const response = await updateHyperliquidWatchlist(watchlistSymbols)
+      setWatchlistSymbols(response.symbols || [])
+      setMaxWatchlistSymbols(response.max_symbols ?? maxWatchlistSymbols)
+      setWatchlistSuccess('Watchlist updated successfully.')
+    } catch (err) {
+      console.error('Failed to update Hyperliquid watchlist', err)
+      setWatchlistError(err instanceof Error ? err.message : 'Failed to update Hyperliquid watchlist.')
+    } finally {
+      setWatchlistSaving(false)
+    }
+  }, [watchlistSymbols, maxWatchlistSymbols, resetWatchlistMessages])
 
   const handleSaveTrader = useCallback(async () => {
     resetMessages()
@@ -204,14 +281,20 @@ export default function StrategyPanel({
   return (
     <Card className="h-full flex flex-col">
       <CardHeader>
-        <CardTitle>AI Strategy Settings</CardTitle>
-        <CardDescription>Configure trigger parameters for AI traders</CardDescription>
+        <CardTitle>Strategy Configuration</CardTitle>
+        <CardDescription>Configure trigger parameters and Hyperliquid watchlist</CardDescription>
       </CardHeader>
-      <CardContent className="flex-1 overflow-y-auto space-y-6">
-        {loading ? (
-          <div className="text-sm text-muted-foreground">Loading strategy…</div>
-        ) : (
-          <>
+      <CardContent className="flex-1 overflow-hidden">
+        <Tabs defaultValue="strategy" className="flex flex-col h-full">
+          <TabsList className="grid grid-cols-2 max-w-md mb-4">
+            <TabsTrigger value="strategy">AI Strategy</TabsTrigger>
+            <TabsTrigger value="watchlist">Market Watchlist</TabsTrigger>
+          </TabsList>
+          <TabsContent value="strategy" className="flex-1 overflow-y-auto space-y-6">
+            {loading ? (
+              <div className="text-sm text-muted-foreground">Loading strategy…</div>
+            ) : (
+              <>
             {/* Trader Selection */}
             <section className="space-y-2">
               <div className="text-xs text-muted-foreground uppercase tracking-wide">Select Trader</div>
@@ -351,8 +434,60 @@ export default function StrategyPanel({
               </CardContent>
             </Card>
 
-                      </>
-        )}
+              </>
+            )}
+          </TabsContent>
+          <TabsContent value="watchlist" className="flex-1 overflow-y-auto space-y-4">
+            {watchlistLoading ? (
+              <div className="text-sm text-muted-foreground">Loading watchlist…</div>
+            ) : (
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground uppercase tracking-wide">
+                  <span>Configure Hyperliquid symbols to monitor</span>
+                  <span className="text-foreground font-semibold">
+                    {watchlistCount} / {maxWatchlistSymbols}
+                  </span>
+                </div>
+                {watchlistError && <div className="text-sm text-destructive">{watchlistError}</div>}
+                {watchlistSuccess && <div className="text-sm text-emerald-600">{watchlistSuccess}</div>}
+                {availableWatchlistSymbols.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No tradable symbols available.</div>
+                ) : (
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    {availableWatchlistSymbols.map((symbol) => {
+                      const active = watchlistSymbols.includes(symbol.symbol)
+                      return (
+                        <button
+                          type="button"
+                          key={symbol.symbol}
+                          onClick={() => toggleWatchlistSymbol(symbol.symbol)}
+                          className={`border rounded-md p-3 text-left transition-colors ${
+                            active ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-foreground'
+                          }`}
+                        >
+                          <div className="text-base font-semibold">{symbol.symbol}</div>
+                          <div className="text-[11px] text-muted-foreground">
+                            {symbol.name || 'Untitled'}
+                          </div>
+                          {symbol.type && (
+                            <div className="text-[10px] uppercase tracking-wide text-muted-foreground mt-1">{symbol.type}</div>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+                <Button
+                  onClick={handleSaveWatchlist}
+                  disabled={watchlistSaving || watchlistLoading}
+                  className="self-start"
+                >
+                  {watchlistSaving ? 'Saving…' : 'Save Watchlist'}
+                </Button>
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
       </CardContent>
     </Card>
   )

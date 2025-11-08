@@ -4,7 +4,7 @@ Trading Commands Service - Handles order execution and trading logic
 import logging
 import random
 from decimal import Decimal
-from typing import Dict, Optional, Tuple, List, Iterable
+from typing import Dict, Optional, Tuple, List, Iterable, Any
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -20,17 +20,26 @@ from services.asset_calculator import calc_positions_value
 from services.market_data import get_last_price
 from services.order_matching import create_order, check_and_execute_order
 from services.ai_decision_service import (
-    call_ai_for_decision, 
-    save_ai_decision, 
-    get_active_ai_accounts, 
+    call_ai_for_decision,
+    save_ai_decision,
+    get_active_ai_accounts,
     _get_portfolio_data,
-    SUPPORTED_SYMBOLS
+    SUPPORTED_SYMBOLS,
+)
+from services.hyperliquid_symbol_service import (
+    get_selected_symbols as get_hyperliquid_selected_symbols,
+    get_available_symbol_map as get_hyperliquid_symbol_map,
+    get_symbol_display as get_hyperliquid_symbol_display,
 )
 
 
 logger = logging.getLogger(__name__)
 
 AI_TRADING_SYMBOLS: List[str] = ["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE"]
+
+
+def _get_symbol_name(symbol: str) -> str:
+    return SUPPORTED_SYMBOLS.get(symbol, symbol)
 
 
 def _estimate_buy_cash_needed(price: float, quantity: float) -> Decimal:
@@ -165,132 +174,126 @@ def place_ai_driven_crypto_order(max_ratio: float = 0.2, account_ids: Optional[I
                 # Call AI for trading decision with all available sampling symbols
                 # Always use all available symbols from pool (not just single symbol from strategy)
                 # This allows controlling AI trading scope via sampling pool, not strategy parameters
-                decision = call_ai_for_decision(
+                decisions = call_ai_for_decision(
                     db, account, portfolio, prices,
                     samples=samples, target_symbol=symbol,  # Legacy params for backward compatibility
                     symbols=available_symbols if available_symbols else None  # New multi-symbol param
                 )
-                if not decision or not isinstance(decision, dict):
+                if not decisions:
                     logger.warning(f"Failed to get AI decision for {account.name}, skipping")
                     continue
 
-                operation = decision.get("operation", "").lower() if decision.get("operation") else ""
-                symbol = decision.get("symbol", "").upper() if decision.get("symbol") else ""
-                target_portion = float(decision.get("target_portion_of_balance", 0)) if decision.get("target_portion_of_balance") is not None else 0
-                reason = decision.get("reason", "No reason provided")
+                for decision in decisions:
+                    if not isinstance(decision, dict):
+                        logger.warning(f"Skipping malformed decision for {account.name}: {decision}")
+                        continue
 
-                logger.info(f"AI decision for {account.name}: {operation} {symbol} (portion: {target_portion:.2%}) - {reason}")
+                    operation = decision.get("operation", "").lower() if decision.get("operation") else ""
+                    symbol = decision.get("symbol", "").upper() if decision.get("symbol") else ""
+                    target_portion = float(decision.get("target_portion_of_balance", 0)) if decision.get("target_portion_of_balance") is not None else 0
+                    reason = decision.get("reason", "No reason provided")
 
-                # Validate decision
-                if operation not in ["buy", "sell", "hold", "close"]:
-                    logger.warning(f"Invalid operation '{operation}' from AI for {account.name}, skipping")
-                    # Save invalid decision for debugging
-                    save_ai_decision(db, account, decision, portfolio, executed=False)
-                    continue
-                
-                if operation == "hold":
-                    logger.info(f"AI decided to HOLD for {account.name}")
-                    # Save hold decision
-                    save_ai_decision(db, account, decision, portfolio, executed=True)
-                    continue
+                    logger.info(f"AI decision for {account.name}: {operation} {symbol} (portion: {target_portion:.2%}) - {reason}")
 
-                if symbol not in SUPPORTED_SYMBOLS:
-                    logger.warning(f"Invalid symbol '{symbol}' from AI for {account.name}, skipping")
-                    # Save invalid decision for debugging
-                    save_ai_decision(db, account, decision, portfolio, executed=False)
-                    continue
-
-                if target_portion <= 0 or target_portion > 1:
-                    logger.warning(f"Invalid target_portion {target_portion} from AI for {account.name}, skipping")
-                    # Save invalid decision for debugging
-                    save_ai_decision(db, account, decision, portfolio, executed=False)
-                    continue
-
-                # Get current price
-                price = prices.get(symbol)
-                if not price or price <= 0:
-                    logger.warning(f"Invalid price for {symbol} for {account.name}, skipping")
-                    # Save decision with execution failure
-                    save_ai_decision(db, account, decision, portfolio, executed=False)
-                    continue
-
-                # Calculate quantity based on operation
-                if operation == "buy":
-                    # Calculate quantity based on available cash and target portion
-                    available_cash = float(account.current_cash)
-                    available_cash_dec = Decimal(str(account.current_cash))
-                    order_value = available_cash * target_portion
-                    # For crypto, support fractional quantities - use float instead of int
-                    quantity = float(Decimal(str(order_value)) / Decimal(str(price)))
+                    # Validate decision
+                    if operation not in ["buy", "sell", "hold", "close"]:
+                        logger.warning(f"Invalid operation '{operation}' from AI for {account.name}, skipping")
+                        # Save invalid decision for debugging
+                        save_ai_decision(db, account, decision, portfolio, executed=False)
+                        continue
                     
-                    # Round to reasonable precision (6 decimal places for crypto)
-                    quantity = round(quantity, 6)
-                    
-                    if quantity <= 0:
-                        logger.info(f"Calculated BUY quantity <= 0 for {symbol} for {account.name}, skipping")
+                    if operation == "hold":
+                        logger.info(f"AI decided to HOLD for {account.name}")
+                        # Save hold decision
+                        save_ai_decision(db, account, decision, portfolio, executed=True)
+                        continue
+
+                    if symbol not in SUPPORTED_SYMBOLS:
+                        logger.warning(f"Invalid symbol '{symbol}' from AI for {account.name}, skipping")
+                        # Save invalid decision for debugging
+                        save_ai_decision(db, account, decision, portfolio, executed=False)
+                        continue
+
+                    if target_portion <= 0 or target_portion > 1:
+                        logger.warning(f"Invalid target_portion {target_portion} from AI for {account.name}, skipping")
+                        # Save invalid decision for debugging
+                        save_ai_decision(db, account, decision, portfolio, executed=False)
+                        continue
+
+                    # Get current price
+                    price = prices.get(symbol)
+                    if not price or price <= 0:
+                        logger.warning(f"Invalid price for {symbol} for {account.name}, skipping")
                         # Save decision with execution failure
                         save_ai_decision(db, account, decision, portfolio, executed=False)
                         continue
 
-                    cash_needed = _estimate_buy_cash_needed(price, quantity)
-                    if available_cash_dec < cash_needed:
-                        logger.info(
-                            "Skipping BUY for %s due to insufficient cash after fees: need $%.2f, current cash $%.2f",
-                            account.name,
-                            float(cash_needed),
-                            float(available_cash_dec),
+                    # Calculate quantity based on operation
+                    if operation == "buy":
+                        # Calculate quantity based on available cash and target portion
+                        available_cash = float(account.current_cash)
+                        available_cash_dec = Decimal(str(account.current_cash))
+                        order_value = available_cash * target_portion
+                        quantity = float(Decimal(str(order_value)) / Decimal(str(price)))
+                        quantity = round(quantity, 6)
+                        
+                        if quantity <= 0:
+                            logger.info(f"Calculated BUY quantity <= 0 for {symbol} for {account.name}, skipping")
+                            save_ai_decision(db, account, decision, portfolio, executed=False)
+                            continue
+
+                        cash_needed = _estimate_buy_cash_needed(price, quantity)
+                        if available_cash_dec < cash_needed:
+                            logger.info(
+                                "Skipping BUY for %s due to insufficient cash after fees: need $%.2f, current cash $%.2f",
+                                account.name,
+                                float(cash_needed),
+                                float(available_cash_dec),
+                            )
+                            save_ai_decision(db, account, decision, portfolio, executed=False)
+                            continue
+                        
+                        side = "BUY"
+
+                    elif operation == "sell":
+                        position = (
+                            db.query(Position)
+                            .filter(Position.account_id == account.id, Position.symbol == symbol, Position.market == "CRYPTO")
+                            .first()
                         )
-                        save_ai_decision(db, account, decision, portfolio, executed=False)
-                        continue
-                    
-                    side = "BUY"
 
-                elif operation == "sell":
-                    # Calculate quantity based on position and target portion
-                    position = (
-                        db.query(Position)
-                        .filter(Position.account_id == account.id, Position.symbol == symbol, Position.market == "CRYPTO")
-                        .first()
-                    )
+                        if not position or float(position.available_quantity) <= 0:
+                            logger.info(f"No position available to SELL for {symbol} for {account.name}, skipping")
+                            save_ai_decision(db, account, decision, portfolio, executed=False)
+                            continue
 
-                    if not position or float(position.available_quantity) <= 0:
-                        logger.info(f"No position available to SELL for {symbol} for {account.name}, skipping")
-                        # Save decision with execution failure
-                        save_ai_decision(db, account, decision, portfolio, executed=False)
-                        continue
+                        available_quantity = float(position.available_quantity)
+                        quantity = float(available_quantity * target_portion)
+                        if quantity > available_quantity:
+                            quantity = available_quantity
 
-                    available_quantity = float(position.available_quantity)
-                    quantity = float(available_quantity * target_portion)
+                        side = "SELL"
 
-                    if quantity > available_quantity:
-                        quantity = available_quantity
+                    elif operation == "close":
+                        position = (
+                            db.query(Position)
+                            .filter(Position.account_id == account.id, Position.symbol == symbol, Position.market == "CRYPTO")
+                            .first()
+                        )
 
-                    side = "SELL"
+                        if not position or float(position.available_quantity) <= 0:
+                            logger.info(f"No position available to CLOSE for {symbol} for {account.name}, skipping")
+                            save_ai_decision(db, account, decision, portfolio, executed=False)
+                            continue
 
-                elif operation == "close":
-                    # Close entire position (sell 100%)
-                    position = (
-                        db.query(Position)
-                        .filter(Position.account_id == account.id, Position.symbol == symbol, Position.market == "CRYPTO")
-                        .first()
-                    )
+                        quantity = float(position.available_quantity)
+                        side = "CLOSE"
 
-                    if not position or float(position.available_quantity) <= 0:
-                        logger.info(f"No position available to CLOSE for {symbol} for {account.name}, skipping")
-                        # Save decision with execution failure
-                        save_ai_decision(db, account, decision, portfolio, executed=False)
+                    else:
                         continue
 
-                    # Close entire position regardless of target_portion
-                    quantity = float(position.available_quantity)
-                    side = "CLOSE"
+                name = _get_symbol_name(symbol)
 
-                else:
-                    continue
-
-                # Create and execute order
-                name = SUPPORTED_SYMBOLS[symbol]
-                
                 try:
                     order = create_order(
                         db=db,
@@ -315,27 +318,25 @@ def place_ai_driven_crypto_order(max_ratio: float = 0.2, account_ids: Optional[I
                         db.rollback()
                         save_ai_decision(db, account, decision, portfolio, executed=False)
                         continue
-                    # Unexpected validation error - re-raise
-                    raise
+                        raise
 
-                db.commit()
-                db.refresh(order)
-
-                executed = check_and_execute_order(db, order)
-                if executed:
+                    db.commit()
                     db.refresh(order)
-                    logger.info(
-                        f"AI order executed: account={account.name} {side} {symbol} {order.order_no} "
-                        f"quantity={quantity} reason='{reason}'"
-                    )
-                else:
-                    logger.info(
-                        f"AI order created but not executed: account={account.name} {side} {symbol} "
-                        f"quantity={quantity} order_id={order.order_no} reason='{reason}'"
-                    )
-                
-                # Save decision with final execution status (only called once)
-                save_ai_decision(db, account, decision, portfolio, executed=executed, order_id=order.id)
+
+                    executed = check_and_execute_order(db, order)
+                    if executed:
+                        db.refresh(order)
+                        logger.info(
+                            f"AI order executed: account={account.name} {side} {symbol} {order.order_no} "
+                            f"quantity={quantity} reason='{reason}'"
+                        )
+                    else:
+                        logger.info(
+                            f"AI order created but not executed: account={account.name} {side} {symbol} "
+                            f"quantity={quantity} order_id={order.order_no} reason='{reason}'"
+                        )
+                    
+                    save_ai_decision(db, account, decision, portfolio, executed=executed, order_id=order.id)
 
             except Exception as account_err:
                 logger.error(f"AI-driven order placement failed for account {account.name}: {account_err}", exc_info=True)
@@ -379,7 +380,7 @@ def place_random_crypto_order(max_ratio: float = 0.2) -> None:
             return
 
         side, quantity = side_info
-        name = SUPPORTED_SYMBOLS[symbol]
+        name = _get_symbol_name(symbol)
 
         order = create_order(
             db=db,
@@ -477,16 +478,21 @@ def place_ai_driven_hyperliquid_order(account_ids: Optional[Iterable[int]] = Non
     finally:
         db.close()
 
-    # Get latest market prices (no database needed)
-    prices = _get_market_prices(AI_TRADING_SYMBOLS)
+    # Determine configured Hyperliquid symbols
+    selected_symbols = get_hyperliquid_selected_symbols()
+    if not selected_symbols:
+        logger.warning("No Hyperliquid watchlist configured, skipping Hyperliquid trading")
+        return
+
+    prices = _get_market_prices(selected_symbols)
     if not prices:
         logger.warning("Failed to fetch market prices, skipping Hyperliquid trading")
         return
 
-    # Get available symbols from sampling pool
+    # Sampling data availability (informational)
     from services.sampling_pool import sampling_pool
     available_symbols = []
-    for sym in SUPPORTED_SYMBOLS.keys():
+    for sym in selected_symbols:
         samples_data = sampling_pool.get_samples(sym)
         if samples_data:
             available_symbols.append(sym)
@@ -494,7 +500,15 @@ def place_ai_driven_hyperliquid_order(account_ids: Optional[Iterable[int]] = Non
     if available_symbols:
         logger.info(f"Available sampling symbols for Hyperliquid: {', '.join(available_symbols)}")
     else:
-        logger.warning("No sampling data available for Hyperliquid trading")
+        logger.warning("No sampling data available for configured Hyperliquid symbols")
+
+    symbol_metadata_map = get_hyperliquid_symbol_map()
+    prompt_symbol_metadata = {}
+    for sym in selected_symbols:
+        entry = dict(symbol_metadata_map.get(sym, {}))
+        entry.setdefault("name", sym)
+        prompt_symbol_metadata[sym] = entry
+    symbol_whitelist = set(selected_symbols)
 
     # Process each account with separate database connections
     for account in accounts:
@@ -572,241 +586,253 @@ def place_ai_driven_hyperliquid_order(account_ids: Optional[Iterable[int]] = Non
             }
 
             # Call AI for trading decision
-            decision = call_ai_for_decision(
-                db, account, portfolio, prices,
-                symbols=available_symbols if available_symbols else None,
-                hyperliquid_state=hyperliquid_state
+            decisions = call_ai_for_decision(
+                db,
+                account,
+                portfolio,
+                prices,
+                symbols=selected_symbols,
+                hyperliquid_state=hyperliquid_state,
+                symbol_metadata=prompt_symbol_metadata,
             )
 
-            if not decision or not isinstance(decision, dict):
+            if not decisions:
                 logger.warning(f"Failed to get AI decision for {account.name}, skipping")
                 continue
 
-
-            operation = decision.get("operation", "").lower()
-            symbol = decision.get("symbol", "").upper()
-            target_portion = float(decision.get("target_portion_of_balance", 0))
-            leverage = int(decision.get("leverage", getattr(account, "default_leverage", 1)))
-            max_price = decision.get("max_price")
-            min_price = decision.get("min_price")
-            reason = decision.get("reason", "No reason provided")
-
-
-            logger.info(
-                f"AI decision for {account.name}: {operation} {symbol} "
-                f"(portion: {target_portion:.2%}, leverage: {leverage}x, max_price: {max_price}, min_price: {min_price}) - {reason}"
+            decision_priority = {"close": 0, "sell": 1, "buy": 2, "hold": 3}
+            ordered_decisions = sorted(
+                decisions,
+                key=lambda d: decision_priority.get(str(d.get("operation", "")).lower(), 4),
             )
 
-            # Validate decision
-            if operation not in ["buy", "sell", "hold", "close"]:
-                logger.warning(f"Invalid operation '{operation}' from AI for {account.name}")
-                save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
-                continue
+            for decision in ordered_decisions:
+                if not isinstance(decision, dict):
+                    logger.warning(f"Skipping malformed Hyperliquid decision for {account.name}: {decision}")
+                    continue
 
-            if operation == "hold":
-                logger.info(f"AI decided to HOLD for {account.name}")
-                save_ai_decision(db, account, decision, portfolio, executed=True, **decision_kwargs)
-                continue
-
-            if symbol not in SUPPORTED_SYMBOLS:
-                logger.warning(f"Invalid symbol '{symbol}' from AI for {account.name}")
-                save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
-                continue
-
-            # Validate leverage
-            max_leverage = getattr(account, "max_leverage", 3)
-            if leverage < 1 or leverage > max_leverage:
-                logger.warning(
-                    f"Invalid leverage {leverage}x from AI (max: {max_leverage}x), "
-                    f"using default {getattr(account, 'default_leverage', 1)}x"
-                )
-                leverage = getattr(account, "default_leverage", 1)
-
-            if target_portion <= 0 or target_portion > 1:
-                logger.warning(f"Invalid target_portion {target_portion} from AI for {account.name}")
-                save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
-                continue
-
-            # Get current price
-            price = prices.get(symbol)
-            if not price or price <= 0:
-                logger.warning(f"Invalid price for {symbol} for {account.name}")
-                save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
-                continue
-
-            # Clamp AI-provided price bands to +/-5% of market price
-            upper_bound = price * 1.05
-            lower_bound = price * 0.95
-
-            if max_price is not None and max_price > upper_bound:
-                logger.warning(
-                    f"AI max_price {max_price} exceeds +5% band from market {price}; clamping to {upper_bound}"
-                )
-                max_price = upper_bound
-
-            if min_price is not None and min_price < lower_bound:
-                logger.warning(
-                    f"AI min_price {min_price} below -5% band from market {price}; clamping to {lower_bound}"
-                )
-                min_price = lower_bound
-
-            # Execute order based on operation
-            order_result = None
-
-            if operation == "buy":
-                # Open long position
-                order_value = available_balance * target_portion
-                quantity = round(order_value / price, 6)
-
-                price_to_use = max_price if max_price is not None else price
-                if abs(price_to_use - price) / price > 0.05:
-                    logger.warning(
-                        f"BUY price {price_to_use} deviates >5% from market {price}; using market price"
-                    )
-                    price_to_use = price
+                operation = decision.get("operation", "").lower()
+                symbol = decision.get("symbol", "").upper()
+                target_portion = float(decision.get("target_portion_of_balance", 0))
+                leverage = int(decision.get("leverage", getattr(account, "default_leverage", 1)))
+                max_price = decision.get("max_price")
+                min_price = decision.get("min_price")
+                reason = decision.get("reason", "No reason provided")
 
                 logger.info(
-                    f"[HYPERLIQUID {environment.upper()}] Placing BUY order: "
-                    f"{symbol} size={quantity} leverage={leverage}x"
+                    f"AI decision for {account.name}: {operation} {symbol} "
+                    f"(portion: {target_portion:.2%}, leverage: {leverage}x, max_price: {max_price}, min_price: {min_price}) - {reason}"
                 )
 
-                order_result = client.place_order(
-                    db=db,
-                    symbol=symbol,
-                    is_buy=True,
-                    size=quantity,
-                    order_type="market",
-                    price=price_to_use,
-                    leverage=leverage,
-                    reduce_only=False
-                )
-
-            elif operation == "sell":
-                # Open short position
-                order_value = available_balance * target_portion
-                quantity = round(order_value / price, 6)
-
-                price_to_use = min_price if min_price is not None else price
-                if abs(price_to_use - price) / price > 0.05:
-                    logger.warning(
-                        f"SELL price {price_to_use} deviates >5% from market {price}; using market price"
-                    )
-                    price_to_use = price
-
-                logger.info(
-                    f"[HYPERLIQUID {environment.upper()}] Placing SELL order: "
-                    f"{symbol} size={quantity} leverage={leverage}x"
-                )
-
-                order_result = client.place_order(
-                    db=db,
-                    symbol=symbol,
-                    is_buy=False,
-                    size=quantity,
-                    order_type="market",
-                    price=price_to_use,
-                    leverage=leverage,
-                    reduce_only=False
-                )
-
-            elif operation == "close":
-                # Close existing position
-                position_to_close = None
-                for pos in positions:
-                    if pos['coin'] == symbol:
-                        position_to_close = pos
-                        break
-
-                if not position_to_close:
-                    logger.info(f"No position to close for {symbol} for {account.name}")
+                if operation not in ["buy", "sell", "hold", "close"]:
+                    logger.warning(f"Invalid operation '{operation}' from AI for {account.name}")
                     save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
                     continue
 
-                position_size = abs(position_to_close['szi'])
-                close_size = position_size * target_portion
-                is_long = position_to_close['szi'] > 0
-
-                logger.info(
-                    f"[HYPERLIQUID {environment.upper()}] Closing position: "
-                    f"{symbol} size={close_size} (closing {'long' if is_long else 'short'})"
-                )
-
-                # Use AI price or fallback to market price with slippage
-                current_price = prices.get(symbol, 0)
-                close_price = min_price if min_price else current_price * (0.95 if is_long else 1.05)
-
-                order_result = client.place_order(
-                    db=db,
-                    symbol=symbol,
-                    is_buy=(not is_long),  # Close long by selling, close short by buying
-                    size=close_size,
-                    order_type="market",
-                    price=close_price,
-                    leverage=1,
-                    reduce_only=True
-                )
-
-
-            # Process order result (shared by all operations)
-            if order_result:
-                print(f"[DEBUG] {operation.upper()} order_result: {order_result}")
-                order_status = order_result.get('status')
-                order_id = order_result.get('order_id')
-
-                if order_status == 'filled':
-                    logger.info(
-                        f"[HYPERLIQUID] Order executed successfully for {account.name}: "
-                        f"{operation.upper()} {symbol} order_id={order_id}"
-                    )
+                if operation == "hold":
+                    logger.info(f"AI decided to HOLD for {account.name}")
                     save_ai_decision(db, account, decision, portfolio, executed=True, **decision_kwargs)
+                    continue
 
-                    # Create Hyperliquid trade record
-                    try:
-                        from database.snapshot_connection import SnapshotSessionLocal
-                        from database.snapshot_models import HyperliquidTrade
-                        from decimal import Decimal
+                if symbol not in symbol_whitelist:
+                    logger.warning(f"Symbol '{symbol}' not in Hyperliquid watchlist for {account.name}")
+                    save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
+                    continue
 
-                        snapshot_db = SnapshotSessionLocal()
-                        try:
-                            trade_record = HyperliquidTrade(
-                                account_id=account.id,
-                                environment=environment,
-                                wallet_address=wallet_address,
-                                symbol=symbol,
-                                side=operation,
-                                quantity=Decimal(str(order_result.get('filled_amount', 0))),
-                                price=Decimal(str(order_result.get('average_price', 0))),
-                                leverage=leverage,
-                                order_id=order_id,
-                                order_status=order_status,
-                                trade_value=Decimal(str(order_result.get('filled_amount', 0))) * Decimal(str(order_result.get('average_price', 0))),
-                                fee=Decimal(str(order_result.get('fee', 0)))
-                            )
-                            snapshot_db.add(trade_record)
-                            snapshot_db.commit()
-                            logger.info(f"[HYPERLIQUID] Trade record saved for {account.name}")
-                        finally:
-                            snapshot_db.close()
-                    except Exception as trade_err:
-                        logger.warning(f"Failed to save Hyperliquid trade record: {trade_err}")
-
-                elif order_status == 'resting':
-                    logger.info(
-                        f"[HYPERLIQUID] Order placed (resting) for {account.name}: "
-                        f"{operation.upper()} {symbol} order_id={order_id}"
+                max_leverage = getattr(account, "max_leverage", 3)
+                if leverage < 1 or leverage > max_leverage:
+                    logger.warning(
+                        f"Invalid leverage {leverage}x from AI (max: {max_leverage}x), "
+                        f"using default {getattr(account, 'default_leverage', 1)}x"
                     )
-                    save_ai_decision(db, account, decision, portfolio, executed=True, **decision_kwargs)
+                    leverage = getattr(account, "default_leverage", 1)
+
+                if target_portion <= 0 or target_portion > 1:
+                    logger.warning(f"Invalid target_portion {target_portion} from AI for {account.name}")
+                    save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
+                    continue
+
+                price = prices.get(symbol)
+                if not price or price <= 0:
+                    logger.warning(f"Invalid price for {symbol} for {account.name}")
+                    save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
+                    continue
+
+                upper_bound = price * 1.05
+                lower_bound = price * 0.95
+
+                if max_price is not None and max_price > upper_bound:
+                    logger.warning(
+                        f"AI max_price {max_price} exceeds +5% band from market {price}; clamping to {upper_bound}"
+                    )
+                    max_price = upper_bound
+
+                if min_price is not None and min_price < lower_bound:
+                    logger.warning(
+                        f"AI min_price {min_price} below -5% band from market {price}; clamping to {lower_bound}"
+                    )
+                    min_price = lower_bound
+
+                order_result = None
+
+                if operation == "buy":
+                    order_value = available_balance * target_portion
+                    quantity = round(order_value / price, 6)
+
+                    price_to_use = max_price if max_price is not None else price
+                    if abs(price_to_use - price) / price > 0.05:
+                        logger.warning(
+                            f"BUY price {price_to_use} deviates >5% from market {price}; using market price"
+                        )
+                        price_to_use = price
+
+                    logger.info(
+                        f"[HYPERLIQUID {environment.upper()}] Placing BUY order: "
+                        f"{symbol} size={quantity} leverage={leverage}x"
+                    )
+
+                    order_result = client.place_order(
+                        db=db,
+                        symbol=symbol,
+                        is_buy=True,
+                        size=quantity,
+                        order_type="market",
+                        price=price_to_use,
+                        leverage=leverage,
+                        reduce_only=False
+                    )
+
+                elif operation == "sell":
+                    order_value = available_balance * target_portion
+                    quantity = round(order_value / price, 6)
+
+                    price_to_use = min_price if min_price is not None else price
+                    if abs(price_to_use - price) / price > 0.05:
+                        logger.warning(
+                            f"SELL price {price_to_use} deviates >5% from market {price}; using market price"
+                        )
+                        price_to_use = price
+
+                    logger.info(
+                        f"[HYPERLIQUID {environment.upper()}] Placing SELL order: "
+                        f"{symbol} size={quantity} leverage={leverage}x"
+                    )
+
+                    order_result = client.place_order(
+                        db=db,
+                        symbol=symbol,
+                        is_buy=False,
+                        size=quantity,
+                        order_type="market",
+                        price=price_to_use,
+                        leverage=leverage,
+                        reduce_only=False
+                    )
+
+                elif operation == "close":
+                    position_to_close = None
+                    for pos in positions:
+                        if pos.get('coin') == symbol:
+                            position_to_close = pos
+                            break
+
+                    if position_to_close:
+                        position_size = abs(position_to_close.get('szi', 0))
+                        is_long = (position_to_close.get('szi', 0) or 0) > 0
+                    else:
+                        # Fall back to portfolio snapshot from prompt context
+                        portfolio_positions = portfolio.get('positions') or {}
+                        fallback_position = portfolio_positions.get(symbol)
+                        if not fallback_position:
+                            logger.warning(f"Unable to locate Hyperliquid position data for {symbol}; skipping close.")
+                            save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
+                            continue
+                        quantity = float(fallback_position.get('quantity') or 0)
+                        position_size = abs(quantity)
+                        is_long = quantity > 0
+
+                    close_size = position_size * target_portion
+
+                    logger.info(
+                        f"[HYPERLIQUID {environment.upper()}] Closing position: "
+                        f"{symbol} size={close_size} (closing {'long' if is_long else 'short'})"
+                    )
+
+                    current_price = prices.get(symbol, 0)
+                    close_price = min_price if min_price else current_price * (0.95 if is_long else 1.05)
+
+                    order_result = client.place_order(
+                        db=db,
+                        symbol=symbol,
+                        is_buy=(not is_long),
+                        size=close_size,
+                        order_type="market",
+                        price=close_price,
+                        leverage=1,
+                        reduce_only=True
+                    )
 
                 else:
-                    error_msg = order_result.get('error', 'Unknown error')
-                    logger.error(
-                        f"[HYPERLIQUID] Order failed for {account.name}: "
-                        f"{operation.upper()} {symbol} - {error_msg}"
-                    )
+                    continue
+
+                if order_result:
+                    print(f"[DEBUG] {operation.upper()} order_result: {order_result}")
+                    order_status = order_result.get('status')
+                    order_id = order_result.get('order_id')
+
+                    if order_status == 'filled':
+                        logger.info(
+                            f"[HYPERLIQUID] Order executed successfully for {account.name}: "
+                            f"{operation.upper()} {symbol} order_id={order_id}"
+                        )
+                        save_ai_decision(db, account, decision, portfolio, executed=True, **decision_kwargs)
+
+                        try:
+                            from database.snapshot_connection import SnapshotSessionLocal
+                            from database.snapshot_models import HyperliquidTrade
+                            from decimal import Decimal
+
+                            snapshot_db = SnapshotSessionLocal()
+                            try:
+                                trade_record = HyperliquidTrade(
+                                    account_id=account.id,
+                                    environment=environment,
+                                    wallet_address=wallet_address,
+                                    symbol=symbol,
+                                    side=operation,
+                                    quantity=Decimal(str(order_result.get('filled_amount', 0))),
+                                    price=Decimal(str(order_result.get('average_price', 0))),
+                                    leverage=leverage,
+                                    order_id=order_id,
+                                    order_status=order_status,
+                                    trade_value=Decimal(str(order_result.get('filled_amount', 0))) * Decimal(str(order_result.get('average_price', 0))),
+                                    fee=Decimal(str(order_result.get('fee', 0)))
+                                )
+                                snapshot_db.add(trade_record)
+                                snapshot_db.commit()
+                                logger.info(f"[HYPERLIQUID] Trade record saved for {account.name}")
+                            finally:
+                                snapshot_db.close()
+                        except Exception as trade_err:
+                            logger.warning(f"Failed to save Hyperliquid trade record: {trade_err}")
+
+                    elif order_status == 'resting':
+                        logger.info(
+                            f"[HYPERLIQUID] Order placed (resting) for {account.name}: "
+                            f"{operation.upper()} {symbol} order_id={order_id}"
+                        )
+                        save_ai_decision(db, account, decision, portfolio, executed=True, **decision_kwargs)
+
+                    else:
+                        error_msg = order_result.get('error', 'Unknown error')
+                        logger.error(
+                            f"[HYPERLIQUID] Order failed for {account.name}: "
+                            f"{operation.upper()} {symbol} - {error_msg}"
+                        )
+                        save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
+                else:
+                    logger.error(f"No order result received for {account.name}")
                     save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
-            else:
-                logger.error(f"No order result received for {account.name}")
-                save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
 
         except Exception as account_err:
             logger.error(f"Error processing Hyperliquid account {account.name}: {account_err}", exc_info=True)

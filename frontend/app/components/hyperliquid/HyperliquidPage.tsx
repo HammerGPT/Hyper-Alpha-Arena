@@ -79,7 +79,7 @@ export default function HyperliquidPage({ accountId }: HyperliquidPageProps) {
 
   if (!config.enabled) {
     return (
-      <div className="container mx-auto p-6">
+      <div className="container mx-auto p-6 h-full overflow-y-scroll">
         <div className="max-w-4xl mx-auto">
           <div className="mb-8 text-center">
             <h1 className="text-3xl font-bold mb-2">Hyperliquid Trading</h1>
@@ -109,7 +109,7 @@ export default function HyperliquidPage({ accountId }: HyperliquidPageProps) {
   }
 
   return (
-    <div className="container mx-auto p-6">
+    <div className="container mx-auto p-6 h-full overflow-y-scroll">
       <div className="mb-6">
         <div className="flex items-center justify-between mb-4">
           <div>
@@ -200,13 +200,13 @@ export default function HyperliquidPage({ accountId }: HyperliquidPageProps) {
             </div>
           </div>
 
-          <PositionsTable
-            accountId={accountId}
-            environment={config.environment}
-            autoRefresh={true}
-            refreshInterval={30}
-            onPositionClosed={handlePositionClosed}
-          />
+            <PositionsTable
+              accountId={accountId}
+              environment={config.environment}
+              autoRefresh={true}
+              refreshInterval={30}
+              onPositionClosed={handlePositionClosed}
+            />
         </TabsContent>
 
         <TabsContent value="trade" className="space-y-6">

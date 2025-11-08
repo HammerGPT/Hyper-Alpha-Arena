@@ -137,17 +137,62 @@ def _build_holdings_detail(positions: Dict[str, Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _build_market_prices(prices: Dict[str, float]) -> str:
+def _build_market_prices(
+    prices: Dict[str, float],
+    symbol_order: Optional[List[str]] = None,
+    symbol_names: Optional[Dict[str, str]] = None,
+) -> str:
     """Build simple market prices list for Alpha Arena style prompts"""
+    order = symbol_order or list(SUPPORTED_SYMBOLS.keys())
     lines = []
-    for symbol in SUPPORTED_SYMBOLS.keys():
+    for symbol in order:
         price = prices.get(symbol)
+        display_name = (symbol_names or {}).get(symbol)
+        label = symbol if not display_name or display_name == symbol else f"{symbol} ({display_name})"
         if price:
-            lines.append(f"{symbol}: ${_format_currency(price, precision=4)}")
+            lines.append(f"{label}: ${_format_currency(price, precision=4)}")
         else:
-            lines.append(f"{symbol}: N/A")
+            lines.append(f"{label}: N/A")
 
     return "\n".join(lines)
+
+
+def _normalize_symbol_metadata(
+    symbol_metadata: Optional[Dict[str, Any]],
+    fallback_symbols: List[str],
+) -> Dict[str, Dict[str, Optional[str]]]:
+    """Normalize symbol metadata into a consistent mapping."""
+    normalized: Dict[str, Dict[str, Optional[str]]] = {}
+
+    if symbol_metadata:
+        for raw_symbol, meta in symbol_metadata.items():
+            symbol = str(raw_symbol).upper()
+            if isinstance(meta, dict):
+                normalized[symbol] = {
+                    "name": meta.get("name") or meta.get("display_name") or symbol,
+                    "type": meta.get("type") or meta.get("category"),
+                }
+            else:
+                display = str(meta).strip()
+                normalized[symbol] = {
+                    "name": display or symbol,
+                    "type": None,
+                }
+
+    for symbol in fallback_symbols:
+        normalized.setdefault(
+            symbol,
+            {
+                "name": SUPPORTED_SYMBOLS.get(symbol, symbol),
+                "type": None,
+            },
+        )
+
+    if not normalized:
+        for symbol, display in SUPPORTED_SYMBOLS.items():
+            normalized[symbol] = {"name": display, "type": None}
+
+    return normalized
 
 
 def _build_account_state(portfolio: Dict[str, Any]) -> str:
@@ -265,9 +310,14 @@ def _build_multi_symbol_sampling_data(symbols: List[str], sampling_pool) -> str:
     return "\n\n".join(sections)
 
 
-def _build_market_snapshot(prices: Dict[str, float], positions: Dict[str, Dict[str, Any]]) -> str:
+def _build_market_snapshot(
+    prices: Dict[str, float],
+    positions: Dict[str, Dict[str, Any]],
+    symbol_order: Optional[List[str]] = None,
+) -> str:
     lines: List[str] = []
-    for symbol in SUPPORTED_SYMBOLS.keys():
+    order = symbol_order or list(SUPPORTED_SYMBOLS.keys())
+    for symbol in order:
         price = prices.get(symbol)
         position = positions.get(symbol, {})
 
@@ -284,16 +334,21 @@ def _build_market_snapshot(prices: Dict[str, float], positions: Dict[str, Dict[s
     return "\n".join(lines) if lines else "No market data available."
 
 
+SYMBOL_PLACEHOLDER = "__SYMBOL_SET__"
 OUTPUT_FORMAT_JSON = (
     '{\n'
-    '  "operation": "buy" | "sell" | "hold" | "close",\n'
-    '  "symbol": "<BTC|ETH|SOL|BNB|XRP|DOGE>",\n'
-    '  "target_portion_of_balance": <float 0.0-1.0>,\n'
-    '  "leverage": <integer 1-20>,\n'
-    '  "max_price": <number, required for "buy" operations>,\n'
-    '  "min_price": <number, required for "sell"/"close" operations>,\n'
-    '  "reason": "<string max 150 chars>",\n'
-    '  "trading_strategy": "<string 2-3 sentences>"\n'
+    '  "decisions": [\n'
+    '    {\n'
+    '      "operation": "buy" | "sell" | "hold" | "close",\n'
+    '      "symbol": "<' + SYMBOL_PLACEHOLDER + '>",\n'
+    '      "target_portion_of_balance": <float 0.0-1.0>,\n'
+    '      "leverage": <integer 1-20>,\n'
+    '      "max_price": <number, required for "buy" operations>,\n'
+    '      "min_price": <number, required for "sell"/"close" operations>,\n'
+    '      "reason": "<string explaining primary signals>",\n'
+    '      "trading_strategy": "<string covering thesis, risk controls, and exit plan>"\n'
+    '    }\n'
+    '  ]\n'
     '}'
 )
 
@@ -316,10 +371,44 @@ def _build_prompt_context(
     samples: Optional[List] = None,
     target_symbol: Optional[str] = None,
     hyperliquid_state: Optional[Dict[str, Any]] = None,
+    *,
+    symbol_metadata: Optional[Dict[str, Any]] = None,
+    symbol_order: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     base_portfolio = portfolio or {}
     base_positions = base_portfolio.get("positions") or {}
     positions: Dict[str, Dict[str, Any]] = {symbol: dict(data) for symbol, data in base_positions.items()}
+
+    symbol_source = symbol_metadata or SUPPORTED_SYMBOLS
+    base_order = symbol_order or list(symbol_source.keys())
+    ordered_symbols: List[str] = []
+    seen_symbols = set()
+    for sym in base_order:
+        symbol_upper = str(sym).upper()
+        if not symbol_upper or symbol_upper in seen_symbols:
+            continue
+        seen_symbols.add(symbol_upper)
+        ordered_symbols.append(symbol_upper)
+    if not ordered_symbols:
+        ordered_symbols = list(SUPPORTED_SYMBOLS.keys())
+
+    normalized_symbol_metadata = _normalize_symbol_metadata(symbol_metadata, ordered_symbols)
+    symbol_display_map = {
+        symbol: normalized_symbol_metadata.get(symbol, {}).get("name") or SUPPORTED_SYMBOLS.get(symbol, symbol)
+        for symbol in ordered_symbols
+    }
+    selected_symbols_detail_lines = []
+    for symbol in ordered_symbols:
+        info = normalized_symbol_metadata.get(symbol, {})
+        display_name = info.get("name") or symbol
+        symbol_type = info.get("type")
+        if symbol_type:
+            selected_symbols_detail_lines.append(f"- {symbol}: {display_name} ({symbol_type})")
+        else:
+            selected_symbols_detail_lines.append(f"- {symbol}: {display_name}")
+    selected_symbols_detail = "\n".join(selected_symbols_detail_lines) if selected_symbols_detail_lines else "None configured"
+    selected_symbols_csv = ", ".join(ordered_symbols) if ordered_symbols else "N/A"
+    output_symbol_choices = "|".join(ordered_symbols) if ordered_symbols else "SYMBOL"
 
     hyperliquid_enabled = getattr(account, "hyperliquid_enabled", "false") == "true"
     environment = getattr(account, "hyperliquid_environment", "paper") or "paper"
@@ -368,7 +457,7 @@ def _build_prompt_context(
 
     # Legacy format variables (for backward compatibility with existing templates)
     account_state = _build_account_state(portfolio)
-    market_snapshot = _build_market_snapshot(prices, positions)
+    market_snapshot = _build_market_snapshot(prices, positions, ordered_symbols)
     session_context = _build_session_context(account)
     sampling_data = _build_sampling_data(samples, target_symbol)
 
@@ -379,7 +468,8 @@ def _build_prompt_context(
     available_cash = _format_currency(portfolio.get('cash'))
     total_account_value = _format_currency(portfolio.get('total_assets'))
     holdings_detail = _build_holdings_detail(positions)
-    market_prices = _build_market_prices(prices)
+    market_prices = _build_market_prices(prices, ordered_symbols, symbol_display_map)
+    output_format = OUTPUT_FORMAT_JSON.replace(SYMBOL_PLACEHOLDER, output_symbol_choices or "SYMBOL")
 
     # Hyperliquid-specific context
     max_leverage = getattr(account, "max_leverage", 3)
@@ -474,7 +564,7 @@ def _build_prompt_context(
         "session_context": session_context,
         "sampling_data": sampling_data,
         "decision_task": DECISION_TASK_TEXT,
-        "output_format": OUTPUT_FORMAT_JSON,
+        "output_format": output_format,
         "prices_json": json.dumps(prices, indent=2, sort_keys=True),
         "portfolio_json": json.dumps(portfolio, indent=2, sort_keys=True),
         "portfolio_positions_json": json.dumps(positions, indent=2, sort_keys=True),
@@ -489,6 +579,9 @@ def _build_prompt_context(
         "total_account_value": total_account_value,
         "holdings_detail": positions_detail if hyperliquid_enabled else holdings_detail,
         "market_prices": market_prices,
+        "selected_symbols_csv": selected_symbols_csv,
+        "selected_symbols_detail": selected_symbols_detail,
+        "selected_symbols_count": len(ordered_symbols),
         # Hyperliquid-specific variables
         "trading_environment": trading_environment,
         "real_trading_warning": real_trading_warning,
@@ -542,6 +635,8 @@ def build_chat_completion_endpoints(base_url: str, model: Optional[str] = None) 
 
     Supports Deepseek-specific behavior where both `/chat/completions` and `/v1/chat/completions`
     might be valid, depending on how the base URL is configured.
+    Returns:
+        List of decision dictionaries (one per symbol action) or None if generation failed.
     """
     if not base_url:
         return []
@@ -625,7 +720,8 @@ def call_ai_for_decision(
     target_symbol: Optional[str] = None,
     symbols: Optional[List[str]] = None,
     hyperliquid_state: Optional[Dict[str, Any]] = None,
-) -> Optional[Dict]:
+    symbol_metadata: Optional[Dict[str, Any]] = None,
+) -> Optional[List[Dict[str, Any]]]:
     """Call AI model API to get trading decision
 
     Args:
@@ -637,6 +733,7 @@ def call_ai_for_decision(
         target_symbol: Legacy single symbol (deprecated, use symbols instead)
         symbols: List of symbols to include sampling data for (preferred method)
         hyperliquid_state: Optional Hyperliquid account state for real trading
+        symbol_metadata: Optional mapping of symbol -> display name overrides
     """
     # Check if this is a default API key
     if _is_default_api_key(account.api_key):
@@ -659,15 +756,38 @@ def call_ai_for_decision(
             return None
 
     # Build context with multi-symbol support
+    active_symbol_metadata = symbol_metadata or SUPPORTED_SYMBOLS
+    symbol_order = symbols if symbols else list(active_symbol_metadata.keys())
+
     if symbols:
         # New multi-symbol approach
         from services.sampling_pool import sampling_pool
         sampling_data = _build_multi_symbol_sampling_data(symbols, sampling_pool)
-        context = _build_prompt_context(account, portfolio, prices, news_section, None, None, hyperliquid_state)
+        context = _build_prompt_context(
+            account,
+            portfolio,
+            prices,
+            news_section,
+            None,
+            None,
+            hyperliquid_state,
+            symbol_metadata=active_symbol_metadata,
+            symbol_order=symbol_order,
+        )
         context["sampling_data"] = sampling_data
     else:
         # Legacy single-symbol approach (backward compatibility)
-        context = _build_prompt_context(account, portfolio, prices, news_section, samples, target_symbol, hyperliquid_state)
+        context = _build_prompt_context(
+            account,
+            portfolio,
+            prices,
+            news_section,
+            samples,
+            target_symbol,
+            hyperliquid_state,
+            symbol_metadata=active_symbol_metadata,
+            symbol_order=symbol_order,
+        )
 
     try:
         prompt = template.template_text.format_map(SafeDict(context))
@@ -902,25 +1022,47 @@ def call_ai_for_decision(
                         logger.error(f"Regex match results - operation: {operation_match.group(1) if operation_match else None}, symbol: {symbol_match.group(1) if symbol_match else None}, portion: {portion_match.group(1) if portion_match else None}, reason: {reason_match.group(1)[:100] if reason_match else None}...")
                         return None
 
-            # Validate that decision is a dict with required structure
-            if not isinstance(decision, dict):
-                logger.error(f"AI response is not a dict: {type(decision)}")
+            # Normalize into a list of decisions
+            if isinstance(decision, dict) and isinstance(decision.get("decisions"), list):
+                decision_entries = decision.get("decisions") or []
+            elif isinstance(decision, list):
+                decision_entries = decision
+            elif isinstance(decision, dict):
+                decision_entries = [decision]
+            else:
+                logger.error(f"AI response has unsupported structure: {type(decision)}")
                 return None
 
-            # Attach debugging snapshots for downstream storage/logging
-            strategy_details = decision.get("trading_strategy")
+            snapshot_source = cleaned_content if "cleaned_content" in locals() and cleaned_content else raw_decision_text
 
-            decision["_prompt_snapshot"] = prompt
-            if isinstance(strategy_details, str) and strategy_details.strip():
-                decision["_reasoning_snapshot"] = strategy_details.strip()
-            else:
-                decision["_reasoning_snapshot"] = reasoning_text or ""
-            # Use the most recent cleaned JSON payload; fall back to raw text if parsing succeeded via manual extraction
-            snapshot_source = cleaned_content if 'cleaned_content' in locals() and cleaned_content else raw_decision_text
-            decision["_raw_decision_text"] = snapshot_source
+            structured_decisions: List[Dict[str, Any]] = []
+            for idx, raw_entry in enumerate(decision_entries):
+                if not isinstance(raw_entry, dict):
+                    logger.warning(
+                        "Skipping decision entry %s for account %s because it is %s instead of dict",
+                        idx,
+                        account.name,
+                        type(raw_entry),
+                    )
+                    continue
 
-            logger.info(f"AI decision for {account.name}: {decision}")
-            return decision
+                entry = dict(raw_entry)
+                strategy_details = entry.get("trading_strategy")
+
+                entry["_prompt_snapshot"] = prompt
+                if isinstance(strategy_details, str) and strategy_details.strip():
+                    entry["_reasoning_snapshot"] = strategy_details.strip()
+                else:
+                    entry["_reasoning_snapshot"] = reasoning_text or ""
+                entry["_raw_decision_text"] = snapshot_source
+                structured_decisions.append(entry)
+
+            if not structured_decisions:
+                logger.error("AI response for %s contained no usable decision entries", account.name)
+                return None
+
+            logger.info(f"AI decisions for {account.name}: {structured_decisions}")
+            return structured_decisions
 
         logger.error(f"Unexpected AI response format: {result}")
         return None

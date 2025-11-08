@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class HyperliquidSnapshotService:
     """Service to periodically snapshot Hyperliquid account states"""
 
-    def __init__(self, interval_seconds: int = 30):
+    def __init__(self, interval_seconds: int = 300):
         self.interval_seconds = interval_seconds
         self.running = False
 
@@ -83,6 +83,11 @@ class HyperliquidSnapshotService:
             # Use existing API to get Hyperliquid client and account state
             client = get_hyperliquid_client(main_db, account.id)
             account_state = client.get_account_state(main_db)
+            try:
+                # Fetch positions to refresh caches for UI consumers
+                client.get_positions(main_db)
+            except Exception as pos_err:
+                logger.warning(f"[HYPERLIQUID SNAPSHOT] Failed to refresh positions for account {account.id}: {pos_err}")
 
             # Create snapshot record in snapshot database
             snapshot = HyperliquidAccountSnapshot(
@@ -119,4 +124,4 @@ class HyperliquidSnapshotService:
 
 
 # Global instance
-hyperliquid_snapshot_service = HyperliquidSnapshotService(interval_seconds=30)
+hyperliquid_snapshot_service = HyperliquidSnapshotService(interval_seconds=300)

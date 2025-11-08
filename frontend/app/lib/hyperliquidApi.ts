@@ -6,8 +6,9 @@ import { apiRequest } from './api';
 import type {
   HyperliquidConfig,
   HyperliquidBalance,
-  HyperliquidPosition,
   HyperliquidAccountState,
+  HyperliquidPositionsResponse,
+  HyperliquidActionSummary,
   SetupRequest,
   SwitchEnvironmentRequest,
   ManualOrderRequest,
@@ -68,6 +69,9 @@ export async function getHyperliquidBalance(
     `${HYPERLIQUID_API_BASE}/accounts/${accountId}/balance`
   );
   const data = await response.json();
+  const lastUpdated =
+    data.cached_at ??
+    (data.timestamp ? new Date(data.timestamp).toISOString() : undefined);
   return {
     totalEquity: data.total_equity ?? 0,
     availableBalance: data.available_balance ?? 0,
@@ -75,7 +79,7 @@ export async function getHyperliquidBalance(
     maintenanceMargin: data.maintenance_margin ?? 0,
     marginUsagePercent: data.margin_usage_percent ?? 0,
     withdrawalAvailable: data.withdrawal_available ?? 0,
-    lastUpdated: data.timestamp ? new Date(data.timestamp).toISOString() : undefined,
+    lastUpdated,
     walletAddress: data.wallet_address ?? undefined,
   };
 }
@@ -94,23 +98,29 @@ export async function getHyperliquidAccountState(
  */
 export async function getHyperliquidPositions(
   accountId: number
-): Promise<HyperliquidPosition[]> {
+): Promise<HyperliquidPositionsResponse> {
   const response = await apiRequest(
     `${HYPERLIQUID_API_BASE}/accounts/${accountId}/positions`
   );
   const data = await response.json();
   const positions = Array.isArray(data.positions) ? data.positions : [];
 
-  return positions.map((pos: any) => ({
-    coin: pos.coin ?? pos.symbol ?? '',
-    szi: Number(pos.szi ?? pos.contracts ?? 0),
-    entryPx: Number(pos.entry_px ?? pos.entryPx ?? 0),
-    positionValue: Number(pos.position_value ?? pos.positionValue ?? 0),
-    unrealizedPnl: Number(pos.unrealized_pnl ?? pos.unrealizedPnl ?? 0),
-    marginUsed: Number(pos.margin_used ?? pos.marginUsed ?? 0),
-    liquidationPx: Number(pos.liquidation_px ?? pos.liquidationPx ?? 0),
-    leverage: Number(pos.leverage ?? 1),
-  }));
+  return {
+    positions: positions.map((pos: any) => ({
+      coin: pos.coin ?? pos.symbol ?? '',
+      szi: Number(pos.szi ?? pos.contracts ?? 0),
+      entryPx: Number(pos.entry_px ?? pos.entryPx ?? 0),
+      positionValue: Number(pos.position_value ?? pos.positionValue ?? 0),
+      unrealizedPnl: Number(pos.unrealized_pnl ?? pos.unrealizedPnl ?? 0),
+      marginUsed: Number(pos.margin_used ?? pos.marginUsed ?? 0),
+      liquidationPx: Number(pos.liquidation_px ?? pos.liquidationPx ?? 0),
+      leverage: Number(pos.leverage ?? 1),
+    })),
+    count: data.count ?? positions.length,
+    environment: data.environment,
+    source: data.source ?? 'live',
+    cachedAt: data.cached_at,
+  };
 }
 
 /**
@@ -154,6 +164,39 @@ export async function testConnection(
 export async function getHyperliquidHealth(): Promise<HyperliquidHealthResponse> {
   const response = await apiRequest(`${HYPERLIQUID_API_BASE}/health`);
   return response.json();
+}
+
+export async function getHyperliquidActionSummary(params?: {
+  accountId?: number;
+  windowMinutes?: number;
+}): Promise<HyperliquidActionSummary> {
+  const search = new URLSearchParams();
+  if (params?.accountId) {
+    search.append('account_id', params.accountId.toString());
+  }
+  if (params?.windowMinutes) {
+    search.append('window_minutes', params.windowMinutes.toString());
+  }
+  const query = search.toString() ? `?${search.toString()}` : '';
+  const response = await apiRequest(
+    `${HYPERLIQUID_API_BASE}/actions/summary${query}`
+  );
+  const data = await response.json();
+  return {
+    windowMinutes: data.window_minutes ?? params?.windowMinutes ?? 1440,
+    accountId: data.account_id ?? params?.accountId,
+    totalActions: data.total_actions ?? 0,
+    generatedAt: data.generated_at,
+    latestActionAt: data.latest_action_at,
+    byAction: Array.isArray(data.by_action)
+      ? data.by_action.map((entry: any) => ({
+          actionType: entry.action_type,
+          count: entry.count ?? 0,
+          errors: entry.errors ?? 0,
+          lastOccurrence: entry.last_occurrence,
+        }))
+      : [],
+  };
 }
 
 /**

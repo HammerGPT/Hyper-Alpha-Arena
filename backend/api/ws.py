@@ -18,6 +18,8 @@ from services.asset_calculator import calc_positions_value
 from services.asset_curve_calculator import get_all_asset_curves_data_new
 from services.market_data import get_last_price
 from services.scheduler import add_account_snapshot_job, remove_account_snapshot_job
+from services.hyperliquid_cache import get_cached_account_state, get_cached_positions
+from services.hyperliquid_environment import get_hyperliquid_client
 
 
 class ConnectionManager:
@@ -105,6 +107,7 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+HYPERLIQUID_SNAPSHOT_CACHE_TTL = 360  # seconds
 
 
 async def broadcast_asset_curve_update(timeframe: str = "1h"):
@@ -378,23 +381,20 @@ async def _send_snapshot_by_mode(db: Session, account_id: int, trading_mode: str
 
 async def _send_hyperliquid_snapshot(db: Session, account_id: int, environment: str):
     """
-    Send Hyperliquid real-time snapshot (testnet or mainnet)
+    Send Hyperliquid snapshot, preferring cached data to avoid unnecessary API calls.
 
     Args:
         db: Database session
         account_id: Account ID
         environment: "testnet" or "mainnet"
     """
-    from services.hyperliquid_trading_client import HyperliquidTradingClient
-    from utils.encryption import decrypt_private_key
 
     account = get_account(db, account_id)
     if not account:
         logging.error(f"Account {account_id} not found for Hyperliquid snapshot")
         return
 
-    # Validate account has Hyperliquid configured
-    if not account.hyperliquid_enabled:
+    if account.hyperliquid_enabled != "true":
         logging.warning(f"Account {account_id} does not have Hyperliquid enabled")
         await manager.send_to_account(account_id, {
             "type": "error",
@@ -402,43 +402,72 @@ async def _send_hyperliquid_snapshot(db: Session, account_id: int, environment: 
         })
         return
 
-    # Get appropriate private key based on environment
-    if environment == "testnet":
-        encrypted_key = account.hyperliquid_testnet_private_key
-    else:  # mainnet
-        encrypted_key = account.hyperliquid_mainnet_private_key
-
-    if not encrypted_key:
-        logging.error(f"Account {account_id} missing {environment} private key")
+    configured_env = account.hyperliquid_environment
+    if configured_env != environment:
         await manager.send_to_account(account_id, {
             "type": "error",
-            "message": f"Hyperliquid {environment} private key not configured"
+            "message": f"Account configured for {configured_env or 'unknown'} but {environment} snapshot requested"
         })
         return
 
-    # Decrypt private key
-    try:
-        private_key = decrypt_private_key(encrypted_key)
-    except Exception as e:
-        logging.error(f"Failed to decrypt private key: {e}")
-        await manager.send_to_account(account_id, {
-            "type": "error",
-            "message": f"Failed to decrypt private key: {str(e)}"
-        })
+    cached_state = get_cached_account_state(account_id, max_age_seconds=HYPERLIQUID_SNAPSHOT_CACHE_TTL)
+    cached_positions = get_cached_positions(account_id, max_age_seconds=HYPERLIQUID_SNAPSHOT_CACHE_TTL)
+    account_state = cached_state["data"] if cached_state else None
+    positions_data = cached_positions["data"] if cached_positions else None
+    wallet_address = None
+    if isinstance(account_state, dict):
+        wallet_address = account_state.get("wallet_address")
+
+    data_source = "cache"
+    client = None
+
+    if account_state is None or positions_data is None:
+        try:
+            client = get_hyperliquid_client(db, account_id)
+        except Exception as e:
+            logging.error(f"Failed to initialize Hyperliquid client for account {account_id}: {e}")
+            await manager.send_to_account(account_id, {
+                "type": "error",
+                "message": f"Hyperliquid client init failed: {str(e)}"
+            })
+            return
+
+        if client.environment != environment:
+            await manager.send_to_account(account_id, {
+                "type": "error",
+                "message": f"Account client uses {client.environment}, cannot serve {environment} snapshot"
+            })
+            return
+
+        try:
+            account_state = client.get_account_state(db)
+            positions_data = client.get_positions(db)
+            wallet_address = client.wallet_address
+            data_source = "live"
+        except Exception as e:
+            logging.error(f"Failed to fetch Hyperliquid data for account {account_id}: {e}", exc_info=True)
+            await manager.send_to_account(account_id, {
+                "type": "error",
+                "message": f"Failed to fetch Hyperliquid data: {str(e)}"
+            })
+            return
+    else:
+        # Cache hit but wallet missing? fall back to client for metadata only.
+        if wallet_address is None:
+            try:
+                client = get_hyperliquid_client(db, account_id)
+                if client.environment == environment:
+                    wallet_address = client.wallet_address
+            except Exception:
+                wallet_address = None
+
+    if account_state is None or positions_data is None:
+        logging.error(f"Hyperliquid snapshot missing state or positions for account {account_id}")
         return
 
+    wallet_address = wallet_address or account_state.get("wallet_address")
+
     try:
-        # Create Hyperliquid client
-        client = HyperliquidTradingClient(
-            account_id=account_id,
-            private_key=private_key,
-            environment=environment
-        )
-
-        # Get account state from Hyperliquid API
-        account_state = client.get_account_state(db)
-        positions_data = client.get_positions(db)
-
         # Transform Hyperliquid data to frontend format
         overview = {
             "account": {
@@ -569,6 +598,8 @@ async def _send_hyperliquid_snapshot(db: Session, account_id: int, environment: 
                 "available_balance": account_state.get("available_balance", 0),
                 "used_margin": account_state.get("used_margin", 0),
                 "margin_usage_percent": account_state.get("margin_usage_percent", 0),
+                "source": data_source,
+                "wallet_address": wallet_address,
             }
         }
 

@@ -3,6 +3,7 @@ import { toast } from 'react-hot-toast'
 import {
   previewPrompt,
   getAccounts,
+  getHyperliquidWatchlist,
   TradingAccount,
   PromptPreviewItem,
 } from '@/lib/api'
@@ -25,8 +26,6 @@ interface PromptPreviewDialogProps {
   templateName: string
 }
 
-const SUPPORTED_SYMBOLS = ['BTC', 'ETH', 'SOL', 'DOGE', 'XRP', 'BNB']
-
 export default function PromptPreviewDialog({
   open,
   onOpenChange,
@@ -35,16 +34,20 @@ export default function PromptPreviewDialog({
 }: PromptPreviewDialogProps) {
   const [accounts, setAccounts] = useState<TradingAccount[]>([])
   const [selectedAccountIds, setSelectedAccountIds] = useState<number[]>([])
-  const [selectedSymbols, setSelectedSymbols] = useState<string[]>(['BTC'])
   const [previews, setPreviews] = useState<PromptPreviewItem[]>([])
   const [loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [hyperliquidWatchlist, setHyperliquidWatchlist] = useState<string[]>([])
+  const [watchlistLoading, setWatchlistLoading] = useState(false)
 
   useEffect(() => {
     if (open) {
       loadAccounts()
+      if (templateKey === 'hyperliquid') {
+        loadHyperliquidWatchlist()
+      }
     }
-  }, [open])
+  }, [open, templateKey])
 
   const loadAccounts = async () => {
     setLoading(true)
@@ -65,15 +68,22 @@ export default function PromptPreviewDialog({
     }
   }
 
+  const loadHyperliquidWatchlist = async () => {
+    setWatchlistLoading(true)
+    try {
+      const response = await getHyperliquidWatchlist()
+      setHyperliquidWatchlist(response.symbols ?? [])
+    } catch (err) {
+      console.error(err)
+      toast.error('Failed to load Hyperliquid watchlist')
+    } finally {
+      setWatchlistLoading(false)
+    }
+  }
+
   const handleAccountToggle = (accountId: number) => {
     setSelectedAccountIds((prev) =>
       prev.includes(accountId) ? prev.filter((id) => id !== accountId) : [...prev, accountId],
-    )
-  }
-
-  const handleSymbolToggle = (symbol: string) => {
-    setSelectedSymbols((prev) =>
-      prev.includes(symbol) ? prev.filter((s) => s !== symbol) : [...prev, symbol],
     )
   }
 
@@ -88,7 +98,6 @@ export default function PromptPreviewDialog({
       const result = await previewPrompt({
         promptTemplateKey: templateKey,
         accountIds: selectedAccountIds,
-        symbols: selectedSymbols.length > 0 ? selectedSymbols : undefined,
       })
       setPreviews(result.previews)
       toast.success(`Generated ${result.previews.length} preview(s)`)
@@ -159,28 +168,32 @@ export default function PromptPreviewDialog({
               )}
             </div>
 
-            <div className="border-t pt-4">
-              <h3 className="text-sm font-semibold mb-2">Select Symbols (Optional)</h3>
-              <p className="text-xs text-muted-foreground mb-2">
-                If selected, sampling pool data will be included for each symbol
-              </p>
-              <div className="space-y-2">
-                {SUPPORTED_SYMBOLS.map((symbol) => (
-                  <div key={symbol} className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id={`symbol-${symbol}`}
-                      checked={selectedSymbols.includes(symbol)}
-                      onChange={() => handleSymbolToggle(symbol)}
-                      className="w-4 h-4 cursor-pointer"
-                    />
-                    <label htmlFor={`symbol-${symbol}`} className="text-sm cursor-pointer flex-1">
-                      {symbol}
-                    </label>
+            {templateKey === 'hyperliquid' && (
+              <div className="border-t pt-4">
+                <h3 className="text-sm font-semibold mb-2">Hyperliquid Watchlist</h3>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Prompt preview always uses the configured watchlist symbols
+                </p>
+                {watchlistLoading ? (
+                  <p className="text-xs text-muted-foreground">Loading watchlist…</p>
+                ) : hyperliquidWatchlist.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    No symbols configured yet. Configure them under AI Trader Management.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {hyperliquidWatchlist.map((symbol) => (
+                      <span
+                        key={symbol}
+                        className="px-2 py-1 text-xs border rounded-md bg-muted text-muted-foreground"
+                      >
+                        {symbol}
+                      </span>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
-            </div>
+            )}
 
             <Button
               onClick={handleGeneratePreview}

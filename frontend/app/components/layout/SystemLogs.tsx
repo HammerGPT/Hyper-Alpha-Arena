@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -79,8 +79,6 @@ export default function SystemLogs() {
   const [activeTab, setActiveTab] = useState<string>('logs')
   const [hyperliquidActions, setHyperliquidActions] = useState<HyperliquidActionEntry[]>([])
   const [hyperliquidStats, setHyperliquidStats] = useState<HyperliquidActionStats | null>(null)
-  const [autoRefresh, setAutoRefresh] = useState(true)
-  const refreshIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   // Fetch logs
   const fetchLogs = async () => {
@@ -148,32 +146,6 @@ export default function SystemLogs() {
   }
 
   // Auto refresh
-  useEffect(() => {
-    if (autoRefresh) {
-      refreshIntervalRef.current = setInterval(() => {
-        if (activeTab === 'logs') {
-          fetchLogs()
-          fetchStats()
-        } else if (activeTab === 'sampling') {
-          fetchSamplingPool()
-        } else if (activeTab === 'hyperliquid') {
-          fetchHyperliquidActions()
-        }
-      }, 60000) // Refresh every 60 seconds
-    } else {
-      if (refreshIntervalRef.current) {
-        clearInterval(refreshIntervalRef.current)
-        refreshIntervalRef.current = null
-      }
-    }
-
-    return () => {
-      if (refreshIntervalRef.current) {
-        clearInterval(refreshIntervalRef.current)
-      }
-    }
-  }, [autoRefresh, selectedCategory, selectedLevel, activeTab])
-
   // Initial load
 useEffect(() => {
   if (activeTab === 'logs') {
@@ -242,14 +214,6 @@ useEffect(() => {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">System Logs</h1>
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setAutoRefresh(!autoRefresh)}
-          >
-            <RefreshCw className={`w-4 h-4 mr-2 ${autoRefresh ? 'animate-spin' : ''}`} />
-            {autoRefresh ? 'Auto Refresh' : 'Manual'}
-          </Button>
           <Button
             variant="outline"
             size="sm"

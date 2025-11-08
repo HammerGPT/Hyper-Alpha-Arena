@@ -12,7 +12,7 @@ import {
 import { useArenaData } from '@/contexts/ArenaDataContext'
 import { useTradingMode } from '@/contexts/TradingModeContext'
 import { Button } from '@/components/ui/button'
-import { getModelLogo, getSymbolLogo } from './logoAssets'
+import { getModelLogo } from './logoAssets'
 import FlipNumber from './FlipNumber'
 import HighlightWrapper from './HighlightWrapper'
 
@@ -47,6 +47,14 @@ function formatDate(value?: string | null) {
 function formatPercent(value?: number | null) {
   if (value === undefined || value === null) return '—'
   return `${(value * 100).toFixed(2)}%`
+}
+
+function renderSymbolBadge(symbol?: string, size: 'sm' | 'md' = 'md') {
+  if (!symbol) return null
+  const text = symbol.slice(0, 4).toUpperCase()
+  const baseClasses = 'inline-flex items-center justify-center rounded bg-muted text-muted-foreground font-semibold'
+  const sizeClasses = size === 'sm' ? 'h-4 w-4 text-[9px]' : 'h-5 w-5 text-[10px]'
+  return <span className={`${baseClasses} ${sizeClasses}`}>{text}</span>
 }
 
 
@@ -485,7 +493,6 @@ export default function AlphaArenaFeed({
                 ) : (
                   trades.map((trade) => {
                     const modelLogo = getModelLogo(trade.account_name || trade.model)
-                    const symbolLogo = getSymbolLogo(trade.symbol)
                     const isNew = !seenTradeIds.current.has(trade.trade_id)
                     if (!seenTradeIds.current.has(trade.trade_id)) {
                       seenTradeIds.current.add(trade.trade_id)
@@ -521,14 +528,7 @@ export default function AlphaArenaFeed({
                           </span>
                           <span>trade on</span>
                           <span className="flex items-center gap-2 font-semibold">
-                            {symbolLogo && (
-                              <img
-                                src={symbolLogo.src}
-                                alt={symbolLogo.alt}
-                                className="h-5 w-5 rounded-full object-contain bg-background"
-                                loading="lazy"
-                              />
-                            )}
+                            {renderSymbolBadge(trade.symbol)}
                             {trade.symbol}
                           </span>
                           <span>!</span>
@@ -575,7 +575,6 @@ export default function AlphaArenaFeed({
                   modelChat.map((entry) => {
                     const isExpanded = expandedChat === entry.id
                     const modelLogo = getModelLogo(entry.account_name || entry.model)
-                    const symbolLogo = getSymbolLogo(entry.symbol || undefined)
                     const isNew = !seenDecisionIds.current.has(entry.id)
                     if (!seenDecisionIds.current.has(entry.id)) {
                       seenDecisionIds.current.add(entry.id)
@@ -621,14 +620,7 @@ export default function AlphaArenaFeed({
                         <div className="text-sm font-medium text-foreground">
                           {(entry.operation || 'UNKNOWN').toUpperCase()} {entry.symbol && (
                             <span className="inline-flex items-center gap-1">
-                              {symbolLogo && (
-                                <img
-                                  src={symbolLogo.src}
-                                  alt={symbolLogo.alt}
-                                  className="h-4 w-4 rounded-full object-contain bg-background"
-                                  loading="lazy"
-                                />
-                              )}
+                              {renderSymbolBadge(entry.symbol, 'sm')}
                               {entry.symbol}
                             </span>
                           )}
@@ -796,7 +788,6 @@ export default function AlphaArenaFeed({
                             </thead>
                             <tbody className="divide-y divide-border text-xs text-muted-foreground">
                               {snapshot.positions.map((position, idx) => {
-                                const symbolLogo = getSymbolLogo(position.symbol)
                                 const leverageLabel =
                                   position.leverage && position.leverage > 0
                                     ? `${position.leverage.toFixed(2)}x`
@@ -817,14 +808,7 @@ export default function AlphaArenaFeed({
                                     <td className="px-4 py-2 font-semibold text-foreground">{position.side}</td>
                                     <td className="px-4 py-2">
                                       <div className="flex items-center gap-2 font-semibold text-foreground">
-                                        {symbolLogo && (
-                                          <img
-                                            src={symbolLogo.src}
-                                            alt={symbolLogo.alt}
-                                            className="h-4 w-4 rounded-full object-contain bg-background"
-                                            loading="lazy"
-                                          />
-                                        )}
+                                        {renderSymbolBadge(position.symbol, 'sm')}
                                         {position.symbol}
                                       </div>
                                       <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{position.market}</div>

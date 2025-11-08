@@ -64,11 +64,18 @@ class SystemLogCollector:
         # 通知所有监听器
         self._notify_listeners(entry)
 
+    _LEVEL_ORDER = {
+        "INFO": 1,
+        "WARNING": 2,
+        "ERROR": 3,
+    }
+
     def get_logs(
         self,
         level: Optional[str] = None,
         category: Optional[str] = None,
-        limit: int = 100
+        limit: int = 100,
+        min_level: Optional[str] = None,
     ) -> List[Dict]:
         """
         获取日志列表
@@ -90,6 +97,13 @@ class SystemLogCollector:
         # 过滤
         if level:
             logs = [log for log in logs if log.level == level]
+        elif min_level:
+            threshold = self._LEVEL_ORDER.get(min_level.upper(), 1)
+            logs = [
+                log for log in logs
+                if self._LEVEL_ORDER.get(log.level.upper(), 1) >= threshold
+            ]
+
         if category:
             logs = [log for log in logs if log.category == category]
 

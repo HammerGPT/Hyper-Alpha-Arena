@@ -19,7 +19,7 @@ import {
   formatPnl,
   formatLeverage,
 } from '@/lib/hyperliquidApi';
-import type { HyperliquidPosition, PositionDisplay } from '@/lib/types/hyperliquid';
+import type { PositionDisplay } from '@/lib/types/hyperliquid';
 import { cn } from '@/lib/utils';
 
 interface PositionsTableProps {
@@ -45,6 +45,7 @@ export default function PositionsTable({
   const [loading, setLoading] = useState(false);
   const [closingPositionId, setClosingPositionId] = useState<string | null>(null);
   const [totalPnl, setTotalPnl] = useState(0);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
   useEffect(() => {
     loadPositions();
@@ -59,9 +60,8 @@ export default function PositionsTable({
     try {
       setLoading(true);
       const data = await getHyperliquidPositions(accountId);
-
       // Transform positions to display format
-      const displayPositions: PositionDisplay[] = data.map((pos) => {
+      const displayPositions: PositionDisplay[] = data.positions.map((pos) => {
         const side = getPositionSide(pos.szi);
         const sizeAbs = Math.abs(pos.szi);
         const positionValue = pos.positionValue || 0;
@@ -89,6 +89,7 @@ export default function PositionsTable({
       });
 
       setPositions(displayPositions);
+      setLastUpdated(data.cachedAt ?? null);
 
       // Calculate total PnL
       const total = displayPositions.reduce((sum, pos) => sum + pos.unrealizedPnl, 0);
@@ -148,6 +149,11 @@ export default function PositionsTable({
               {pnlFormatted.icon} ${pnlFormatted.value}
             </p>
           </div>
+          {lastUpdated && (
+            <div className="text-xs text-gray-400 text-right">
+              Last update: {new Date(lastUpdated).toLocaleTimeString()}
+            </div>
+          )}
 
           {showRefreshButton && (
             <Button
