@@ -39,8 +39,6 @@ services:
       - ./logs:/app/logs
       # Mount data for encryption key persistence
       - app_data:/app/data
-      # Preserve built static files in container
-      - /app/backend/static
     restart: unless-stopped
 
 volumes:

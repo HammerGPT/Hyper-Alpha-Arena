@@ -10,6 +10,8 @@
 
 Hyper Alpha Arena is a production-ready AI trading platform where Large Language Models (LLMs) autonomously execute cryptocurrency trading strategies. Inspired by [nof1 Alpha Arena](https://nof1.ai), this platform enables AI models like GPT-5, Claude, and Deepseek to make intelligent trading decisions based on real-time market data and execute trades automatically.
 
+**Official Website:** https://www.akooi.com/
+
 **Trading Modes:**
 - **Paper Trading**: Risk-free simulation with real market data for strategy development and testing
 - **Hyperliquid Perpetual Contracts**: Real trading on decentralized perpetual exchange with 1-50x leverage support
@@ -82,9 +84,9 @@ git clone https://github.com/HammerGPT/Hyper-Alpha-Arena.git
 cd Hyper-Alpha-Arena
 
 # Start the application (choose one command based on your Docker version)
-docker compose up -d        # For newer Docker Desktop (recommended)
+docker compose up -d --build        # For newer Docker Desktop (recommended)
 # OR
-docker-compose up -d       # For older Docker versions or standalone docker-compose
+docker-compose up -d --build       # For older Docker versions or standalone docker-compose
 ```
 
 The application will be available at **http://localhost:8802**
@@ -123,7 +125,7 @@ Due to significant database schema changes (wallet address tracking for multi-mo
 # ⚠️ This will delete all historical data
 docker-compose down -v
 git pull origin main
-docker-compose up -d
+docker-compose up -d --build
 ```
 
 **Why clean installation?**
@@ -317,7 +319,7 @@ The platform automatically handles model-specific configurations and parameter d
 **Solution**:
 ```bash
 docker-compose down
-docker-compose up -d
+docker-compose up -d --build
 ```
 
 **Problem**: Cannot connect to Docker daemon
@@ -330,7 +332,7 @@ docker-compose up -d
 **Solution**:
 ```bash
 docker-compose down -v  # This will delete all data!
-docker-compose up -d
+docker-compose up -d --build
 ```
 
 ## Contributing
