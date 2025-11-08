@@ -370,7 +370,7 @@ Please star and fork this repository to stay updated with development progress.
   <img src="https://github.com/user-attachments/assets/82f748a0-2d2f-412d-9eb8-f46f543688d5" alt="Heliki AI Community" width="400"/>
 </div>
 
-**🌐 Official Website**: [https://www.heliki.com/](https://www.heliki.com/)
+**🌐 Official Website**: [https://www.akooi.com/](https://www.akooi.com/)
 
 **🐦 Contact me on Twitter/X**: [@GptHammer3309](https://x.com/GptHammer3309)
 - Latest updates on Hyper Alpha Arena development
