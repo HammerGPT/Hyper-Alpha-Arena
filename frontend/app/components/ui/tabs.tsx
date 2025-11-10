@@ -48,7 +48,7 @@ export function Tabs({ defaultValue, value, onValueChange, children, className }
 
   return (
     <TabsContext.Provider value={{ activeTab, setActiveTab }}>
-      <div className={cn('w-full h-full flex flex-col', className)}>
+      <div className={cn('w-full h-full flex flex-col min-h-0', className)}>
         {children}
       </div>
     </TabsContext.Provider>
@@ -87,7 +87,7 @@ export function TabsContent({ value, children, className }: TabsContentProps) {
   if (activeTab !== value) return null
 
   return (
-    <div className={cn('flex flex-col ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2', className)}>
+    <div className={cn('flex flex-col ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 min-h-0', className)}>
       {children}
     </div>
   )

@@ -435,7 +435,7 @@ function App() {
 
         {currentPage === 'comprehensive' && (
           tradingMode === 'paper' ? (
-            <div className="flex flex-col flex-1 h-0 overflow-y-auto pr-1">
+            <div className="flex flex-col flex-1 min-h-0 overflow-hidden pr-1">
               <ComprehensiveView
                 overview={effectiveOverview}
                 positions={positions}

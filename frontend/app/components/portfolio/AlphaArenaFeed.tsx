@@ -431,7 +431,7 @@ export default function AlphaArenaFeed({
     !!expandedSections[`${entryId}-${section}`]
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="flex flex-col flex-1 min-h-0">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Filter</span>
