@@ -33,8 +33,34 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      # Mount backend code for development (excluding static files)
-      - ./backend:/app/backend:delegated
+      # ========== Selective Backend Mounts for Hot Reload ==========
+      # Mount individual directories and files to enable hot reload while preserving
+      # the built frontend static files in the container image.
+      #
+      # IMPORTANT: Do NOT mount ./backend:/app/backend as it will override the
+      # /app/backend/static directory that contains the built frontend files,
+      # causing "Frontend not built yet" errors.
+      #
+      # If you add new directories or important Python files under backend/,
+      # remember to add corresponding volume mounts here to enable hot reload.
+
+      # Backend subdirectories
+      - ./backend/api:/app/backend/api
+      - ./backend/config:/app/backend/config
+      - ./backend/database:/app/backend/database
+      - ./backend/factors:/app/backend/factors
+      - ./backend/repositories:/app/backend/repositories
+      - ./backend/schemas:/app/backend/schemas
+      - ./backend/services:/app/backend/services
+      - ./backend/utils:/app/backend/utils
+
+      # Backend root files (frequently modified during development)
+      - ./backend/main.py:/app/backend/main.py
+      - ./backend/models.py:/app/backend/models.py
+
+      # DO NOT mount ./backend/static - it must remain from the Docker image build
+      # ===============================================================
+
       # Mount logs
       - ./logs:/app/logs
       # Mount data for encryption key persistence

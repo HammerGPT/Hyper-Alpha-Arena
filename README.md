@@ -335,6 +335,20 @@ docker-compose down -v  # This will delete all data!
 docker-compose up -d --build
 ```
 
+### For Developers
+
+**Hot Reload Configuration**: The project uses selective volume mounting in `docker-compose.yml` to enable Python code hot reload while preserving built frontend static files.
+
+If you add new directories or important Python files under `backend/`, you need to update the `volumes` section in `docker-compose.yml` to enable hot reload for those new files. For example:
+
+```yaml
+volumes:
+  - ./backend/your_new_directory:/app/backend/your_new_directory
+  - ./backend/your_new_file.py:/app/backend/your_new_file.py
+```
+
+**IMPORTANT**: Never mount the entire `./backend` directory or the `./backend/static` directory, as this will override the built frontend files and cause "Frontend not built yet" errors.
+
 ## Contributing
 
 We welcome contributions from the community! Here are ways you can help:
