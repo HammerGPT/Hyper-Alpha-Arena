@@ -970,7 +970,10 @@ async def trigger_ai_trade(
                 print(f"[DEBUG] Calling place_ai_driven_hyperliquid_order for account {account_id}")
                 # Note: place_ai_driven_hyperliquid_order doesn't support samples override yet
                 # TODO: Add samples support for forced operations in Hyperliquid trading
-                place_ai_driven_hyperliquid_order(account_id=account_id)
+                place_ai_driven_hyperliquid_order(
+                    account_id=account_id,
+                    bypass_auto_trading=True,
+                )
                 print(f"[DEBUG] place_ai_driven_hyperliquid_order completed for account {account_id}")
             except Exception as hyperliquid_err:
                 print(f"[DEBUG] Error in Hyperliquid trading: {hyperliquid_err}")

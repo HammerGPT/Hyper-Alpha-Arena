@@ -435,22 +435,24 @@ function App() {
 
         {currentPage === 'comprehensive' && (
           tradingMode === 'paper' ? (
-            <ComprehensiveView
-              overview={effectiveOverview}
-              positions={positions}
-              orders={orders}
-              trades={trades}
-              aiDecisions={aiDecisions}
-              allAssetCurves={allAssetCurves}
-              wsRef={wsRef}
-              onSwitchUser={switchUser}
-              onSwitchAccount={switchAccount}
-              onRefreshData={refreshData}
-              accountRefreshTrigger={accountRefreshTrigger}
-              accounts={accounts}
-              loadingAccounts={accountsLoading}
-              onPageChange={setCurrentPage}
-            />
+            <div className="h-full overflow-y-auto pr-1">
+              <ComprehensiveView
+                overview={effectiveOverview}
+                positions={positions}
+                orders={orders}
+                trades={trades}
+                aiDecisions={aiDecisions}
+                allAssetCurves={allAssetCurves}
+                wsRef={wsRef}
+                onSwitchUser={switchUser}
+                onSwitchAccount={switchAccount}
+                onRefreshData={refreshData}
+                accountRefreshTrigger={accountRefreshTrigger}
+                accounts={accounts}
+                loadingAccounts={accountsLoading}
+                onPageChange={setCurrentPage}
+              />
+            </div>
           ) : (
             <HyperliquidView
               wsRef={wsRef}

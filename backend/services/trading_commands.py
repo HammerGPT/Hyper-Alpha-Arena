@@ -417,7 +417,11 @@ AI_TRADE_JOB_ID = "ai_crypto_trade"
 def test_hyperliquid_function():
     return "test_success"
 
-def place_ai_driven_hyperliquid_order(account_ids: Optional[Iterable[int]] = None, account_id: Optional[int] = None) -> None:
+def place_ai_driven_hyperliquid_order(
+    account_ids: Optional[Iterable[int]] = None,
+    account_id: Optional[int] = None,
+    bypass_auto_trading: bool = False,
+) -> None:
     """Place Hyperliquid perpetual contract order based on AI decision.
 
     This function handles real trading on Hyperliquid exchange, supporting:
@@ -455,7 +459,13 @@ def place_ai_driven_hyperliquid_order(account_ids: Optional[Iterable[int]] = Non
                 logger.debug(f"Account {account_id} does not have Hyperliquid enabled")
                 return
 
-            # For manual trigger, bypass auto_trading_enabled check
+            if not bypass_auto_trading and getattr(account, "auto_trading_enabled", "false") != "true":
+                logger.debug(
+                    "Account %s auto trading disabled - skipping Hyperliquid AI order",
+                    account_id,
+                )
+                return
+
             accounts = [account]
         else:
             # Get all active accounts with Hyperliquid enabled
