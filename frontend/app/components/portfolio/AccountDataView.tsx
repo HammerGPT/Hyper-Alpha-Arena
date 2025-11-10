@@ -481,8 +481,8 @@ export default function AccountDataView(props: AccountDataViewProps) {
           {/* Tabs and Strategy Panel */}
           <div className={`${showAssetCurves ? 'col-span-2' : 'col-span-1'} overflow-hidden flex flex-col min-h-0`}>
           {/* Content Area */}
-          <div className={`flex-1 h-0 overflow-hidden ${showStrategyPanel ? 'grid grid-cols-4 gap-4' : ''}`}>
-            <div className={`${showStrategyPanel ? 'col-span-3' : 'col-span-1'} h-full overflow-hidden flex flex-col border border-border rounded-lg bg-card shadow-sm px-4 py-3 gap-4`}>
+          <div className={`flex-1 h-0 min-h-0 overflow-hidden ${showStrategyPanel ? 'grid grid-cols-4 gap-4' : ''}`}>
+            <div className={`${showStrategyPanel ? 'col-span-3' : 'col-span-1'} flex flex-col flex-1 min-h-0 overflow-hidden border border-border rounded-lg bg-card shadow-sm px-4 py-3 gap-4`}>
               {showAssetCurves ? (
                 <AlphaArenaFeed
                   refreshKey={accountRefreshTrigger}
