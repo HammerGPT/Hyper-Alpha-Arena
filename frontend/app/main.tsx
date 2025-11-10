@@ -431,11 +431,11 @@ function App() {
     }
 
     return (
-      <main className="flex-1 p-4 overflow-hidden">
+      <main className="flex-1 p-4 overflow-hidden flex flex-col min-h-0">
 
         {currentPage === 'comprehensive' && (
           tradingMode === 'paper' ? (
-            <div className="h-full overflow-y-auto pr-1">
+            <div className="flex flex-col flex-1 h-0 overflow-y-auto pr-1">
               <ComprehensiveView
                 overview={effectiveOverview}
                 positions={positions}
@@ -454,10 +454,12 @@ function App() {
               />
             </div>
           ) : (
-            <HyperliquidView
-              wsRef={wsRef}
-              refreshKey={hyperliquidRefreshKey}
-            />
+            <div className="flex flex-col flex-1 min-h-0">
+              <HyperliquidView
+                wsRef={wsRef}
+                refreshKey={hyperliquidRefreshKey}
+              />
+            </div>
           )
         )}
 
