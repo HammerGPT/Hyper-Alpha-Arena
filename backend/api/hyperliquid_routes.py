@@ -574,6 +574,62 @@ async def get_action_summary(
         raise HTTPException(status_code=500, detail="Failed to summarize Hyperliquid actions")
 
 
+@router.get("/accounts/{account_id}/rate-limit")
+async def get_account_rate_limit(
+    account_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get API request rate limit status for Hyperliquid account
+
+    Returns the address-based request quota information including:
+    - Cumulative trading volume
+    - Requests used vs cap
+    - Remaining quota
+    - Over-limit status
+
+    This helps users understand if they need to increase trading volume
+    to avoid "Too many requests" errors when placing orders.
+
+    Args:
+        account_id: Account ID
+        db: Database session
+
+    Returns:
+        Rate limit status with usage metrics
+
+    Raises:
+        HTTPException: If account not found or Hyperliquid not enabled
+    """
+    try:
+        # Get Hyperliquid client for this account
+        client = get_hyperliquid_client(db, account_id)
+
+        if not client:
+            raise HTTPException(
+                status_code=400,
+                detail="Hyperliquid trading is not enabled for this account"
+            )
+
+        # Query rate limit status
+        rate_limit = client.get_user_rate_limit(db)
+
+        return {
+            'success': True,
+            'accountId': account_id,
+            'rateLimit': rate_limit
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get rate limit for account {account_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to query rate limit: {str(e)}"
+        )
+
+
 @router.get("/health")
 async def health_check():
     """

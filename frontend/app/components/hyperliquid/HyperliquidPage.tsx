@@ -9,6 +9,7 @@ import BalanceCard from './BalanceCard';
 import PositionsTable from './PositionsTable';
 import OrderForm from './OrderForm';
 import EnvironmentSwitcher from './EnvironmentSwitcher';
+import WalletApiUsage from './WalletApiUsage';
 import { getHyperliquidConfig } from '@/lib/hyperliquidApi';
 import type { HyperliquidEnvironment } from '@/lib/types/hyperliquid';
 
@@ -207,6 +208,11 @@ export default function HyperliquidPage({ accountId }: HyperliquidPageProps) {
               refreshInterval={30}
               onPositionClosed={handlePositionClosed}
             />
+
+          <WalletApiUsage
+            accountId={accountId}
+            environment={config.environment}
+          />
         </TabsContent>
 
         <TabsContent value="trade" className="space-y-6">

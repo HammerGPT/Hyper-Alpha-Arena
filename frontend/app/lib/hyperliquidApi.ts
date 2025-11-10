@@ -290,3 +290,29 @@ export function getRiskLevel(marginPercent: number): 'low' | 'medium' | 'high' {
   if (marginPercent < 75) return 'medium';
   return 'high';
 }
+
+/**
+ * Rate Limit Management
+ */
+export async function getWalletRateLimit(
+  accountId: number
+): Promise<{
+  success: boolean;
+  accountId: number;
+  rateLimit: {
+    cumVlm: number;
+    nRequestsUsed: number;
+    nRequestsCap: number;
+    nRequestsSurplus: number;
+    remaining: number;
+    usagePercent: number;
+    isOverLimit: boolean;
+    environment: string;
+    walletAddress: string;
+  };
+}> {
+  const response = await apiRequest(
+    `${HYPERLIQUID_API_BASE}/accounts/${accountId}/rate-limit`
+  );
+  return response.json();
+}
