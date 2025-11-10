@@ -100,7 +100,7 @@ def _get_bucketed_snapshots(
 def get_all_asset_curves_data_new(
     db: Session,
     timeframe: str = "1h",
-    trading_mode: str = "paper",
+    trading_mode: str = "testnet",
     environment: Optional[str] = None,
     wallet_address: Optional[str] = None,
 ) -> List[Dict]:

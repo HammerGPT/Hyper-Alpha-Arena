@@ -194,7 +194,7 @@ async def broadcast_model_chat_update(decision_data: dict):
 def get_all_asset_curves_data(
     db: Session,
     timeframe: str = "1h",
-    trading_mode: str = "paper",
+    trading_mode: str = "testnet",
     environment: Optional[str] = None,
     wallet_address: Optional[str] = None,
 ):
@@ -888,14 +888,14 @@ async def websocket_endpoint(websocket: WebSocket):
                     await _send_snapshot(db, account_id)
                 elif kind == "get_snapshot":
                     if account_id is not None:
-                        # Get trading mode from request (default to "paper")
-                        trading_mode = msg.get("trading_mode", "paper")
+                        # Get trading mode from request (default to "testnet")
+                        trading_mode = msg.get("trading_mode", "testnet")
                         logging.info(f"Received get_snapshot request: account_id={account_id}, trading_mode={trading_mode}")
                         await _send_snapshot_by_mode(db, account_id, trading_mode)
                 elif kind == "get_asset_curve":
                     # Get asset curve data with specific timeframe and trading mode
                     timeframe = msg.get("timeframe", "1h")
-                    trading_mode = msg.get("trading_mode", "paper")
+                    trading_mode = msg.get("trading_mode", "testnet")
                     environment = msg.get("environment")
                     if timeframe not in ["5m", "1h", "1d"]:
                         await websocket.send_text(json.dumps({"type": "error", "message": "Invalid timeframe. Must be 5m, 1h, or 1d"}))

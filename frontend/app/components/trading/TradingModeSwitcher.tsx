@@ -1,6 +1,6 @@
 /**
  * Trading Mode Switcher Component
- * Allows users to switch between Paper Trading, Testnet, and Mainnet
+ * Allows users to switch between Testnet and Mainnet
  */
 
 import { useTradingMode, TradingMode } from '@/contexts/TradingModeContext';
@@ -9,12 +9,6 @@ export default function TradingModeSwitcher() {
   const { tradingMode, setTradingMode } = useTradingMode();
 
   const modes: { value: TradingMode; label: string; subtitle: string; color: string }[] = [
-    {
-      value: 'paper',
-      label: 'Paper',
-      subtitle: 'Virtual Money',
-      color: 'bg-blue-500 hover:bg-blue-600',
-    },
     {
       value: 'testnet',
       label: 'Testnet',

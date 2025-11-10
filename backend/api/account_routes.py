@@ -16,7 +16,7 @@ from services.asset_curve_calculator import invalidate_asset_curve_cache
 from services.ai_decision_service import build_chat_completion_endpoints, _extract_text_from_message
 from schemas.account import StrategyConfig, StrategyConfigUpdate
 from repositories.strategy_repo import get_strategy_by_account, upsert_strategy
-from services.trading_strategy import paper_strategy_manager, hyper_strategy_manager
+from services.trading_strategy import hyper_strategy_manager
 from services.hyperliquid_cache import get_cached_account_state
 
 logger = logging.getLogger(__name__)
@@ -199,10 +199,11 @@ async def get_account_strategy(account_id: int, db: Session = Depends(get_db)):
             trigger_interval=150,
             enabled=(account.auto_trading_enabled == "true"),
         )
+        # Only reload strategies for Hyperliquid-enabled accounts
         if getattr(account, "hyperliquid_enabled", "false") == "true":
             hyper_strategy_manager._load_strategies()
         else:
-            paper_strategy_manager._load_strategies()
+            logger.warning(f"Account {account_id} is not Hyperliquid-enabled, strategy will not be loaded")
 
     return _serialize_strategy(account, strategy)
 
@@ -253,10 +254,11 @@ async def update_account_strategy(
         enabled=payload.enabled,
     )
 
+    # Only reload strategies for Hyperliquid-enabled accounts
     if getattr(account, "hyperliquid_enabled", "false") == "true":
         hyper_strategy_manager._load_strategies()
     else:
-        paper_strategy_manager._load_strategies()
+        logger.warning(f"Account {account_id} is not Hyperliquid-enabled, strategy will not be loaded")
     return _serialize_strategy(account, strategy)
 
 
@@ -496,7 +498,7 @@ async def update_account_settings(account_id: int, payload: dict, db: Session = 
 @router.get("/asset-curve")
 async def get_asset_curve(
     timeframe: str = "5m",
-    trading_mode: str = "paper",
+    trading_mode: str = "testnet",
     environment: Optional[str] = None,
     wallet_address: Optional[str] = None,
     db: Session = Depends(get_db)

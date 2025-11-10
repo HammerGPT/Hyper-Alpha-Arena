@@ -210,18 +210,15 @@ class StrategyManager:
                 hyperliquid_enabled = getattr(account, 'hyperliquid_enabled', 'false') == 'true'
                 logger.info(f"Account {account_id} hyperliquid_enabled check: {getattr(account, 'hyperliquid_enabled', 'false')} -> {hyperliquid_enabled}")
 
-            # Execute AI trading decision based on account configuration
-            if hyperliquid_enabled:
-                logger.info(f"Account {account_id} has Hyperliquid enabled, using real trading")
-                from services.trading_commands import place_ai_driven_hyperliquid_order
-                place_ai_driven_hyperliquid_order(account_id=account_id)
-            else:
-                logger.info(f"Account {account_id} using paper trading")
-                place_ai_driven_crypto_order(
-                    account_id=account_id,
-                    symbol=symbol,
-                    samples=samples
-                )
+                # Only execute for Hyperliquid-enabled accounts
+                if not hyperliquid_enabled:
+                    logger.warning(f"Account {account_id} is not Hyperliquid-enabled, skipping strategy execution")
+                    return
+
+            # Execute AI trading decision for Hyperliquid account
+            logger.info(f"Account {account_id} executing Hyperliquid trading")
+            from services.trading_commands import place_ai_driven_hyperliquid_order
+            place_ai_driven_hyperliquid_order(account_id=account_id)
 
             # Update last trigger time
             state.last_trigger_at = event_time
@@ -333,20 +330,17 @@ class HyperliquidStrategyManager(StrategyManager):
             state.running = False
 
 
-# Global strategy manager instance
-paper_strategy_manager = StrategyManager()
+# Global strategy manager instance (Hyperliquid only)
 hyper_strategy_manager = HyperliquidStrategyManager()
 
 
 def start_strategy_manager():
     """Start the global strategy manager"""
-    paper_strategy_manager.start()
     hyper_strategy_manager.start()
 
 
 def stop_strategy_manager():
     """Stop the global strategy manager"""
-    paper_strategy_manager.stop()
     hyper_strategy_manager.stop()
 
 
@@ -357,8 +351,7 @@ def handle_price_update(symbol: str, price: float, event_time: Optional[datetime
 
     print(f"Global handle_price_update called: {symbol} = {price}")
 
-    # Use strategy manager for proper trigger logic (price change + time interval)
-    paper_strategy_manager.handle_price_update(symbol, price, event_time)
+    # Use Hyperliquid strategy manager only
     hyper_strategy_manager.handle_price_update(symbol, price, event_time)
 
 
@@ -391,7 +384,6 @@ def _execute_strategy_direct(account_id: int, symbol: str, event_time: datetime,
 def get_strategy_status() -> Dict[str, Any]:
     """Get strategy manager status"""
     status = {
-        "paper": paper_strategy_manager.get_strategy_status(),
         "hyperliquid": hyper_strategy_manager.get_strategy_status(),
     }
     return status

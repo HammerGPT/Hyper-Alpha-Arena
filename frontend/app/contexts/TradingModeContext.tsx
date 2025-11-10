@@ -1,13 +1,13 @@
 /**
  * Global Trading Mode Context
- * Manages trading mode state (paper/testnet/mainnet) across the application
+ * Manages trading mode state (testnet/mainnet) across the application
  */
 
 'use client';
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
-export type TradingMode = 'paper' | 'testnet' | 'mainnet';
+export type TradingMode = 'testnet' | 'mainnet';
 
 interface TradingModeContextType {
   tradingMode: TradingMode;
@@ -19,9 +19,9 @@ const TradingModeContext = createContext<TradingModeContextType | undefined>(und
 export function TradingModeProvider({ children }: { children: ReactNode }) {
   // Load from localStorage synchronously on initialization
   const getInitialMode = (): TradingMode => {
-    if (typeof window === 'undefined') return 'paper';
+    if (typeof window === 'undefined') return 'testnet';
     const saved = localStorage.getItem('trading_mode');
-    return (saved === 'paper' || saved === 'testnet' || saved === 'mainnet') ? saved : 'paper';
+    return (saved === 'testnet' || saved === 'mainnet') ? saved : 'testnet';
   };
 
   const [tradingMode, setTradingModeState] = useState<TradingMode>(getInitialMode);

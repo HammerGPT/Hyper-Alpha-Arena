@@ -411,7 +411,7 @@ def _build_prompt_context(
     output_symbol_choices = "|".join(ordered_symbols) if ordered_symbols else "SYMBOL"
 
     hyperliquid_enabled = getattr(account, "hyperliquid_enabled", "false") == "true"
-    environment = getattr(account, "hyperliquid_environment", "paper") or "paper"
+    environment = getattr(account, "hyperliquid_environment", "testnet") or "testnet"
 
     if hyperliquid_enabled and environment in ("testnet", "mainnet"):
         if not hyperliquid_state:
