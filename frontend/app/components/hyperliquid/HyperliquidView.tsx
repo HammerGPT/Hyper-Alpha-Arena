@@ -77,7 +77,7 @@ export default function HyperliquidView({ wsRef, refreshKey = 0 }: HyperliquidVi
 
       {/* Right Panel - Feed */}
       <div className="col-span-2 flex flex-col min-h-0">
-        <div className="flex-1 min-h-0 border border-border rounded-lg bg-card shadow-sm px-4 py-3">
+        <div className="flex-1 min-h-0 border border-border rounded-lg bg-card shadow-sm px-4 py-3 flex flex-col">
           <AlphaArenaFeed wsRef={wsRef} walletAddress={walletAddress} />
         </div>
       </div>
