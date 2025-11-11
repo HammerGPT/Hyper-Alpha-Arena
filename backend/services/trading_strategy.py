@@ -183,29 +183,18 @@ class StrategyManager:
 
     def _execute_strategy(self, account_id: int, symbol: str, event_time: datetime):
         """Execute strategy for account"""
-        print(f"[DEBUG BASE] _execute_strategy called: account_id={account_id}, symbol={symbol}")
-
         state = self.strategies.get(account_id)
-        print(f"[DEBUG BASE] state lookup result: {state is not None}, strategies count: {len(self.strategies)}")
-
         if not state:
-            print(f"[DEBUG BASE] No state found for account {account_id}, returning early")
             return
 
-        print(f"[DEBUG BASE] Acquiring lock for account {account_id}")
         with state.lock:
-            print(f"[DEBUG BASE] Lock acquired, checking running status: {state.running}")
             if state.running:
-                print(f"[DEBUG BASE] Account {account_id} already running, skipping")
                 logger.debug(f"Strategy for account {account_id} already running, skipping")
                 return
 
             state.running = True
-            print(f"[DEBUG BASE] Set running=True for account {account_id}")
 
-        print(f"[DEBUG BASE] Starting try block for account {account_id}")
         try:
-            print(f"[DEBUG BASE] About to execute Hyperliquid order for account {account_id}")
             logger.info(f"Executing strategy for account {account_id}, symbol {symbol}")
 
             # Get sampling data for AI decision
@@ -294,47 +283,27 @@ class HyperliquidStrategyManager(StrategyManager):
 
     def _execute_strategy(self, account_id: int, symbol: str, event_time: datetime):
         """Execute strategy for Hyperliquid account"""
-        print(f"[DEBUG] _execute_strategy called: account_id={account_id}, symbol={symbol}")
-
         state = self.strategies.get(account_id)
-        print(f"[DEBUG] state lookup result: {state is not None}, strategies count: {len(self.strategies)}")
-
         if not state:
-            print(f"[DEBUG] No state found for account {account_id}, returning early")
             return
 
-        print(f"[DEBUG] Acquiring lock for account {account_id}")
         with state.lock:
-            print(f"[DEBUG] Lock acquired, checking running status: {state.running}")
             if state.running:
-                print(f"[DEBUG] Account {account_id} already running, skipping")
                 logger.debug(f"[HyperliquidStrategy] Account {account_id} already running, skipping")
                 return
             state.running = True
-            print(f"[DEBUG] Set running=True for account {account_id}")
 
-        print(f"[DEBUG] Starting try block for account {account_id}")
         try:
-            print(f"[DEBUG] About to execute Hyperliquid order for account {account_id}")
             logger.info(f"[HyperliquidStrategy] Executing strategy for account {account_id}, symbol {symbol}")
 
-            print(f"[DEBUG] Opening database session for account check")
             with SessionLocal() as db:
-                print(f"[DEBUG] Database session opened, querying account {account_id}")
                 account = db.query(Account).filter(Account.id == account_id).first()
-                print(f"[DEBUG] Account query result: account={'found' if account else 'NOT FOUND'}")
-                if account:
-                    print(f"[DEBUG] Account auto_trading_enabled: {account.auto_trading_enabled}")
                 if not account or account.auto_trading_enabled != "true":
-                    print(f"[DEBUG] Account check failed, returning early")
                     logger.debug(f"[HyperliquidStrategy] Account {account_id} auto trading disabled, skipping")
                     return
-                print(f"[DEBUG] Account check passed, proceeding to trading")
 
             # Execute Hyperliquid trading decision
-            print(f"[DEBUG] Calling place_ai_driven_hyperliquid_order for account {account_id}")
             place_ai_driven_hyperliquid_order(account_id=account_id)
-            print(f"[DEBUG] place_ai_driven_hyperliquid_order returned successfully")
 
             # Update in-memory timestamp
             state.last_trigger_at = event_time
