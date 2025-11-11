@@ -10,7 +10,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Trash2, Plus, Pencil } from 'lucide-react'
-import { 
+import {
   getAccounts as getAccounts,
   createAccount as createAccount,
   updateAccount as updateAccount,
@@ -19,6 +19,7 @@ import {
   type TradingAccountCreate,
   type TradingAccountUpdate
 } from '@/lib/api'
+import WalletConfigPanel from '@/components/trader/WalletConfigPanel'
 
 interface SettingsDialogProps {
   open: boolean
@@ -347,7 +348,7 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
                 )}
 
                 {accounts.map((account) => (
-                  <div key={account.id} className="border rounded-lg p-4">
+                  <div key={account.id} className="border rounded-lg p-4 space-y-4">
                     {editingId === account.id ? (
                       <div className="space-y-3">
                         <div className="grid grid-cols-2 gap-3">
@@ -384,8 +385,8 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
                         </label>
                         {testResult && (
                           <div className={`text-xs p-2 rounded ${
-                            testResult.includes('❌') 
-                              ? 'bg-red-50 text-red-700 border border-red-200' 
+                            testResult.includes('❌')
+                              ? 'bg-red-50 text-red-700 border border-red-200'
                               : 'bg-green-50 text-green-700 border border-green-200'
                           }`}>
                             {testResult}
@@ -401,48 +402,57 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
                         </div>
                       </div>
                     ) : (
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="space-y-1 flex-1">
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="font-medium">{account.name}</div>
-                            <label className="flex items-center gap-2 text-xs text-muted-foreground whitespace-nowrap">
-                              <input
-                                type="checkbox"
-                                className="h-4 w-4"
-                                checked={account.auto_trading_enabled ?? true}
-                                disabled={toggleLoadingId === account.id || loading}
-                                onChange={(e) => handleToggleAutoTrading(account, e.target.checked)}
-                              />
-                              <span>Start Trading</span>
-                            </label>
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {account.model ? `Model: ${account.model}` : 'No model configured'}
-                          </div>
-                          {account.base_url && (
-                            <div className="text-xs text-muted-foreground truncate">
-                              Base URL: {account.base_url}
+                      <>
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="space-y-1 flex-1">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="font-medium">{account.name}</div>
+                              <label className="flex items-center gap-2 text-xs text-muted-foreground whitespace-nowrap">
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4"
+                                  checked={account.auto_trading_enabled ?? true}
+                                  disabled={toggleLoadingId === account.id || loading}
+                                  onChange={(e) => handleToggleAutoTrading(account, e.target.checked)}
+                                />
+                                <span>Start Trading</span>
+                              </label>
                             </div>
-                          )}
-                          {account.api_key && (
-                            <div className="text-xs text-muted-foreground truncate max-w-full">
-                              API Key: {'*'.repeat(Math.min(20, Math.max(0, (account.api_key?.length || 0) - 4)))}{account.api_key?.slice(-4) || '****'}
+                            <div className="text-xs text-muted-foreground">
+                              {account.model ? `Model: ${account.model}` : 'No model configured'}
                             </div>
-                          )}
-                          <div className="text-xs text-muted-foreground">
-                            Cash: ${account.current_cash?.toLocaleString() || '0'}
+                            {account.base_url && (
+                              <div className="text-xs text-muted-foreground truncate">
+                                Base URL: {account.base_url}
+                              </div>
+                            )}
+                            {account.api_key && (
+                              <div className="text-xs text-muted-foreground truncate max-w-full">
+                                API Key: {'*'.repeat(Math.min(20, Math.max(0, (account.api_key?.length || 0) - 4)))}{account.api_key?.slice(-4) || '****'}
+                              </div>
+                            )}
+                            <div className="text-xs text-muted-foreground">
+                              Cash: ${account.current_cash?.toLocaleString() || '0'}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              onClick={() => startEdit(account)}
+                              variant="outline"
+                              size="sm"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            onClick={() => startEdit(account)}
-                            variant="outline"
-                            size="sm"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
+
+                        {/* Wallet Configuration Panel */}
+                        <WalletConfigPanel
+                          accountId={account.id}
+                          accountName={account.name}
+                          onWalletConfigured={loadAccounts}
+                        />
+                      </>
                     )}
                   </div>
                 ))}

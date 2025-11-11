@@ -316,3 +316,126 @@ export async function getWalletRateLimit(
   );
   return response.json();
 }
+
+/**
+ * Wallet Management (Multi-Wallet Architecture)
+ */
+
+export interface WalletConfig {
+  id: number;
+  walletAddress: string;
+  maxLeverage: number;
+  defaultLeverage: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WalletConfigRequest {
+  privateKey: string;
+  maxLeverage: number;
+  defaultLeverage: number;
+}
+
+export interface WalletInfo {
+  success: boolean;
+  configured: boolean;
+  accountId: number;
+  accountName: string;
+  wallet?: WalletConfig;
+  globalTradingMode?: string;
+  balance?: {
+    totalEquity: number;
+    availableBalance: number;
+    marginUsagePercent: number;
+  };
+}
+
+export async function getAccountWallet(accountId: number): Promise<WalletInfo> {
+  const response = await apiRequest(
+    `${HYPERLIQUID_API_BASE}/accounts/${accountId}/wallet`
+  );
+  return response.json();
+}
+
+export async function configureAccountWallet(
+  accountId: number,
+  config: WalletConfigRequest
+): Promise<{ success: boolean; walletId: number; walletAddress: string; message: string }> {
+  const response = await apiRequest(
+    `${HYPERLIQUID_API_BASE}/accounts/${accountId}/wallet`,
+    {
+      method: 'POST',
+      body: JSON.stringify(config),
+    }
+  );
+  return response.json();
+}
+
+export async function deleteAccountWallet(
+  accountId: number
+): Promise<{ success: boolean; message: string }> {
+  const response = await apiRequest(
+    `${HYPERLIQUID_API_BASE}/accounts/${accountId}/wallet`,
+    {
+      method: 'DELETE',
+    }
+  );
+  return response.json();
+}
+
+export async function testWalletConnection(
+  accountId: number
+): Promise<{
+  success: boolean;
+  accountId: number;
+  accountName: string;
+  environment: string;
+  walletAddress?: string;
+  connection: string;
+  accountState?: {
+    totalEquity: number;
+    availableBalance: number;
+    marginUsage: number;
+  };
+  error?: string;
+}> {
+  const response = await apiRequest(
+    `${HYPERLIQUID_API_BASE}/accounts/${accountId}/wallet/test`,
+    {
+      method: 'POST',
+    }
+  );
+  return response.json();
+}
+
+/**
+ * Global Trading Mode Management
+ */
+
+export interface TradingModeInfo {
+  success: boolean;
+  mode: 'testnet' | 'mainnet';
+  description: string;
+}
+
+export async function getGlobalTradingMode(): Promise<TradingModeInfo> {
+  const response = await apiRequest(`${HYPERLIQUID_API_BASE}/trading-mode`);
+  return response.json();
+}
+
+export async function setGlobalTradingMode(
+  mode: 'testnet' | 'mainnet'
+): Promise<{
+  success: boolean;
+  mode: string;
+  changed: boolean;
+  oldMode?: string;
+  message: string;
+}> {
+  const response = await apiRequest(`${HYPERLIQUID_API_BASE}/trading-mode`, {
+    method: 'POST',
+    body: JSON.stringify({ mode }),
+  });
+  return response.json();
+}

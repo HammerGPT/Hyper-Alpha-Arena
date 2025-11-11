@@ -10,6 +10,7 @@ import PositionsTable from './PositionsTable';
 import OrderForm from './OrderForm';
 import EnvironmentSwitcher from './EnvironmentSwitcher';
 import WalletApiUsage from './WalletApiUsage';
+import TradingModeSwitch from './TradingModeSwitch';
 import { getHyperliquidConfig } from '@/lib/hyperliquidApi';
 import type { HyperliquidEnvironment } from '@/lib/types/hyperliquid';
 
@@ -251,6 +252,7 @@ export default function HyperliquidPage({ accountId }: HyperliquidPageProps) {
         </TabsContent>
 
         <TabsContent value="settings" className="space-y-6">
+          <TradingModeSwitch />
           <ConfigPanel accountId={accountId} onConfigUpdated={handleConfigUpdated} />
         </TabsContent>
       </Tabs>
