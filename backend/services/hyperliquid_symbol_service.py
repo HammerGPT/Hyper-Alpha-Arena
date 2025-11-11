@@ -98,6 +98,16 @@ def _serialize_symbols(symbols: List[Dict[str, str]]) -> str:
     return json.dumps(sanitized)
 
 
+def _validate_symbol_tradability(symbol: str) -> bool:
+    """Test if a symbol can actually fetch price data (i.e., is tradable)."""
+    try:
+        from services.hyperliquid_market_data import hyperliquid_client
+        price = hyperliquid_client.get_last_price(symbol)
+        return price is not None and price > 0
+    except Exception:
+        return False
+
+
 def fetch_remote_symbols(environment: str = "testnet") -> List[Dict[str, str]]:
     """Call Hyperliquid meta endpoint to retrieve tradable universe."""
     url = META_ENDPOINTS.get(environment, META_ENDPOINTS["testnet"])
@@ -112,6 +122,8 @@ def fetch_remote_symbols(environment: str = "testnet") -> List[Dict[str, str]]:
 
     results: List[Dict[str, str]] = []
     seen = set()
+    invalid_count = 0
+
     for entry in universe:
         if not isinstance(entry, dict):
             continue
@@ -122,6 +134,13 @@ def fetch_remote_symbols(environment: str = "testnet") -> List[Dict[str, str]]:
         if symbol in seen:
             continue
         seen.add(symbol)
+
+        # Validate symbol is actually tradable
+        if not _validate_symbol_tradability(symbol):
+            logger.debug(f"Symbol {symbol} not tradable, skipping")
+            invalid_count += 1
+            continue
+
         results.append(
             {
                 "symbol": symbol,
@@ -129,6 +148,10 @@ def fetch_remote_symbols(environment: str = "testnet") -> List[Dict[str, str]]:
                 "type": entry.get("type") or entry.get("szType") or entry.get("assetType"),
             }
         )
+
+    if invalid_count > 0:
+        logger.info(f"Filtered out {invalid_count} non-tradable symbols from meta API")
+
     return results
 
 
