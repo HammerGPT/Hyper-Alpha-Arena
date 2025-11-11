@@ -660,6 +660,7 @@ class WalletConfigRequest(BaseModel):
     private_key: str = Field(..., min_length=64, max_length=66, description="Hyperliquid private key (0x...)", alias="privateKey")
     max_leverage: int = Field(3, ge=1, le=50, description="Maximum allowed leverage", alias="maxLeverage")
     default_leverage: int = Field(1, ge=1, le=50, description="Default leverage", alias="defaultLeverage")
+    environment: str = Field("testnet", description="Trading environment: testnet or mainnet")
 
     class Config:
         populate_by_name = True
@@ -682,9 +683,9 @@ async def get_account_wallet(
     db: Session = Depends(get_db)
 ):
     """
-    Get wallet configuration for an AI Trader account
+    Get wallet configurations for an AI Trader account (both testnet and mainnet)
 
-    Returns wallet address, leverage settings, and balance information.
+    Returns both testnet and mainnet wallet configurations with balance information.
     """
     from database.models import HyperliquidWallet, Account
     from services.hyperliquid_environment import get_global_trading_mode
@@ -695,58 +696,66 @@ async def get_account_wallet(
         if not account:
             raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
 
-        # Get wallet configuration
-        wallet = db.query(HyperliquidWallet).filter(
+        # Get all wallets for this account (testnet and mainnet)
+        wallets = db.query(HyperliquidWallet).filter(
             HyperliquidWallet.account_id == account_id
-        ).first()
+        ).all()
 
-        if not wallet:
-            return {
-                'success': True,
-                'configured': False,
-                'accountId': account_id,
-                'accountName': account.name,
-                'message': 'No wallet configured for this AI Trader'
-            }
+        # Organize wallets by environment
+        testnet_wallet = None
+        mainnet_wallet = None
 
-        # Get global trading mode
-        trading_mode = get_global_trading_mode(db)
-
-        # Try to get balance from cache or API
-        balance_info = {}
-        try:
-            client = get_hyperliquid_client(db, account_id)
-            account_state = client.get_account_state(db)
-            balance_info = {
-                'totalEquity': float(account_state.get('total_equity', 0)),
-                'availableBalance': float(account_state.get('available_balance', 0)),
-                'marginUsagePercent': float(account_state.get('margin_usage_percent', 0))
-            }
-        except Exception as e:
-            logger.warning(f"Failed to fetch balance for wallet: {e}")
-
-        return {
-            'success': True,
-            'configured': True,
-            'accountId': account_id,
-            'accountName': account.name,
-            'wallet': {
+        for wallet in wallets:
+            wallet_data = {
                 'id': wallet.id,
                 'walletAddress': wallet.wallet_address,
                 'maxLeverage': wallet.max_leverage,
                 'defaultLeverage': wallet.default_leverage,
                 'isActive': wallet.is_active == "true",
                 'createdAt': wallet.created_at.isoformat() if wallet.created_at else None,
-                'updatedAt': wallet.updated_at.isoformat() if wallet.updated_at else None
-            },
-            'globalTradingMode': trading_mode,
-            'balance': balance_info
+                'updatedAt': wallet.updated_at.isoformat() if wallet.updated_at else None,
+                'environment': wallet.environment
+            }
+
+            # Try to get balance
+            try:
+                # Temporarily set environment for this wallet
+                from services.hyperliquid_environment import set_global_trading_mode_internal
+                set_global_trading_mode_internal(db, wallet.environment)
+
+                client = get_hyperliquid_client(db, account_id)
+                account_state = client.get_account_state(db)
+                wallet_data['balance'] = {
+                    'totalEquity': float(account_state.get('total_equity', 0)),
+                    'availableBalance': float(account_state.get('available_balance', 0)),
+                    'marginUsagePercent': float(account_state.get('margin_usage_percent', 0))
+                }
+            except Exception as e:
+                logger.warning(f"Failed to fetch balance for {wallet.environment} wallet: {e}")
+                wallet_data['balance'] = None
+
+            if wallet.environment == 'testnet':
+                testnet_wallet = wallet_data
+            elif wallet.environment == 'mainnet':
+                mainnet_wallet = wallet_data
+
+        # Get global trading mode
+        trading_mode = get_global_trading_mode(db)
+
+        return {
+            'success': True,
+            'configured': testnet_wallet is not None or mainnet_wallet is not None,
+            'accountId': account_id,
+            'accountName': account.name,
+            'testnetWallet': testnet_wallet,
+            'mainnetWallet': mainnet_wallet,
+            'globalTradingMode': trading_mode
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get wallet for account {account_id}: {e}", exc_info=True)
+        logger.error(f"Failed to get wallets for account {account_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get wallet configuration: {str(e)}")
 
 
@@ -759,7 +768,7 @@ async def configure_account_wallet(
     """
     Configure or update wallet for an AI Trader account
 
-    Creates a new wallet record or updates existing one.
+    Creates a new wallet record or updates existing one for the specified environment.
     The private key will be encrypted before storage.
     """
     from database.models import HyperliquidWallet, Account
@@ -767,6 +776,10 @@ async def configure_account_wallet(
     from eth_account import Account as EthAccount
 
     try:
+        # Validate environment
+        if request.environment not in ['testnet', 'mainnet']:
+            raise HTTPException(status_code=400, detail="Environment must be 'testnet' or 'mainnet'")
+
         # Check if account exists
         account = db.query(Account).filter(Account.id == account_id).first()
         if not account:
@@ -797,9 +810,10 @@ async def configure_account_wallet(
             logger.error(f"Failed to encrypt private key: {e}")
             raise HTTPException(status_code=500, detail="Failed to encrypt private key")
 
-        # Check if wallet already exists
+        # Check if wallet already exists for this account and environment
         existing_wallet = db.query(HyperliquidWallet).filter(
-            HyperliquidWallet.account_id == account_id
+            HyperliquidWallet.account_id == account_id,
+            HyperliquidWallet.environment == request.environment
         ).first()
 
         if existing_wallet:
@@ -813,18 +827,19 @@ async def configure_account_wallet(
             db.commit()
             db.refresh(existing_wallet)
 
-            logger.info(f"Updated wallet for account {account.name} (ID: {account_id}), address: {wallet_address}")
+            logger.info(f"Updated {request.environment} wallet for account {account.name} (ID: {account_id}), address: {wallet_address}")
 
             return WalletConfigResponse(
                 success=True,
                 wallet_id=existing_wallet.id,
                 wallet_address=wallet_address,
-                message=f"Wallet updated for {account.name}"
+                message=f"{request.environment.capitalize()} wallet updated for {account.name}"
             )
         else:
             # Create new wallet
             new_wallet = HyperliquidWallet(
                 account_id=account_id,
+                environment=request.environment,
                 private_key_encrypted=encrypted_key,
                 wallet_address=wallet_address,
                 max_leverage=request.max_leverage,
@@ -836,19 +851,18 @@ async def configure_account_wallet(
             db.commit()
             db.refresh(new_wallet)
 
-            logger.info(f"Created wallet for account {account.name} (ID: {account_id}), address: {wallet_address}")
+            logger.info(f"Created {request.environment} wallet for account {account.name} (ID: {account_id}), address: {wallet_address}")
 
             return WalletConfigResponse(
                 success=True,
                 wallet_id=new_wallet.id,
                 wallet_address=wallet_address,
-                message=f"Wallet configured for {account.name}"
+                message=f"{request.environment.capitalize()} wallet configured for {account.name}"
             )
 
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
         logger.error(f"Failed to configure wallet for account {account_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to configure wallet: {str(e)}")
 

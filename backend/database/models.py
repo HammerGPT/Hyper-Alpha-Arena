@@ -357,15 +357,18 @@ class AccountPromptBinding(Base):
 
 
 class HyperliquidWallet(Base):
-    """Store Hyperliquid wallet configurations per AI Trader
+    """Store Hyperliquid wallet configurations per AI Trader per environment
 
-    One-to-one relationship with Account. Each AI Trader has one wallet configuration.
-    The same private key works for both testnet and mainnet (same address).
+    One-to-many relationship with Account. Each AI Trader can have multiple wallets
+    (one for testnet, one for mainnet).
     """
     __tablename__ = "hyperliquid_wallets"
 
     id = Column(Integer, primary_key=True, index=True)
-    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False, unique=True, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False, index=True)
+
+    # Environment (testnet or mainnet)
+    environment = Column(String(20), nullable=False)  # 'testnet' or 'mainnet'
 
     # Wallet credentials (encrypted)
     private_key_encrypted = Column(String(500), nullable=False)
@@ -382,6 +385,11 @@ class HyperliquidWallet(Base):
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(
         TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
+    )
+
+    # Unique constraint: one wallet per account per environment
+    __table_args__ = (
+        UniqueConstraint('account_id', 'environment', name='uq_hyperliquid_wallets_account_environment'),
     )
 
     # Relationships

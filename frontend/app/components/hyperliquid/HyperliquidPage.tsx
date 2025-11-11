@@ -8,9 +8,7 @@ import ConfigPanel from './ConfigPanel';
 import BalanceCard from './BalanceCard';
 import PositionsTable from './PositionsTable';
 import OrderForm from './OrderForm';
-import EnvironmentSwitcher from './EnvironmentSwitcher';
 import WalletApiUsage from './WalletApiUsage';
-import TradingModeSwitch from './TradingModeSwitch';
 import { getHyperliquidConfig } from '@/lib/hyperliquidApi';
 import type { HyperliquidEnvironment } from '@/lib/types/hyperliquid';
 
@@ -28,7 +26,6 @@ export default function HyperliquidPage({ accountId }: HyperliquidPageProps) {
     maxLeverage: number;
     defaultLeverage: number;
   } | null>(null);
-  const [showEnvironmentSwitcher, setShowEnvironmentSwitcher] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   useEffect(() => {
@@ -61,11 +58,6 @@ export default function HyperliquidPage({ accountId }: HyperliquidPageProps) {
 
   const handlePositionClosed = () => {
     setRefreshTrigger((prev) => prev + 1);
-  };
-
-  const handleEnvironmentSwitch = () => {
-    setRefreshTrigger((prev) => prev + 1);
-    setShowEnvironmentSwitcher(false);
   };
 
   if (!config) {
@@ -113,30 +105,11 @@ export default function HyperliquidPage({ accountId }: HyperliquidPageProps) {
   return (
     <div className="container mx-auto p-6 h-full overflow-y-scroll">
       <div className="mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-3xl font-bold">Hyperliquid Trading</h1>
-            <p className="text-gray-600 mt-1">
-              Real perpetual contract trading on Hyperliquid DEX
-            </p>
-          </div>
-
-          <div className="flex items-center space-x-3">
-            <Badge
-              variant={config.environment === 'testnet' ? 'default' : 'destructive'}
-              className="text-sm px-3 py-1 uppercase"
-            >
-              {config.environment}
-            </Badge>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowEnvironmentSwitcher(true)}
-            >
-              Switch to {config.environment === 'testnet' ? 'Mainnet' : 'Testnet'}
-            </Button>
-          </div>
+        <div className="mb-4">
+          <h1 className="text-3xl font-bold">Hyperliquid Trading</h1>
+          <p className="text-gray-600 mt-1">
+            Real perpetual contract trading on Hyperliquid DEX
+          </p>
         </div>
       </div>
 
@@ -252,18 +225,9 @@ export default function HyperliquidPage({ accountId }: HyperliquidPageProps) {
         </TabsContent>
 
         <TabsContent value="settings" className="space-y-6">
-          <TradingModeSwitch />
           <ConfigPanel accountId={accountId} onConfigUpdated={handleConfigUpdated} />
         </TabsContent>
       </Tabs>
-
-      <EnvironmentSwitcher
-        accountId={accountId}
-        currentEnvironment={config.environment}
-        open={showEnvironmentSwitcher}
-        onOpenChange={setShowEnvironmentSwitcher}
-        onSwitchComplete={handleEnvironmentSwitch}
-      />
     </div>
   );
 }
