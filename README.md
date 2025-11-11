@@ -13,12 +13,12 @@ Hyper Alpha Arena is a production-ready AI trading platform where Large Language
 **Official Website:** https://www.akooi.com/
 
 **Trading Modes:**
-- **Paper Trading**: Risk-free simulation with real market data for strategy development and testing
-- **Hyperliquid Perpetual Contracts**: Real trading on decentralized perpetual exchange with 1-50x leverage support
-  - Testnet: Safe testing environment with test funds
-  - Mainnet: Production trading with real capital (use with caution)
+- **Hyperliquid Testnet (Paper Trading)**: Risk-free testing with real market mechanics, free test funds, and actual order book - a superior paper trading experience
+- **Hyperliquid Mainnet**: Live trading on decentralized perpetual exchange with 1-50x leverage support (real capital at risk)
 
-**Current Status**: v0.5.0 - Major update with complete Hyperliquid DEX integration for real perpetual contract trading.
+> **⚠️ Important Update (v0.5.1)**: Traditional paper mode has been removed. **Hyperliquid Testnet now serves as the paper trading environment**, offering realistic market conditions with real order matching, free test funds, and zero risk. Existing users: please see upgrade instructions below.
+
+**Current Status**: v0.5.1 - Paper mode removed in favor of Hyperliquid Testnet for superior paper trading experience.
 
 
 ## Features
@@ -113,7 +113,28 @@ docker compose up -d --build # (or docker-compose up -d --build)
 - Data will be preserved when you stop/restart containers
 - Only `docker-compose down -v` will delete data (don't use `-v` flag unless you want to reset everything)
 
-### Upgrading from Previous Versions
+### Upgrading from v0.5.0 (Paper Mode Removal)
+
+**⚠️ Important**: Traditional paper mode has been completely removed in v0.5.1+. Use Hyperliquid Testnet instead for paper trading.
+
+**Quick Update** (preserves all data):
+```bash
+cd Hyper-Alpha-Arena
+git pull origin main
+docker compose down
+docker compose up -d --build
+```
+
+**After Update:**
+- Paper mode option removed from UI
+- Switch to "Testnet" mode for paper trading
+- All historical data preserved
+- Get Testnet key: https://app.hyperliquid-testnet.xyz/
+- Request free test funds from faucet
+
+---
+
+### Upgrading from Previous Versions (v0.4.x or earlier)
 
 **For v0.4.x or earlier users upgrading to v0.5.0+:**
 
