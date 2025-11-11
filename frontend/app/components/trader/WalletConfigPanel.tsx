@@ -9,11 +9,12 @@ import toast from 'react-hot-toast'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { Wallet, Eye, EyeOff, CheckCircle, RefreshCw, Plus } from 'lucide-react'
+import { Wallet, Eye, EyeOff, CheckCircle, RefreshCw, Plus, Trash2 } from 'lucide-react'
 import {
   getAccountWallet,
   configureAccountWallet,
   testWalletConnection,
+  deleteAccountWallet,
 } from '@/lib/hyperliquidApi'
 
 interface WalletConfigPanelProps {
@@ -180,6 +181,32 @@ export default function WalletConfigPanel({
     }
   }
 
+  const handleDeleteWallet = async (environment: 'testnet' | 'mainnet') => {
+    const envName = environment === 'testnet' ? 'Testnet' : 'Mainnet'
+
+    if (!confirm(`Are you sure you want to delete the ${envName} wallet? This action cannot be undone.`)) {
+      return
+    }
+
+    try {
+      setLoading(true)
+      const result = await deleteAccountWallet(accountId, environment)
+
+      if (result.success) {
+        toast.success(`${envName} wallet deleted successfully`)
+        await loadWalletInfo()
+        onWalletConfigured?.()
+      } else {
+        toast.error('Failed to delete wallet')
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to delete wallet'
+      toast.error(message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const renderWalletBlock = (
     environment: 'testnet' | 'mainnet',
     wallet: WalletData | null,
@@ -208,13 +235,23 @@ export default function WalletConfigPanel({
             </Badge>
           </div>
           {wallet && !editing && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setEditing(true)}
-            >
-              Update
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setEditing(true)}
+              >
+                Edit
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => handleDeleteWallet(environment)}
+                disabled={loading}
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            </div>
           )}
         </div>
 

@@ -867,13 +867,17 @@ async def configure_account_wallet(
 @router.delete("/accounts/{account_id}/wallet")
 async def delete_account_wallet(
     account_id: int,
+    environment: str = Query(..., pattern="^(testnet|mainnet)$", description="Environment to delete (testnet or mainnet)"),
     db: Session = Depends(get_db)
 ):
     """
-    Delete wallet configuration for an AI Trader account
+    Delete wallet configuration for a specific environment
 
-    Warning: This will remove the wallet configuration and prevent trading.
-    The account will need to be reconfigured before trading can resume.
+    Deletes the testnet or mainnet wallet for an AI Trader account.
+    The other wallet (if exists) will remain configured.
+
+    Query Parameters:
+    - environment: Which wallet to delete ('testnet' or 'mainnet')
     """
     from database.models import HyperliquidWallet, Account
 
@@ -883,32 +887,40 @@ async def delete_account_wallet(
         if not account:
             raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
 
-        # Find wallet
+        # Find wallet for specified environment
         wallet = db.query(HyperliquidWallet).filter(
-            HyperliquidWallet.account_id == account_id
+            HyperliquidWallet.account_id == account_id,
+            HyperliquidWallet.environment == environment
         ).first()
 
         if not wallet:
-            raise HTTPException(status_code=404, detail=f"No wallet configured for account {account_id}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"No {environment} wallet configured for account {account_id}"
+            )
 
         # Delete wallet
+        wallet_address = wallet.wallet_address
         db.delete(wallet)
         db.commit()
 
-        logger.warning(f"Deleted wallet for account {account.name} (ID: {account_id})")
+        logger.warning(
+            f"Deleted {environment} wallet ({wallet_address}) for account {account.name} (ID: {account_id})"
+        )
 
         return {
             'success': True,
             'accountId': account_id,
             'accountName': account.name,
-            'message': 'Wallet configuration deleted'
+            'environment': environment,
+            'message': f'{environment.capitalize()} wallet deleted'
         }
 
     except HTTPException:
         raise
     except Exception as e:
         db.rollback()
-        logger.error(f"Failed to delete wallet for account {account_id}: {e}", exc_info=True)
+        logger.error(f"Failed to delete {environment} wallet for account {account_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to delete wallet: {str(e)}")
 
 

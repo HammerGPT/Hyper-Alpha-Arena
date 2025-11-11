@@ -373,10 +373,11 @@ export async function configureAccountWallet(
 }
 
 export async function deleteAccountWallet(
-  accountId: number
-): Promise<{ success: boolean; message: string }> {
+  accountId: number,
+  environment: 'testnet' | 'mainnet'
+): Promise<{ success: boolean; message: string; environment: string }> {
   const response = await apiRequest(
-    `${HYPERLIQUID_API_BASE}/accounts/${accountId}/wallet`,
+    `${HYPERLIQUID_API_BASE}/accounts/${accountId}/wallet?environment=${environment}`,
     {
       method: 'DELETE',
     }
