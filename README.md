@@ -428,5 +428,76 @@ When using this software, please include attribution to Heliki AI Community in y
 
 ---
 
+## FAQ (Frequently Asked Questions)
 
-Star this repository to follow development progress. Frontend UI for Hyperliquid coming soon.
+### How do I get testnet funds for paper trading?
+
+When using Hyperliquid Testnet mode for paper trading, you'll need test funds to execute trades. If you see this warning in logs:
+
+```
+⚠️ Account skipped - No balance to trade! Equity: $0.00
+Please deposit funds to wallet 0xYourWalletAddress
+```
+
+Follow these steps to get free testnet funds:
+
+**Step 1: Get Your Wallet Address**
+1. Navigate to the **Hyperliquid** page in the web interface
+2. Make sure you've switched to **Testnet** mode
+3. Your wallet address will be displayed in the configuration panel (starts with `0x...`)
+4. Copy this address
+
+**Step 2: Request Testnet Funds**
+1. Visit the Hyperliquid Testnet interface: https://app.hyperliquid-testnet.xyz/
+2. Connect your wallet or import your private key
+3. Request testnet USDC from the faucet:
+   - Look for the "Faucet" or "Get Test Funds" button
+   - Request the maximum amount available (usually 10,000 USDC)
+   - The funds should arrive within 1-2 minutes
+
+**Step 3: Verify Balance**
+1. Return to your Hyper Alpha Arena interface
+2. Refresh the **Hyperliquid** page
+3. You should see your balance updated
+4. Wait for the next strategy trigger (60-150 seconds depending on your interval)
+5. Check **System Logs** - you should now see AI decision logs
+
+**Alternative Methods:**
+- Join the Hyperliquid Discord community and ask for testnet funds
+- Use Hyperliquid testnet bridge if available
+- Contact Hyperliquid support for faucet issues
+
+**Note**: Testnet funds have no real value and are reset periodically. This is a completely safe environment for testing your AI trading strategies.
+
+### Why is my AI strategy not executing any trades?
+
+Check these common issues in order:
+
+1. **Zero Balance**: Check System Logs for warnings about "No balance to trade" - see FAQ above for getting testnet funds
+2. **Strategy Not Enabled**: Verify "Start Trading" is toggled ON in AI Trader settings
+3. **Trigger Interval**: Default is 150 seconds (2.5 minutes) - wait at least this long after enabling
+4. **Price Threshold**: Default 1.0% - market needs to move enough to trigger
+5. **Auto Trading Disabled**: Check that "Auto Trading" is enabled for your account
+6. **API Key Issues**: Verify your AI model API key is valid and has sufficient credits
+
+### What's the difference between Testnet and Mainnet?
+
+- **Testnet (Paper Trading)**:
+  - Uses test funds with no real value
+  - Risk-free testing environment
+  - Real market mechanics and order matching
+  - Free unlimited test funds from faucet
+  - Perfect for testing strategies before going live
+
+- **Mainnet (Live Trading)**:
+  - Uses real cryptocurrency (USDC)
+  - Real money at risk - can result in losses
+  - Live trading on Hyperliquid DEX
+  - Requires real funds deposited to your wallet
+  - Only use after thorough testing on testnet
+
+**⚠️ Always test on testnet for at least 1 week before considering mainnet trading!**
+
+---
+
+Star this repository to follow development progress.
