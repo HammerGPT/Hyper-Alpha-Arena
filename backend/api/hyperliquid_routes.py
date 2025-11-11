@@ -717,13 +717,10 @@ async def get_account_wallet(
                 'environment': wallet.environment
             }
 
-            # Try to get balance
+            # Try to get balance for this specific wallet
             try:
-                # Temporarily set environment for this wallet
-                from services.hyperliquid_environment import set_global_trading_mode_internal
-                set_global_trading_mode_internal(db, wallet.environment)
-
-                client = get_hyperliquid_client(db, account_id)
+                # Use override_environment to get client for this wallet's environment
+                client = get_hyperliquid_client(db, account_id, override_environment=wallet.environment)
                 account_state = client.get_account_state(db)
                 wallet_data['balance'] = {
                     'totalEquity': float(account_state.get('total_equity', 0)),
