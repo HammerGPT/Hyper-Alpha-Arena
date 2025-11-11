@@ -10,7 +10,7 @@ import logging
 from typing import Dict, Any
 from sqlalchemy.orm import Session
 
-from database.models import Account, HyperliquidPosition
+from database.models import Account, HyperliquidPosition, HyperliquidWallet, SystemConfig
 from services.hyperliquid_trading_client import (
     HyperliquidTradingClient,
     create_hyperliquid_client
@@ -100,16 +100,38 @@ def setup_hyperliquid_account(
     }
 
 
-def get_hyperliquid_client(db: Session, account_id: int) -> HyperliquidTradingClient:
+def get_global_trading_mode(db: Session) -> str:
+    """
+    Get global Hyperliquid trading mode from system config
+
+    Returns:
+        "testnet" or "mainnet", defaults to "testnet" if not configured
+    """
+    config = db.query(SystemConfig).filter(
+        SystemConfig.key == "hyperliquid_trading_mode"
+    ).first()
+
+    if config and config.value in ["testnet", "mainnet"]:
+        return config.value
+
+    # Default to testnet for safety
+    return "testnet"
+
+
+def get_hyperliquid_client(db: Session, account_id: int, override_environment: str = None) -> HyperliquidTradingClient:
     """
     Get Hyperliquid trading client for an account
 
-    Automatically detects environment from account configuration and
-    retrieves correct private key.
+    NEW BEHAVIOR (Multi-wallet architecture):
+    - Reads wallet configuration from hyperliquid_wallets table
+    - Uses global trading_mode from system config (unless override_environment specified)
+    - Falls back to Account table fields if wallet not configured (backward compatibility)
 
     Args:
         db: Database session
         account_id: Target account ID
+        override_environment: Optional environment override ("testnet" or "mainnet")
+                            If not specified, uses global trading_mode
 
     Returns:
         Initialized HyperliquidTradingClient
@@ -121,27 +143,47 @@ def get_hyperliquid_client(db: Session, account_id: int) -> HyperliquidTradingCl
     if not account:
         raise ValueError(f"Account {account_id} not found")
 
-    environment = account.hyperliquid_environment
-    if not environment:
-        raise ValueError(f"Account {account.name} has no environment configured")
-
-    # Get private key for environment
-    if environment == "testnet":
-        encrypted_key = account.hyperliquid_testnet_private_key
+    # Determine which environment to use
+    if override_environment:
+        if override_environment not in ["testnet", "mainnet"]:
+            raise ValueError("override_environment must be 'testnet' or 'mainnet'")
+        environment = override_environment
     else:
-        encrypted_key = account.hyperliquid_mainnet_private_key
+        # Use global trading mode
+        environment = get_global_trading_mode(db)
 
-    if not encrypted_key:
-        raise ValueError(
-            f"No private key configured for {environment}. "
-            f"Please setup {environment} credentials first."
-        )
+    logger.info(f"Getting Hyperliquid client for account {account.name} (ID: {account_id}), environment: {environment}")
+
+    # Try to get wallet from hyperliquid_wallets table (new architecture)
+    wallet = db.query(HyperliquidWallet).filter(
+        HyperliquidWallet.account_id == account_id,
+        HyperliquidWallet.is_active == "true"
+    ).first()
+
+    if wallet:
+        # New architecture: use wallet table
+        logger.info(f"Using wallet configuration from hyperliquid_wallets table (wallet_address: {wallet.wallet_address})")
+        encrypted_key = wallet.private_key_encrypted
+    else:
+        # Backward compatibility: fallback to Account table fields
+        logger.info(f"No wallet found in hyperliquid_wallets table, falling back to Account table")
+
+        if environment == "testnet":
+            encrypted_key = account.hyperliquid_testnet_private_key
+        else:
+            encrypted_key = account.hyperliquid_mainnet_private_key
+
+        if not encrypted_key:
+            raise ValueError(
+                f"No wallet configured for account {account.name} (ID: {account_id}). "
+                f"Please configure Hyperliquid wallet in AI Trader settings."
+            )
 
     # Decrypt private key
     try:
         private_key = decrypt_private_key(encrypted_key)
     except Exception as e:
-        logger.error(f"Failed to decrypt private key: {e}")
+        logger.error(f"Failed to decrypt private key for account {account_id}: {e}")
         raise ValueError(f"Private key decryption failed: {e}")
 
     # Create and return client
@@ -150,6 +192,7 @@ def get_hyperliquid_client(db: Session, account_id: int) -> HyperliquidTradingCl
         private_key=private_key,
         environment=environment
     )
+
 
 
 def switch_hyperliquid_environment(

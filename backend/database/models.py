@@ -356,6 +356,38 @@ class AccountPromptBinding(Base):
     prompt_template = relationship("PromptTemplate", back_populates="account_bindings")
 
 
+class HyperliquidWallet(Base):
+    """Store Hyperliquid wallet configurations per AI Trader
+
+    One-to-one relationship with Account. Each AI Trader has one wallet configuration.
+    The same private key works for both testnet and mainnet (same address).
+    """
+    __tablename__ = "hyperliquid_wallets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False, unique=True, index=True)
+
+    # Wallet credentials (encrypted)
+    private_key_encrypted = Column(String(500), nullable=False)
+    wallet_address = Column(String(100), nullable=False, index=True)  # Parsed from private key
+
+    # Trading configuration
+    max_leverage = Column(Integer, nullable=False, default=3)  # Maximum allowed leverage (1-50)
+    default_leverage = Column(Integer, nullable=False, default=1)  # Default leverage for new orders
+
+    # Status
+    is_active = Column(String(10), nullable=False, default="true")
+
+    # Metadata
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at = Column(
+        TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
+    )
+
+    # Relationships
+    account = relationship("Account")
+
+
 class HyperliquidAccountSnapshot(Base):
     """Store Hyperliquid account state snapshots for audit and analysis"""
     __tablename__ = "hyperliquid_account_snapshots"

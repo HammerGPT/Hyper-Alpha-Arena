@@ -343,12 +343,45 @@ def place_ai_driven_hyperliquid_order(
         db = SessionLocal()
         # PostgreSQL handles concurrent access natively
         try:
+            # Validate account configuration completeness
+            validation_errors = []
+
+            # Check model configuration
+            if not account.api_key or not account.model:
+                validation_errors.append("AI model/API key not configured")
+
+            # Check strategy configuration
+            from database.models import AccountStrategyConfig
+            strategy = db.query(AccountStrategyConfig).filter(
+                AccountStrategyConfig.account_id == account.id,
+                AccountStrategyConfig.enabled == "true"
+            ).first()
+            if not strategy:
+                validation_errors.append("trading strategy not configured or disabled")
+
+            # If there are validation errors, skip this account with clear warning
+            if validation_errors:
+                logger.warning(
+                    f"⚠️  AI Trader '{account.name}' (ID: {account.id}) skipped - "
+                    f"Configuration incomplete: {', '.join(validation_errors)}. "
+                    f"Please complete configuration in AI Traders management page."
+                )
+                continue
+
             environment = getattr(account, "hyperliquid_environment", "testnet")
             logger.info(f"Processing Hyperliquid trading for account: {account.name} (environment: {environment})")
 
-            # Get Hyperliquid client
+            # Get Hyperliquid client (will check wallet configuration)
             try:
                 client = get_hyperliquid_client(db, account.id)
+            except ValueError as wallet_err:
+                # Wallet not configured - log clear warning
+                logger.warning(
+                    f"⚠️  AI Trader '{account.name}' (ID: {account.id}) skipped - "
+                    f"Hyperliquid wallet not configured. {str(wallet_err)} "
+                    f"Please configure wallet in AI Traders management page."
+                )
+                continue
             except Exception as client_err:
                 logger.error(f"Failed to get Hyperliquid client for {account.name}: {client_err}")
                 continue
