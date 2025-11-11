@@ -59,14 +59,13 @@ def add_environment_field():
         db.commit()
         logger.info("✓ Environment column set to NOT NULL")
 
-        # Step 4: Drop old UNIQUE constraint on account_id
-        logger.info("Step 4: Dropping old UNIQUE constraint on account_id...")
+        # Step 4: Drop old UNIQUE index on account_id
+        logger.info("Step 4: Dropping old UNIQUE index on account_id...")
         db.execute(text("""
-            ALTER TABLE hyperliquid_wallets
-            DROP CONSTRAINT IF EXISTS ix_hyperliquid_wallets_account_id
+            DROP INDEX IF EXISTS ix_hyperliquid_wallets_account_id
         """))
         db.commit()
-        logger.info("✓ Old UNIQUE constraint dropped")
+        logger.info("✓ Old UNIQUE index dropped")
 
         # Step 5: Create new index on account_id (non-unique)
         logger.info("Step 5: Creating non-unique index on account_id...")
