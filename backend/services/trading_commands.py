@@ -306,14 +306,20 @@ def place_ai_driven_hyperliquid_order(
         db.close()
 
     # Determine configured Hyperliquid symbols
+    print(f"[DEBUG TRADE] Getting Hyperliquid selected symbols...")
     selected_symbols = get_hyperliquid_selected_symbols()
+    print(f"[DEBUG TRADE] Selected symbols: {selected_symbols}")
     if not selected_symbols:
         logger.warning("No Hyperliquid watchlist configured, skipping Hyperliquid trading")
+        print(f"[DEBUG TRADE] EARLY RETURN: No watchlist configured")
         return
 
+    print(f"[DEBUG TRADE] Getting market prices for symbols: {selected_symbols}")
     prices = _get_market_prices(selected_symbols)
+    print(f"[DEBUG TRADE] Market prices: {prices}")
     if not prices:
         logger.warning("Failed to fetch market prices, skipping Hyperliquid trading")
+        print(f"[DEBUG TRADE] EARLY RETURN: No market prices")
         return
 
     # Sampling data availability (informational)
@@ -338,29 +344,37 @@ def place_ai_driven_hyperliquid_order(
     symbol_whitelist = set(selected_symbols)
 
     # Process each account with separate database connections
+    print(f"[DEBUG TRADE] Processing {len(accounts)} accounts for Hyperliquid trading")
     for account in accounts:
+        print(f"[DEBUG TRADE] === Processing account {account.id} ({account.name}) ===")
         # Each account gets its own database connection
         db = SessionLocal()
         # PostgreSQL handles concurrent access natively
         try:
             environment = getattr(account, "hyperliquid_environment", "testnet")
             logger.info(f"Processing Hyperliquid trading for account: {account.name} (environment: {environment})")
+            print(f"[DEBUG TRADE] Account environment: {environment}")
 
             # Get Hyperliquid client
+            print(f"[DEBUG TRADE] Getting Hyperliquid client for account {account.id}...")
             try:
                 client = get_hyperliquid_client(db, account.id)
+                print(f"[DEBUG TRADE] Hyperliquid client obtained successfully")
             except Exception as client_err:
                 logger.error(f"Failed to get Hyperliquid client for {account.name}: {client_err}")
+                print(f"[DEBUG TRADE] SKIP ACCOUNT: Failed to get client - {client_err}")
                 continue
             wallet_address = getattr(client, "wallet_address", None)
             decision_kwargs = {"wallet_address": wallet_address}
 
             # Get real account state from Hyperliquid
+            print(f"[DEBUG TRADE] Getting account state from Hyperliquid...")
             try:
                 account_state = client.get_account_state(db)
                 available_balance = account_state['available_balance']
                 total_equity = account_state['total_equity']
                 margin_usage = account_state['margin_usage_percent']
+                print(f"[DEBUG TRADE] Account state: equity=${total_equity:.2f}, available=${available_balance:.2f}, margin={margin_usage:.1f}%")
 
                 logger.info(
                     f"Hyperliquid account state for {account.name}: "
@@ -370,18 +384,23 @@ def place_ai_driven_hyperliquid_order(
 
                 if total_equity <= 0:
                     logger.debug(f"Account {account.name} has non-positive equity, skipping")
+                    print(f"[DEBUG TRADE] SKIP ACCOUNT: Non-positive equity")
                     continue
 
             except Exception as state_err:
                 logger.error(f"Failed to get account state for {account.name}: {state_err}")
+                print(f"[DEBUG TRADE] SKIP ACCOUNT: Failed to get account state - {state_err}")
                 continue
 
             # Get open positions from Hyperliquid
+            print(f"[DEBUG TRADE] Getting positions from Hyperliquid...")
             try:
                 positions = client.get_positions(db)
                 logger.info(f"Account {account.name} has {len(positions)} open positions")
+                print(f"[DEBUG TRADE] Positions: {len(positions)} open")
             except Exception as pos_err:
                 logger.error(f"Failed to get positions for {account.name}: {pos_err}")
+                print(f"[DEBUG TRADE] Failed to get positions (continuing with empty): {pos_err}")
                 positions = []
 
             # Build portfolio data for AI (using Hyperliquid real data)
@@ -413,6 +432,10 @@ def place_ai_driven_hyperliquid_order(
             }
 
             # Call AI for trading decision
+            print(f"[DEBUG TRADE] ===== CALLING AI FOR DECISION =====")
+            print(f"[DEBUG TRADE] Symbols: {selected_symbols}")
+            print(f"[DEBUG TRADE] Portfolio cash: ${portfolio['cash']:.2f}")
+            print(f"[DEBUG TRADE] About to call call_ai_for_decision...")
             decisions = call_ai_for_decision(
                 db,
                 account,
@@ -422,9 +445,11 @@ def place_ai_driven_hyperliquid_order(
                 hyperliquid_state=hyperliquid_state,
                 symbol_metadata=prompt_symbol_metadata,
             )
+            print(f"[DEBUG TRADE] AI decision returned: {decisions}")
 
             if not decisions:
                 logger.warning(f"Failed to get AI decision for {account.name}, skipping")
+                print(f"[DEBUG TRADE] SKIP ACCOUNT: No AI decisions returned")
                 continue
 
             decision_priority = {"close": 0, "sell": 1, "buy": 2, "hold": 3}
