@@ -157,16 +157,17 @@ def get_hyperliquid_client(db: Session, account_id: int, override_environment: s
     # Try to get wallet from hyperliquid_wallets table (new architecture)
     wallet = db.query(HyperliquidWallet).filter(
         HyperliquidWallet.account_id == account_id,
+        HyperliquidWallet.environment == environment,
         HyperliquidWallet.is_active == "true"
     ).first()
 
     if wallet:
         # New architecture: use wallet table
-        logger.info(f"Using wallet configuration from hyperliquid_wallets table (wallet_address: {wallet.wallet_address})")
+        logger.info(f"Using {environment} wallet from hyperliquid_wallets table (wallet_address: {wallet.wallet_address})")
         encrypted_key = wallet.private_key_encrypted
     else:
         # Backward compatibility: fallback to Account table fields
-        logger.info(f"No wallet found in hyperliquid_wallets table, falling back to Account table")
+        logger.info(f"No {environment} wallet found in hyperliquid_wallets table, falling back to Account table")
 
         if environment == "testnet":
             encrypted_key = account.hyperliquid_testnet_private_key

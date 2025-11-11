@@ -394,20 +394,17 @@ async def _send_hyperliquid_snapshot(db: Session, account_id: int, environment: 
         logging.error(f"Account {account_id} not found for Hyperliquid snapshot")
         return
 
-    configured_env = account.hyperliquid_environment
-    if not configured_env:
-        logging.warning(f"Account {account_id} does not have Hyperliquid environment configured")
-        await manager.send_to_account(account_id, {
-            "type": "error",
-            "message": "Hyperliquid environment not configured for this account"
-        })
-        return
+    # Check if wallet exists for this environment (multi-wallet architecture)
+    from database.models import HyperliquidWallet
+    wallet = db.query(HyperliquidWallet).filter(
+        HyperliquidWallet.account_id == account_id,
+        HyperliquidWallet.environment == environment
+    ).first()
 
-    if configured_env != environment:
-        await manager.send_to_account(account_id, {
-            "type": "error",
-            "message": f"Account configured for {configured_env or 'unknown'} but {environment} snapshot requested"
-        })
+    if not wallet:
+        # Silently skip sending error to avoid spamming frontend
+        # Just log the warning
+        logging.debug(f"No {environment} wallet configured for account {account.name} (ID: {account_id})")
         return
 
     cached_state = get_cached_account_state(account_id, max_age_seconds=HYPERLIQUID_SNAPSHOT_CACHE_TTL)
@@ -423,20 +420,10 @@ async def _send_hyperliquid_snapshot(db: Session, account_id: int, environment: 
 
     if account_state is None or positions_data is None:
         try:
-            client = get_hyperliquid_client(db, account_id)
+            client = get_hyperliquid_client(db, account_id, override_environment=environment)
         except Exception as e:
-            logging.error(f"Failed to initialize Hyperliquid client for account {account_id}: {e}")
-            await manager.send_to_account(account_id, {
-                "type": "error",
-                "message": f"Hyperliquid client init failed: {str(e)}"
-            })
-            return
-
-        if client.environment != environment:
-            await manager.send_to_account(account_id, {
-                "type": "error",
-                "message": f"Account client uses {client.environment}, cannot serve {environment} snapshot"
-            })
+            logging.warning(f"Failed to initialize Hyperliquid client for account {account.name} ({environment}): {e}")
+            # Don't send error to frontend, just log and skip
             return
 
         try:

@@ -97,7 +97,7 @@ export default function HyperliquidSummary({ accountId, refreshKey }: Hyperliqui
   if (state.status === 'loading') {
     return (
       <Card className="border text-card-foreground shadow p-6 flex items-center justify-center">
-        <div className="text-sm text-muted-foreground">正在加载 Hyperliquid 数据...</div>
+        <div className="text-sm text-muted-foreground">Loading Hyperliquid data...</div>
       </Card>
     )
   }
