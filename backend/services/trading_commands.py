@@ -382,17 +382,12 @@ def place_ai_driven_hyperliquid_order(
                     f"margin_usage={margin_usage:.1f}%"
                 )
 
-                if total_equity <= 0:
-                    logger.debug(f"Account {account.name} has non-positive equity, skipping")
-                    print(f"[DEBUG TRADE] SKIP ACCOUNT: Non-positive equity")
-                    continue
-
             except Exception as state_err:
                 logger.error(f"Failed to get account state for {account.name}: {state_err}")
                 print(f"[DEBUG TRADE] SKIP ACCOUNT: Failed to get account state - {state_err}")
                 continue
 
-            # Get open positions from Hyperliquid
+            # Get open positions from Hyperliquid (must check before skipping due to equity)
             print(f"[DEBUG TRADE] Getting positions from Hyperliquid...")
             try:
                 positions = client.get_positions(db)
@@ -402,6 +397,19 @@ def place_ai_driven_hyperliquid_order(
                 logger.error(f"Failed to get positions for {account.name}: {pos_err}")
                 print(f"[DEBUG TRADE] Failed to get positions (continuing with empty): {pos_err}")
                 positions = []
+
+            # Check equity after getting positions - allow close operations even with zero equity
+            if total_equity <= 0 and len(positions) == 0:
+                logger.debug(f"Account {account.name} has no equity and no positions, skipping")
+                print(f"[DEBUG TRADE] SKIP ACCOUNT: No equity ($0) and no positions")
+                continue
+
+            if total_equity <= 0 and len(positions) > 0:
+                logger.warning(
+                    f"Account {account.name} has no equity but {len(positions)} open positions, "
+                    f"allowing AI to decide on close operations"
+                )
+                print(f"[DEBUG TRADE] WARNING: No equity but has positions - allowing close operations")
 
             # Build portfolio data for AI (using Hyperliquid real data)
             portfolio = {
