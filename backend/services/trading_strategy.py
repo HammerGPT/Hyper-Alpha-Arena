@@ -318,14 +318,23 @@ class HyperliquidStrategyManager(StrategyManager):
             print(f"[DEBUG] About to execute Hyperliquid order for account {account_id}")
             logger.info(f"[HyperliquidStrategy] Executing strategy for account {account_id}, symbol {symbol}")
 
+            print(f"[DEBUG] Opening database session for account check")
             with SessionLocal() as db:
+                print(f"[DEBUG] Database session opened, querying account {account_id}")
                 account = db.query(Account).filter(Account.id == account_id).first()
+                print(f"[DEBUG] Account query result: account={'found' if account else 'NOT FOUND'}")
+                if account:
+                    print(f"[DEBUG] Account auto_trading_enabled: {account.auto_trading_enabled}")
                 if not account or account.auto_trading_enabled != "true":
+                    print(f"[DEBUG] Account check failed, returning early")
                     logger.debug(f"[HyperliquidStrategy] Account {account_id} auto trading disabled, skipping")
                     return
+                print(f"[DEBUG] Account check passed, proceeding to trading")
 
             # Execute Hyperliquid trading decision
+            print(f"[DEBUG] Calling place_ai_driven_hyperliquid_order for account {account_id}")
             place_ai_driven_hyperliquid_order(account_id=account_id)
+            print(f"[DEBUG] place_ai_driven_hyperliquid_order returned successfully")
 
             # Update in-memory timestamp
             state.last_trigger_at = event_time
