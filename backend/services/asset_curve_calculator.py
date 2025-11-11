@@ -209,9 +209,8 @@ def _build_hyperliquid_asset_curve(
     snapshot_db = SnapshotSessionLocal()
 
     try:
-        # Get active Hyperliquid accounts from main DB
+        # Get active accounts with Hyperliquid environment configured
         account_query = db.query(Account).filter(
-            Account.hyperliquid_enabled == "true",
             Account.is_active == "true",
         )
 

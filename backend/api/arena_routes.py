@@ -79,8 +79,7 @@ def _get_hyperliquid_positions(db: Session, account_id: Optional[int], environme
     # Get all AI accounts or specific account
     accounts_query = db.query(Account).filter(
         Account.account_type == "AI",
-        Account.is_active == "true",
-        Account.hyperliquid_enabled == "true"  # Only get Hyperliquid-enabled accounts
+        Account.is_active == "true"
     )
 
     if account_id:

@@ -439,15 +439,15 @@ async def get_account_snapshots(
     from database.snapshot_connection import SnapshotSessionLocal
     from database.snapshot_models import HyperliquidAccountSnapshot
 
-    # Verify account exists and has Hyperliquid enabled
+    # Verify account exists and has Hyperliquid environment configured
     account = db.query(Account).filter(Account.id == account_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    if account.hyperliquid_enabled != "true":
+    if not account.hyperliquid_environment:
         raise HTTPException(
             status_code=400,
-            detail="Hyperliquid trading is not enabled for this account"
+            detail="Hyperliquid environment is not configured for this account"
         )
 
     # Query snapshots from snapshot database

@@ -42,10 +42,10 @@ class HyperliquidSnapshotService:
         try:
             # PostgreSQL handles concurrent access natively
 
-            # Find all accounts with Hyperliquid enabled
+            # Find all active accounts with Hyperliquid environment configured
             accounts = main_db.query(Account).filter(
-                Account.hyperliquid_enabled == "true",
-                Account.is_active == "true"
+                Account.is_active == "true",
+                Account.hyperliquid_environment.isnot(None)
             ).all()
 
             if not accounts:

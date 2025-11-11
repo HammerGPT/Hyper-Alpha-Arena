@@ -157,186 +157,9 @@ def place_ai_driven_crypto_order(max_ratio: float = 0.2, account_ids: Optional[I
             try:
                 logger.info(f"Processing AI trading for account: {account.name}")
 
-                if getattr(account, "hyperliquid_enabled", "false") == "true":
-                    logger.info(
-                        f"Redirecting Hyperliquid-enabled account {account.name} to Hyperliquid trading pipeline"
-                    )
-                    place_ai_driven_hyperliquid_order(account_id=account.id)
-                    continue
-
-                # Get portfolio data for this account
-                portfolio = _get_portfolio_data(db, account)
-
-                if portfolio['total_assets'] <= 0:
-                    logger.debug(f"Account {account.name} has non-positive total assets, skipping")
-                    continue
-
-                # Call AI for trading decision with all available sampling symbols
-                # Always use all available symbols from pool (not just single symbol from strategy)
-                # This allows controlling AI trading scope via sampling pool, not strategy parameters
-                decisions = call_ai_for_decision(
-                    db, account, portfolio, prices,
-                    samples=samples, target_symbol=symbol,  # Legacy params for backward compatibility
-                    symbols=available_symbols if available_symbols else None  # New multi-symbol param
-                )
-                if not decisions:
-                    logger.warning(f"Failed to get AI decision for {account.name}, skipping")
-                    continue
-
-                for decision in decisions:
-                    if not isinstance(decision, dict):
-                        logger.warning(f"Skipping malformed decision for {account.name}: {decision}")
-                        continue
-
-                    operation = decision.get("operation", "").lower() if decision.get("operation") else ""
-                    symbol = decision.get("symbol", "").upper() if decision.get("symbol") else ""
-                    target_portion = float(decision.get("target_portion_of_balance", 0)) if decision.get("target_portion_of_balance") is not None else 0
-                    reason = decision.get("reason", "No reason provided")
-
-                    logger.info(f"AI decision for {account.name}: {operation} {symbol} (portion: {target_portion:.2%}) - {reason}")
-
-                    # Validate decision
-                    if operation not in ["buy", "sell", "hold", "close"]:
-                        logger.warning(f"Invalid operation '{operation}' from AI for {account.name}, skipping")
-                        # Save invalid decision for debugging
-                        save_ai_decision(db, account, decision, portfolio, executed=False)
-                        continue
-                    
-                    if operation == "hold":
-                        logger.info(f"AI decided to HOLD for {account.name}")
-                        # Save hold decision
-                        save_ai_decision(db, account, decision, portfolio, executed=True)
-                        continue
-
-                    if symbol not in SUPPORTED_SYMBOLS:
-                        logger.warning(f"Invalid symbol '{symbol}' from AI for {account.name}, skipping")
-                        # Save invalid decision for debugging
-                        save_ai_decision(db, account, decision, portfolio, executed=False)
-                        continue
-
-                    if target_portion <= 0 or target_portion > 1:
-                        logger.warning(f"Invalid target_portion {target_portion} from AI for {account.name}, skipping")
-                        # Save invalid decision for debugging
-                        save_ai_decision(db, account, decision, portfolio, executed=False)
-                        continue
-
-                    # Get current price
-                    price = prices.get(symbol)
-                    if not price or price <= 0:
-                        logger.warning(f"Invalid price for {symbol} for {account.name}, skipping")
-                        # Save decision with execution failure
-                        save_ai_decision(db, account, decision, portfolio, executed=False)
-                        continue
-
-                    # Calculate quantity based on operation
-                    if operation == "buy":
-                        # Calculate quantity based on available cash and target portion
-                        available_cash = float(account.current_cash)
-                        available_cash_dec = Decimal(str(account.current_cash))
-                        order_value = available_cash * target_portion
-                        quantity = float(Decimal(str(order_value)) / Decimal(str(price)))
-                        quantity = round(quantity, 6)
-                        
-                        if quantity <= 0:
-                            logger.info(f"Calculated BUY quantity <= 0 for {symbol} for {account.name}, skipping")
-                            save_ai_decision(db, account, decision, portfolio, executed=False)
-                            continue
-
-                        cash_needed = _estimate_buy_cash_needed(price, quantity)
-                        if available_cash_dec < cash_needed:
-                            logger.info(
-                                "Skipping BUY for %s due to insufficient cash after fees: need $%.2f, current cash $%.2f",
-                                account.name,
-                                float(cash_needed),
-                                float(available_cash_dec),
-                            )
-                            save_ai_decision(db, account, decision, portfolio, executed=False)
-                            continue
-                        
-                        side = "BUY"
-
-                    elif operation == "sell":
-                        position = (
-                            db.query(Position)
-                            .filter(Position.account_id == account.id, Position.symbol == symbol, Position.market == "CRYPTO")
-                            .first()
-                        )
-
-                        if not position or float(position.available_quantity) <= 0:
-                            logger.info(f"No position available to SELL for {symbol} for {account.name}, skipping")
-                            save_ai_decision(db, account, decision, portfolio, executed=False)
-                            continue
-
-                        available_quantity = float(position.available_quantity)
-                        quantity = float(available_quantity * target_portion)
-                        if quantity > available_quantity:
-                            quantity = available_quantity
-
-                        side = "SELL"
-
-                    elif operation == "close":
-                        position = (
-                            db.query(Position)
-                            .filter(Position.account_id == account.id, Position.symbol == symbol, Position.market == "CRYPTO")
-                            .first()
-                        )
-
-                        if not position or float(position.available_quantity) <= 0:
-                            logger.info(f"No position available to CLOSE for {symbol} for {account.name}, skipping")
-                            save_ai_decision(db, account, decision, portfolio, executed=False)
-                            continue
-
-                        quantity = float(position.available_quantity)
-                        side = "CLOSE"
-
-                    else:
-                        continue
-
-                name = _get_symbol_name(symbol)
-
-                try:
-                    order = create_order(
-                        db=db,
-                        account=account,
-                        symbol=symbol,
-                        name=name,
-                        side=side,
-                        order_type="MARKET",
-                        price=None,
-                        quantity=quantity,
-                    )
-                except ValueError as create_err:
-                    message = str(create_err)
-                    if "Insufficient cash" in message or "Insufficient positions" in message:
-                        logger.info(
-                            "Skipping order for %s (%s %s): %s",
-                            account.name,
-                            side,
-                            symbol,
-                            message,
-                        )
-                        db.rollback()
-                        save_ai_decision(db, account, decision, portfolio, executed=False)
-                        continue
-                        raise
-
-                    db.commit()
-                    db.refresh(order)
-
-                    executed = check_and_execute_order(db, order)
-                    if executed:
-                        db.refresh(order)
-                        logger.info(
-                            f"AI order executed: account={account.name} {side} {symbol} {order.order_no} "
-                            f"quantity={quantity} reason='{reason}'"
-                        )
-                    else:
-                        logger.info(
-                            f"AI order created but not executed: account={account.name} {side} {symbol} "
-                            f"quantity={quantity} order_id={order.order_no} reason='{reason}'"
-                        )
-                    
-                    save_ai_decision(db, account, decision, portfolio, executed=executed, order_id=order.id)
+                # All accounts now use Hyperliquid trading pipeline
+                logger.info(f"Processing Hyperliquid trading for account {account.name}")
+                place_ai_driven_hyperliquid_order(account_id=account.id)
 
             except Exception as account_err:
                 logger.error(f"AI-driven order placement failed for account {account.name}: {account_err}", exc_info=True)
@@ -454,11 +277,6 @@ def place_ai_driven_hyperliquid_order(
                 logger.debug(f"Account {account_id} not found or inactive")
                 return
 
-            # Check if Hyperliquid enabled
-            if getattr(account, "hyperliquid_enabled", "false") != "true":
-                logger.debug(f"Account {account_id} does not have Hyperliquid enabled")
-                return
-
             if not bypass_auto_trading and getattr(account, "auto_trading_enabled", "false") != "true":
                 logger.debug(
                     "Account %s auto trading disabled - skipping Hyperliquid AI order",
@@ -468,15 +286,14 @@ def place_ai_driven_hyperliquid_order(
 
             accounts = [account]
         else:
-            # Get all active accounts with Hyperliquid enabled
+            # Get all active accounts with auto trading enabled
             accounts = db.query(Account).filter(
                 Account.is_active == "true",
-                Account.auto_trading_enabled == "true",
-                Account.hyperliquid_enabled == "true"
+                Account.auto_trading_enabled == "true"
             ).all()
 
             if not accounts:
-                logger.debug("No Hyperliquid-enabled accounts available")
+                logger.debug("No active accounts with auto trading enabled")
                 return
 
             if account_ids is not None:

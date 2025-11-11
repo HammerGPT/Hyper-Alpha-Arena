@@ -394,15 +394,15 @@ async def _send_hyperliquid_snapshot(db: Session, account_id: int, environment: 
         logging.error(f"Account {account_id} not found for Hyperliquid snapshot")
         return
 
-    if account.hyperliquid_enabled != "true":
-        logging.warning(f"Account {account_id} does not have Hyperliquid enabled")
+    configured_env = account.hyperliquid_environment
+    if not configured_env:
+        logging.warning(f"Account {account_id} does not have Hyperliquid environment configured")
         await manager.send_to_account(account_id, {
             "type": "error",
-            "message": "Hyperliquid not enabled for this account"
+            "message": "Hyperliquid environment not configured for this account"
         })
         return
 
-    configured_env = account.hyperliquid_environment
     if configured_env != environment:
         await manager.send_to_account(account_id, {
             "type": "error",

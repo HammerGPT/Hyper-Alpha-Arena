@@ -51,14 +51,13 @@ async def list_user_accounts(session_token: str, db: Session = Depends(get_db)):
         result = []
         for account in accounts:
             # Check if this is a Hyperliquid account
-            hyperliquid_enabled = getattr(account, "hyperliquid_enabled", "false") == "true"
             hyperliquid_environment = getattr(account, "hyperliquid_environment", None)
 
             current_cash = float(account.current_cash)
             frozen_cash = float(account.frozen_cash)
 
             # For Hyperliquid accounts, fetch real-time balance
-            if hyperliquid_enabled and hyperliquid_environment in ["testnet", "mainnet"]:
+            if hyperliquid_environment in ["testnet", "mainnet"]:
                 try:
                     cached_entry = get_cached_account_state(account.id)
                     if cached_entry:
@@ -168,14 +167,13 @@ async def get_account_details(
             raise HTTPException(status_code=403, detail="Access denied")
 
         # Check if this is a Hyperliquid account
-        hyperliquid_enabled = getattr(account, "hyperliquid_enabled", "false") == "true"
         hyperliquid_environment = getattr(account, "hyperliquid_environment", None)
 
         current_cash = float(account.current_cash)
         frozen_cash = float(account.frozen_cash)
 
         # For Hyperliquid accounts, fetch real-time balance
-        if hyperliquid_enabled and hyperliquid_environment in ["testnet", "mainnet"]:
+        if hyperliquid_environment in ["testnet", "mainnet"]:
             try:
                 cached_entry = get_cached_account_state(account.id)
                 if cached_entry:

@@ -123,7 +123,6 @@ class StrategyManager:
                 rows = (
                     db.query(AccountStrategyConfig, Account)
                     .join(Account, AccountStrategyConfig.account_id == Account.id)
-                    .filter(Account.hyperliquid_enabled != "true")
                     .all()
                 )
 
@@ -207,13 +206,6 @@ class StrategyManager:
                 if not account or account.auto_trading_enabled != "true":
                     logger.debug(f"Account {account_id} auto trading disabled, skipping strategy execution")
                     return
-                hyperliquid_enabled = getattr(account, 'hyperliquid_enabled', 'false') == 'true'
-                logger.info(f"Account {account_id} hyperliquid_enabled check: {getattr(account, 'hyperliquid_enabled', 'false')} -> {hyperliquid_enabled}")
-
-                # Only execute for Hyperliquid-enabled accounts
-                if not hyperliquid_enabled:
-                    logger.warning(f"Account {account_id} is not Hyperliquid-enabled, skipping strategy execution")
-                    return
 
             # Execute AI trading decision for Hyperliquid account
             logger.info(f"Account {account_id} executing Hyperliquid trading")
@@ -266,7 +258,6 @@ class HyperliquidStrategyManager(StrategyManager):
                 rows = (
                     db.query(AccountStrategyConfig, Account)
                     .join(Account, AccountStrategyConfig.account_id == Account.id)
-                    .filter(Account.hyperliquid_enabled == "true")
                     .all()
                 )
 

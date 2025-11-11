@@ -245,12 +245,11 @@ def preview_prompt(
             continue
 
         # Check if account uses Hyperliquid
-        hyperliquid_enabled = getattr(account, "hyperliquid_enabled", "false") == "true"
         hyperliquid_environment = getattr(account, "hyperliquid_environment", None)
 
         hyperliquid_state = None
 
-        if hyperliquid_enabled and hyperliquid_environment in ["testnet", "mainnet"]:
+        if hyperliquid_environment in ["testnet", "mainnet"]:
             # Get Hyperliquid real-time data
             try:
                 from services.hyperliquid_environment import get_hyperliquid_client
@@ -303,7 +302,7 @@ def preview_prompt(
             portfolio = _get_portfolio_data(db, account)
 
         # Determine active symbols + metadata for this account
-        if hyperliquid_enabled and hyperliquid_environment in ["testnet", "mainnet"]:
+        if hyperliquid_environment in ["testnet", "mainnet"]:
             active_symbols = requested_symbols or hyper_watchlist or base_symbol_order
             symbol_metadata_map = {}
             for sym in active_symbols:

@@ -77,14 +77,13 @@ async def list_all_accounts(db: Session = Depends(get_db)):
             user = db.query(User).filter(User.id == account.user_id).first()
 
             # Check if this is a Hyperliquid account
-            hyperliquid_enabled = getattr(account, "hyperliquid_enabled", "false") == "true"
             hyperliquid_environment = getattr(account, "hyperliquid_environment", None)
 
             current_cash = float(account.current_cash)
             frozen_cash = float(account.frozen_cash)
 
             # For Hyperliquid accounts, fetch real-time balance
-            if hyperliquid_enabled and hyperliquid_environment in ["testnet", "mainnet"]:
+            if hyperliquid_environment in ["testnet", "mainnet"]:
                 try:
                     cached_entry = get_cached_account_state(account.id)
                     if cached_entry:
@@ -199,11 +198,8 @@ async def get_account_strategy(account_id: int, db: Session = Depends(get_db)):
             trigger_interval=150,
             enabled=(account.auto_trading_enabled == "true"),
         )
-        # Only reload strategies for Hyperliquid-enabled accounts
-        if getattr(account, "hyperliquid_enabled", "false") == "true":
-            hyper_strategy_manager._load_strategies()
-        else:
-            logger.warning(f"Account {account_id} is not Hyperliquid-enabled, strategy will not be loaded")
+        # Reload strategies after creation
+        hyper_strategy_manager._load_strategies()
 
     return _serialize_strategy(account, strategy)
 
@@ -254,11 +250,8 @@ async def update_account_strategy(
         enabled=payload.enabled,
     )
 
-    # Only reload strategies for Hyperliquid-enabled accounts
-    if getattr(account, "hyperliquid_enabled", "false") == "true":
-        hyper_strategy_manager._load_strategies()
-    else:
-        logger.warning(f"Account {account_id} is not Hyperliquid-enabled, strategy will not be loaded")
+    # Reload strategies after update
+    hyper_strategy_manager._load_strategies()
     return _serialize_strategy(account, strategy)
 
 
@@ -949,29 +942,21 @@ async def trigger_ai_trade(
                     "reason": f"Manual HOLD trigger via API for {account.name}"
                 }]
 
-        # Check if account is Hyperliquid-enabled
-        hyperliquid_enabled = getattr(account, "hyperliquid_enabled", "false") == "true"
+        # Check if account has Hyperliquid environment configured
         hyperliquid_environment = getattr(account, "hyperliquid_environment", None)
 
         print(
             f"[DEBUG] Trigger API: account_id={account_id} "
-            f"hyperliquid_enabled={hyperliquid_enabled} "
             f"hyperliquid_environment={hyperliquid_environment}"
         )
 
-        # Debug condition check
-        print(f"[DEBUG] Type check: hyperliquid_enabled type={type(hyperliquid_enabled)}, value={repr(hyperliquid_enabled)}")
-        print(f"[DEBUG] Type check: hyperliquid_environment type={type(hyperliquid_environment)}, value={repr(hyperliquid_environment)}")
-        print(f"[DEBUG] Condition check: hyperliquid_enabled={bool(hyperliquid_enabled)}, env_check={hyperliquid_environment in ['testnet', 'mainnet']}")
         # Trigger AI trading based on account configuration
-        if hyperliquid_enabled and hyperliquid_environment in ["testnet", "mainnet"]:
+        if hyperliquid_environment in ["testnet", "mainnet"]:
             print(f"[DEBUG] ENTERING HYPERLIQUID BRANCH")
             try:
                 from services.trading_commands import place_ai_driven_hyperliquid_order
                 print(f"[DEBUG] Successfully imported place_ai_driven_hyperliquid_order")
                 print(f"[DEBUG] Calling place_ai_driven_hyperliquid_order for account {account_id}")
-                # Note: place_ai_driven_hyperliquid_order doesn't support samples override yet
-                # TODO: Add samples support for forced operations in Hyperliquid trading
                 place_ai_driven_hyperliquid_order(
                     account_id=account_id,
                     bypass_auto_trading=True,

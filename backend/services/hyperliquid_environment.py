@@ -121,9 +121,6 @@ def get_hyperliquid_client(db: Session, account_id: int) -> HyperliquidTradingCl
     if not account:
         raise ValueError(f"Account {account_id} not found")
 
-    if account.hyperliquid_enabled != "true":
-        raise ValueError(f"Account {account.name} not enabled for Hyperliquid trading")
-
     environment = account.hyperliquid_environment
     if not environment:
         raise ValueError(f"Account {account.name} has no environment configured")
@@ -321,12 +318,6 @@ def disable_hyperliquid_trading(db: Session, account_id: int) -> Dict[str, Any]:
     if not account:
         raise ValueError(f"Account {account_id} not found")
 
-    if account.hyperliquid_enabled != "true":
-        return {
-            'status': 'already_disabled',
-            'message': 'Hyperliquid trading already disabled'
-        }
-
     account.hyperliquid_enabled = "false"
 
     try:
@@ -362,12 +353,6 @@ def enable_hyperliquid_trading(db: Session, account_id: int) -> Dict[str, Any]:
     account = db.query(Account).filter(Account.id == account_id).first()
     if not account:
         raise ValueError(f"Account {account_id} not found")
-
-    if account.hyperliquid_enabled == "true":
-        return {
-            'status': 'already_enabled',
-            'message': 'Hyperliquid trading already enabled'
-        }
 
     # Verify configuration exists
     if not account.hyperliquid_environment:

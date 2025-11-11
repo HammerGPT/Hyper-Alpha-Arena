@@ -410,15 +410,10 @@ def _build_prompt_context(
     selected_symbols_csv = ", ".join(ordered_symbols) if ordered_symbols else "N/A"
     output_symbol_choices = "|".join(ordered_symbols) if ordered_symbols else "SYMBOL"
 
-    hyperliquid_enabled = getattr(account, "hyperliquid_enabled", "false") == "true"
     environment = getattr(account, "hyperliquid_environment", "testnet") or "testnet"
 
-    if hyperliquid_enabled and environment in ("testnet", "mainnet"):
-        if not hyperliquid_state:
-            raise ValueError(
-                f"Hyperliquid account {account.id} ({account.name}) is missing exchange state for prompt context"
-            )
-
+    # Use Hyperliquid state if provided (indicates Hyperliquid trading mode)
+    if hyperliquid_state and environment in ("testnet", "mainnet"):
         hl_positions = hyperliquid_state.get("positions", []) or []
         positions = {}
         for pos in hl_positions:
@@ -475,7 +470,8 @@ def _build_prompt_context(
     max_leverage = getattr(account, "max_leverage", 3)
     default_leverage = getattr(account, "default_leverage", 1)
 
-    if hyperliquid_enabled:
+    # Use hyperliquid_state to determine if this is Hyperliquid trading mode
+    if hyperliquid_state and environment in ("testnet", "mainnet"):
         trading_environment = f"Platform: Hyperliquid Perpetual Contracts | Environment: {environment.upper()}"
 
         if environment == "mainnet":
@@ -577,7 +573,7 @@ def _build_prompt_context(
         "total_return_percent": total_return_percent,
         "available_cash": available_cash,
         "total_account_value": total_account_value,
-        "holdings_detail": positions_detail if hyperliquid_enabled else holdings_detail,
+        "holdings_detail": positions_detail if hyperliquid_state else holdings_detail,
         "market_prices": market_prices,
         "selected_symbols_csv": selected_symbols_csv,
         "selected_symbols_detail": selected_symbols_detail,
@@ -1140,10 +1136,7 @@ def save_ai_decision(
                     prev_portion = symbol_value / total_balance
 
         # Get Hyperliquid environment for decision tagging
-        hyperliquid_enabled = getattr(account, "hyperliquid_enabled", "false") == "true"
-        hyperliquid_environment = None
-        if hyperliquid_enabled:
-            hyperliquid_environment = getattr(account, "hyperliquid_environment", None)
+        hyperliquid_environment = getattr(account, "hyperliquid_environment", None)
 
         # Create decision log entry
         decision_log = AIDecisionLog(

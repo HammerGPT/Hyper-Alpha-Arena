@@ -340,7 +340,7 @@ def _has_active_paper_accounts() -> bool:
                 Account.is_active == "true",
                 Account.auto_trading_enabled == "true",
                 Account.account_type == "AI",
-                Account.hyperliquid_enabled != "true",
+                Account.hyperliquid_environment.is_(None),
             )
             .first()
         )
