@@ -31,19 +31,46 @@ class HyperliquidClient:
         try:
             if not self.exchange:
                 self._initialize_exchange()
-            
+
             # Ensure symbol is in CCXT format (e.g., 'BTC/USD')
             formatted_symbol = self._format_symbol(symbol)
-            
+
             ticker = self.exchange.fetch_ticker(formatted_symbol)
             price = ticker['last']
-            
+
             logger.info(f"Got price for {formatted_symbol}: {price}")
             return float(price) if price else None
-            
+
         except Exception as e:
             logger.error(f"Error fetching price for {symbol}: {e}")
             return None
+
+    def check_symbol_tradability(self, symbol: str) -> bool:
+        """
+        Check if a symbol is tradable (can fetch price data).
+
+        This method is designed for validation purposes during symbol refresh
+        and won't log errors for invalid symbols.
+
+        Returns:
+            True if symbol can fetch valid price data, False otherwise
+        """
+        try:
+            if not self.exchange:
+                self._initialize_exchange()
+
+            formatted_symbol = self._format_symbol(symbol)
+            ticker = self.exchange.fetch_ticker(formatted_symbol)
+            price = ticker['last']
+
+            is_valid = price is not None and price > 0
+            if is_valid:
+                logger.debug(f"Symbol {symbol} is tradable (price: {price})")
+            return is_valid
+
+        except Exception:
+            # Silently return False for invalid symbols during validation
+            return False
 
     def get_kline_data(self, symbol: str, period: str = '1d', count: int = 100) -> List[Dict[str, Any]]:
         """Get kline/candlestick data for a symbol"""
