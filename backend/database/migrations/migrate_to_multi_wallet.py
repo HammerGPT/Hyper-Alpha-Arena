@@ -37,20 +37,28 @@ def create_hyperliquid_wallets_table():
     logger.info("✓ hyperliquid_wallets table created")
 
 
-def parse_wallet_address_from_private_key(private_key: str) -> str:
-    """Parse wallet address from private key using eth_account"""
+def parse_wallet_address_from_private_key(encrypted_private_key: str) -> str:
+    """Parse wallet address from encrypted private key"""
     try:
         from eth_account import Account as EthAccount
+        from utils.encryption import decrypt_private_key
+
+        # First decrypt the private key (it's stored encrypted in Account table)
+        private_key = decrypt_private_key(encrypted_private_key)
 
         # Remove 0x prefix if present
         if private_key.startswith('0x'):
             private_key = private_key[2:]
 
+        if len(private_key) != 64:
+            logger.error(f"Invalid private key length after decryption: {len(private_key)}")
+            return None
+
         # Create account from private key
-        account = EthAccount.from_key(private_key)
+        account = EthAccount.from_key('0x' + private_key)
         return account.address
     except Exception as e:
-        logger.error(f"Failed to parse wallet address from private key: {e}")
+        logger.error(f"Failed to parse wallet address from encrypted private key: {e}")
         return None
 
 
