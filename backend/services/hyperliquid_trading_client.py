@@ -157,10 +157,10 @@ class HyperliquidTradingClient:
 
     def _validate_environment(self, db: Session) -> bool:
         """
-        Validate that account's configured environment matches client environment
+        Validate that account has a wallet configured for this environment
 
-        This is a critical safety check to prevent wrong environment operations.
-        Called before every API call that modifies state.
+        Multi-wallet architecture: Each account can have separate testnet and mainnet wallets.
+        This validates that the wallet for the current environment exists and is active.
 
         Args:
             db: Database session
@@ -169,17 +169,24 @@ class HyperliquidTradingClient:
             True if validation passes
 
         Raises:
-            ValueError: If account not found
-            EnvironmentMismatchError: If environments don't match
+            ValueError: If account not found or wallet not configured for this environment
         """
+        from database.models import HyperliquidWallet
+
         account = db.query(Account).filter(Account.id == self.account_id).first()
         if not account:
             raise ValueError(f"Account {self.account_id} not found")
 
-        if account.hyperliquid_environment != self.environment:
-            raise EnvironmentMismatchError(
-                f"Account {account.name} is configured for {account.hyperliquid_environment}, "
-                f"but client is using {self.environment}. Operation blocked for safety."
+        # Check if wallet exists for this account and environment
+        wallet = db.query(HyperliquidWallet).filter(
+            HyperliquidWallet.account_id == self.account_id,
+            HyperliquidWallet.environment == self.environment
+        ).first()
+
+        if not wallet:
+            raise ValueError(
+                f"No {self.environment} wallet configured for account {account.name}. "
+                f"Please configure a wallet before trading."
             )
 
         return True
