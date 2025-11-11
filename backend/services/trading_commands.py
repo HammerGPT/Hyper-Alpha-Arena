@@ -400,16 +400,21 @@ def place_ai_driven_hyperliquid_order(
 
             # Check equity after getting positions - allow close operations even with zero equity
             if total_equity <= 0 and len(positions) == 0:
-                logger.debug(f"Account {account.name} has no equity and no positions, skipping")
-                print(f"[DEBUG TRADE] SKIP ACCOUNT: No equity ($0) and no positions")
+                logger.warning(
+                    f"⚠️  Account {account.name} (ID: {account.id}) skipped - No balance to trade! "
+                    f"Equity: ${total_equity:.2f}, Positions: 0. "
+                    f"Please deposit funds to wallet {wallet_address} to enable trading."
+                )
+                print(f"[DEBUG TRADE] ⚠️  SKIP ACCOUNT: No equity (${total_equity:.2f}) and no positions")
+                print(f"[DEBUG TRADE] Account needs funding at wallet: {wallet_address}")
                 continue
 
             if total_equity <= 0 and len(positions) > 0:
                 logger.warning(
-                    f"Account {account.name} has no equity but {len(positions)} open positions, "
-                    f"allowing AI to decide on close operations"
+                    f"⚠️  Account {account.name} (ID: {account.id}) has ZERO equity but {len(positions)} open positions! "
+                    f"Equity: ${total_equity:.2f}, Allowing AI to decide on close/risk management operations."
                 )
-                print(f"[DEBUG TRADE] WARNING: No equity but has positions - allowing close operations")
+                print(f"[DEBUG TRADE] ⚠️  WARNING: No equity but {len(positions)} positions exist - allowing close operations")
 
             # Build portfolio data for AI (using Hyperliquid real data)
             portfolio = {
