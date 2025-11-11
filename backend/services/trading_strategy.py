@@ -183,18 +183,29 @@ class StrategyManager:
 
     def _execute_strategy(self, account_id: int, symbol: str, event_time: datetime):
         """Execute strategy for account"""
+        print(f"[DEBUG BASE] _execute_strategy called: account_id={account_id}, symbol={symbol}")
+
         state = self.strategies.get(account_id)
+        print(f"[DEBUG BASE] state lookup result: {state is not None}, strategies count: {len(self.strategies)}")
+
         if not state:
+            print(f"[DEBUG BASE] No state found for account {account_id}, returning early")
             return
 
+        print(f"[DEBUG BASE] Acquiring lock for account {account_id}")
         with state.lock:
+            print(f"[DEBUG BASE] Lock acquired, checking running status: {state.running}")
             if state.running:
+                print(f"[DEBUG BASE] Account {account_id} already running, skipping")
                 logger.debug(f"Strategy for account {account_id} already running, skipping")
                 return
 
             state.running = True
+            print(f"[DEBUG BASE] Set running=True for account {account_id}")
 
+        print(f"[DEBUG BASE] Starting try block for account {account_id}")
         try:
+            print(f"[DEBUG BASE] About to execute Hyperliquid order for account {account_id}")
             logger.info(f"Executing strategy for account {account_id}, symbol {symbol}")
 
             # Get sampling data for AI decision
