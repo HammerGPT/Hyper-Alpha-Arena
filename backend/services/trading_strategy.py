@@ -283,17 +283,28 @@ class HyperliquidStrategyManager(StrategyManager):
 
     def _execute_strategy(self, account_id: int, symbol: str, event_time: datetime):
         """Execute strategy for Hyperliquid account"""
+        print(f"[DEBUG] _execute_strategy called: account_id={account_id}, symbol={symbol}")
+
         state = self.strategies.get(account_id)
+        print(f"[DEBUG] state lookup result: {state is not None}, strategies count: {len(self.strategies)}")
+
         if not state:
+            print(f"[DEBUG] No state found for account {account_id}, returning early")
             return
 
+        print(f"[DEBUG] Acquiring lock for account {account_id}")
         with state.lock:
+            print(f"[DEBUG] Lock acquired, checking running status: {state.running}")
             if state.running:
+                print(f"[DEBUG] Account {account_id} already running, skipping")
                 logger.debug(f"[HyperliquidStrategy] Account {account_id} already running, skipping")
                 return
             state.running = True
+            print(f"[DEBUG] Set running=True for account {account_id}")
 
+        print(f"[DEBUG] Starting try block for account {account_id}")
         try:
+            print(f"[DEBUG] About to execute Hyperliquid order for account {account_id}")
             logger.info(f"[HyperliquidStrategy] Executing strategy for account {account_id}, symbol {symbol}")
 
             with SessionLocal() as db:
