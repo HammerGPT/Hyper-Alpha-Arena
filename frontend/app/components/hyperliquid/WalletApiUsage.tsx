@@ -31,20 +31,10 @@ export default function WalletApiUsage({ accountId, environment }: WalletApiUsag
   // Get cache key based on account and environment
   const getCacheKey = () => `hyperliquid_rate_limit_${accountId}_${environment}`;
 
-  // Load cached data on mount
+  // Clear data when account or environment changes (force user to click Update)
   useEffect(() => {
-    const cached = localStorage.getItem(getCacheKey());
-    if (cached) {
-      try {
-        const data = JSON.parse(cached);
-        setRateLimit(data);
-        if (data.timestamp) {
-          setLastUpdateTime(new Date(data.timestamp));
-        }
-      } catch (error) {
-        console.error('Failed to parse cached rate limit data:', error);
-      }
-    }
+    setRateLimit(null);
+    setLastUpdateTime(null);
   }, [accountId, environment]);
 
   const handleUpdate = async () => {
