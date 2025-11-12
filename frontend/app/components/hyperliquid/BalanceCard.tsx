@@ -11,7 +11,7 @@ interface BalanceCardProps {
   environment: 'testnet' | 'mainnet';
   autoRefresh?: boolean;
   refreshInterval?: number; // in seconds
-  refreshToken?: number;
+  refreshTrigger?: number; // external trigger for forced refresh
 }
 
 export default function BalanceCard({
@@ -19,7 +19,7 @@ export default function BalanceCard({
   environment,
   autoRefresh = false,
   refreshInterval = 30,
-  refreshToken,
+  refreshTrigger,
 }: BalanceCardProps) {
   const [balance, setBalance] = useState<HyperliquidBalance | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +58,7 @@ export default function BalanceCard({
       const interval = setInterval(loadBalance, refreshInterval * 1000);
       return () => clearInterval(interval);
     }
-  }, [accountId, environment, autoRefresh, refreshInterval, refreshToken]);
+  }, [accountId, environment, autoRefresh, refreshInterval, refreshTrigger]);
 
   const loadBalance = async () => {
     const shouldShowSpinner = !hasLoaded;

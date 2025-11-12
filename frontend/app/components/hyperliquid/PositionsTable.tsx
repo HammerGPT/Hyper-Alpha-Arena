@@ -27,6 +27,7 @@ interface PositionsTableProps {
   environment: 'testnet' | 'mainnet';
   autoRefresh?: boolean;
   refreshInterval?: number;
+  refreshTrigger?: number; // external trigger for forced refresh
   onPositionClosed?: () => void;
   className?: string;
   showRefreshButton?: boolean;
@@ -37,6 +38,7 @@ export default function PositionsTable({
   environment,
   autoRefresh = false,
   refreshInterval = 30,
+  refreshTrigger,
   onPositionClosed,
   className,
   showRefreshButton = true,
@@ -54,7 +56,7 @@ export default function PositionsTable({
       const interval = setInterval(loadPositions, refreshInterval * 1000);
       return () => clearInterval(interval);
     }
-  }, [accountId, autoRefresh, refreshInterval]);
+  }, [accountId, environment, autoRefresh, refreshInterval, refreshTrigger]);
 
   const loadPositions = async () => {
     try {

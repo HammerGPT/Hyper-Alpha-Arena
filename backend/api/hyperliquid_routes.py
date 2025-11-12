@@ -1081,3 +1081,56 @@ async def set_trading_mode(
         logger.error(f"Failed to set trading mode: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to set trading mode: {str(e)}")
 
+
+@router.get("/wallets/all")
+async def get_all_wallets(db: Session = Depends(get_db)):
+    """
+    Get all Hyperliquid wallets (both testnet and mainnet) across all AI Trader accounts
+
+    Used by the Trade page wallet selector to display all available wallets
+    regardless of the current global trading mode.
+
+    Returns:
+        List of wallet objects with account information, sorted by account name and environment
+    """
+    from database.models import HyperliquidWallet, Account
+
+    try:
+        wallets = db.query(
+            HyperliquidWallet.id.label("wallet_id"),
+            HyperliquidWallet.account_id,
+            HyperliquidWallet.wallet_address,
+            HyperliquidWallet.environment,
+            HyperliquidWallet.is_active,
+            HyperliquidWallet.max_leverage,
+            HyperliquidWallet.default_leverage,
+            Account.name.label("account_name"),
+            Account.model
+        ).join(
+            Account, HyperliquidWallet.account_id == Account.id
+        ).filter(
+            Account.is_active == "true"
+        ).order_by(
+            Account.name.asc(),
+            HyperliquidWallet.environment.asc()
+        ).all()
+
+        return [
+            {
+                "wallet_id": w.wallet_id,
+                "account_id": w.account_id,
+                "account_name": w.account_name,
+                "model": w.model,
+                "wallet_address": w.wallet_address,
+                "environment": w.environment,
+                "is_active": w.is_active == "true",
+                "max_leverage": w.max_leverage,
+                "default_leverage": w.default_leverage
+            }
+            for w in wallets
+        ]
+
+    except Exception as e:
+        logger.error(f"Failed to get all wallets: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get wallets: {str(e)}")
+

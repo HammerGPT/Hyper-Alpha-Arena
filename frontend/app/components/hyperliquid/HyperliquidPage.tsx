@@ -1,54 +1,36 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Settings, BarChart3, PlusCircle } from 'lucide-react';
-import ConfigPanel from './ConfigPanel';
+import { BarChart3, PlusCircle, List } from 'lucide-react';
+import WalletSelector from './WalletSelector';
 import BalanceCard from './BalanceCard';
 import PositionsTable from './PositionsTable';
 import OrderForm from './OrderForm';
 import WalletApiUsage from './WalletApiUsage';
-import { getHyperliquidConfig } from '@/lib/hyperliquidApi';
 import type { HyperliquidEnvironment } from '@/lib/types/hyperliquid';
 
-interface HyperliquidPageProps {
-  accountId: number;
+interface WalletOption {
+  wallet_id: number
+  account_id: number
+  account_name: string
+  model: string | null
+  wallet_address: string
+  environment: HyperliquidEnvironment
+  is_active: boolean
+  max_leverage: number
+  default_leverage: number
 }
 
 const AVAILABLE_SYMBOLS = ['BTC', 'ETH', 'SOL', 'AVAX', 'MATIC', 'ARB', 'OP'];
 
-export default function HyperliquidPage({ accountId }: HyperliquidPageProps) {
+export default function HyperliquidPage() {
   const [activeTab, setActiveTab] = useState('overview');
-  const [config, setConfig] = useState<{
-    enabled: boolean;
-    environment: HyperliquidEnvironment;
-    maxLeverage: number;
-    defaultLeverage: number;
-  } | null>(null);
+  const [selectedWallet, setSelectedWallet] = useState<WalletOption | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  useEffect(() => {
-    loadConfig();
-  }, [accountId, refreshTrigger]);
-
-  const loadConfig = async () => {
-    try {
-      const data = await getHyperliquidConfig(accountId);
-      setConfig({
-        enabled: data.hyperliquid_enabled || data.enabled,
-        environment: data.environment,
-        maxLeverage: data.max_leverage || data.maxLeverage,
-        defaultLeverage: data.default_leverage || data.defaultLeverage,
-      });
-    } catch (error) {
-      console.error('Failed to load Hyperliquid config:', error);
-    }
-  };
-
-  const handleConfigUpdated = () => {
+  const handleWalletSelect = (wallet: WalletOption) => {
+    setSelectedWallet(wallet);
     setRefreshTrigger((prev) => prev + 1);
-    toast.success('Configuration updated');
   };
 
   const handleOrderPlaced = () => {
@@ -60,174 +42,153 @@ export default function HyperliquidPage({ accountId }: HyperliquidPageProps) {
     setRefreshTrigger((prev) => prev + 1);
   };
 
-  if (!config) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="text-gray-600 mt-4">Loading Hyperliquid configuration...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!config.enabled) {
-    return (
-      <div className="container mx-auto p-6 h-full overflow-y-scroll">
-        <div className="max-w-4xl mx-auto">
-          <div className="mb-8 text-center">
-            <h1 className="text-3xl font-bold mb-2">Hyperliquid Trading</h1>
-            <p className="text-gray-600">
-              Perpetual contract trading on Hyperliquid DEX
-            </p>
-          </div>
-
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 mb-6">
-            <div className="flex items-start space-x-3">
-              <Settings className="w-6 h-6 text-yellow-600 mt-1" />
-              <div>
-                <h3 className="font-semibold text-yellow-900 mb-2">
-                  Hyperliquid Not Configured
-                </h3>
-                <p className="text-sm text-yellow-800 mb-4">
-                  Please configure your Hyperliquid account settings below to start trading.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <ConfigPanel accountId={accountId} onConfigUpdated={handleConfigUpdated} />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="container mx-auto p-6 h-full overflow-y-scroll">
       <div className="mb-6">
-        <div className="mb-4">
-          <h1 className="text-3xl font-bold">Hyperliquid Trading</h1>
-          <p className="text-gray-600 mt-1">
-            Real perpetual contract trading on Hyperliquid DEX
-          </p>
-        </div>
+        <h1 className="text-3xl font-bold">🚀 Hyperliquid Trade</h1>
+        <p className="text-gray-600 mt-1">
+          手动交易操作台
+        </p>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-3 mb-6">
-          <TabsTrigger value="overview" className="flex items-center space-x-2">
-            <BarChart3 className="w-4 h-4" />
-            <span>Overview</span>
-          </TabsTrigger>
-          <TabsTrigger value="trade" className="flex items-center space-x-2">
-            <PlusCircle className="w-4 h-4" />
-            <span>Trade</span>
-          </TabsTrigger>
-          <TabsTrigger value="settings" className="flex items-center space-x-2">
-            <Settings className="w-4 h-4" />
-            <span>Settings</span>
-          </TabsTrigger>
-        </TabsList>
+      {/* 钱包选择器 */}
+      <div className="mb-6">
+        <WalletSelector
+          selectedWalletId={selectedWallet?.wallet_id || null}
+          onSelect={handleWalletSelect}
+        />
+      </div>
 
-        <TabsContent value="overview" className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <BalanceCard
-              accountId={accountId}
-              environment={config.environment}
-              autoRefresh={true}
-              refreshInterval={30}
-            />
+      {/* 如果选中钱包且钱包是active状态，显示交易界面 */}
+      {selectedWallet && selectedWallet.is_active && (
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="grid w-full grid-cols-3 mb-6">
+            <TabsTrigger value="overview" className="flex items-center space-x-2">
+              <BarChart3 className="w-4 h-4" />
+              <span>Overview</span>
+            </TabsTrigger>
+            <TabsTrigger value="trade" className="flex items-center space-x-2">
+              <PlusCircle className="w-4 h-4" />
+              <span>Trade</span>
+            </TabsTrigger>
+            <TabsTrigger value="positions" className="flex items-center space-x-2">
+              <List className="w-4 h-4" />
+              <span>Positions</span>
+            </TabsTrigger>
+          </TabsList>
 
-            <div className="space-y-6">
-              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-lg border border-blue-100">
-                <h3 className="text-lg font-semibold mb-3">Quick Stats</h3>
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-gray-600">Max Leverage</span>
-                    <span className="font-bold text-lg">{config.maxLeverage}x</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-gray-600">Default Leverage</span>
-                    <span className="font-bold text-lg">{config.defaultLeverage}x</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-gray-600">Environment</span>
-                    <Badge
-                      variant={config.environment === 'testnet' ? 'default' : 'destructive'}
-                      className="uppercase"
-                    >
-                      {config.environment}
-                    </Badge>
+          <TabsContent value="overview" className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <BalanceCard
+                accountId={selectedWallet.account_id}
+                environment={selectedWallet.environment}
+                autoRefresh={true}
+                refreshInterval={30}
+                refreshTrigger={refreshTrigger}
+              />
+
+              <div className="space-y-6">
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-lg border border-blue-100">
+                  <h3 className="text-lg font-semibold mb-3">Quick Stats</h3>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-600">Max Leverage</span>
+                      <span className="font-bold text-lg">{selectedWallet.max_leverage}x</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-600">Default Leverage</span>
+                      <span className="font-bold text-lg">{selectedWallet.default_leverage}x</span>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="bg-gradient-to-r from-purple-50 to-pink-50 p-6 rounded-lg border border-purple-100">
-                <h3 className="text-lg font-semibold mb-3">Risk Management</h3>
-                <ul className="space-y-2 text-sm text-gray-700">
-                  <li>• Start with lower leverage (2-3x)</li>
-                  <li>• Monitor liquidation prices closely</li>
-                  <li>• Keep margin usage below 75%</li>
-                  <li>• Use stop-loss orders when available</li>
-                  <li>• Never risk more than you can afford to lose</li>
-                </ul>
+                <div className="bg-gradient-to-r from-purple-50 to-pink-50 p-6 rounded-lg border border-purple-100">
+                  <h3 className="text-lg font-semibold mb-3">Risk Management</h3>
+                  <ul className="space-y-2 text-sm text-gray-700">
+                    <li>• Start with lower leverage (2-3x)</li>
+                    <li>• Monitor liquidation prices closely</li>
+                    <li>• Keep margin usage below 75%</li>
+                    <li>• Use stop-loss orders when available</li>
+                    <li>• Never risk more than you can afford to lose</li>
+                  </ul>
+                </div>
               </div>
             </div>
-          </div>
 
             <PositionsTable
-              accountId={accountId}
-              environment={config.environment}
+              accountId={selectedWallet.account_id}
+              environment={selectedWallet.environment}
               autoRefresh={true}
               refreshInterval={30}
+              refreshTrigger={refreshTrigger}
               onPositionClosed={handlePositionClosed}
             />
 
-          <WalletApiUsage
-            accountId={accountId}
-            environment={config.environment}
-          />
-        </TabsContent>
+            <WalletApiUsage
+              accountId={selectedWallet.account_id}
+              environment={selectedWallet.environment}
+            />
+          </TabsContent>
 
-        <TabsContent value="trade" className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2">
-              <OrderForm
-                accountId={accountId}
-                availableSymbols={AVAILABLE_SYMBOLS}
-                maxLeverage={config.maxLeverage}
-                defaultLeverage={config.defaultLeverage}
-                onOrderPlaced={handleOrderPlaced}
-              />
-            </div>
+          <TabsContent value="trade" className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2">
+                <OrderForm
+                  accountId={selectedWallet.account_id}
+                  environment={selectedWallet.environment}
+                  availableSymbols={AVAILABLE_SYMBOLS}
+                  maxLeverage={selectedWallet.max_leverage}
+                  defaultLeverage={selectedWallet.default_leverage}
+                  onOrderPlaced={handleOrderPlaced}
+                />
+              </div>
 
-            <div className="space-y-6">
-              <BalanceCard
-                accountId={accountId}
-                environment={config.environment}
-                autoRefresh={false}
-              />
+              <div className="space-y-6">
+                <BalanceCard
+                  accountId={selectedWallet.account_id}
+                  environment={selectedWallet.environment}
+                  autoRefresh={false}
+                  refreshTrigger={refreshTrigger}
+                />
 
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                <h4 className="font-semibold text-yellow-900 mb-2 text-sm">
-                  Trading Tips
-                </h4>
-                <ul className="space-y-1 text-xs text-yellow-800">
-                  <li>• Market orders execute immediately</li>
-                  <li>• Limit orders may not fill instantly</li>
-                  <li>• Higher leverage = higher risk</li>
-                  <li>• Check liquidation price before trading</li>
-                  <li>• Close positions to free up margin</li>
-                </ul>
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <h4 className="font-semibold text-yellow-900 mb-2 text-sm">
+                    Trading Tips
+                  </h4>
+                  <ul className="space-y-1 text-xs text-yellow-800">
+                    <li>• Market orders execute immediately</li>
+                    <li>• Limit orders may not fill instantly</li>
+                    <li>• Higher leverage = higher risk</li>
+                    <li>• Check liquidation price before trading</li>
+                    <li>• Close positions to free up margin</li>
+                  </ul>
+                </div>
               </div>
             </div>
-          </div>
-        </TabsContent>
+          </TabsContent>
 
-        <TabsContent value="settings" className="space-y-6">
-          <ConfigPanel accountId={accountId} onConfigUpdated={handleConfigUpdated} />
-        </TabsContent>
-      </Tabs>
+          <TabsContent value="positions" className="space-y-6">
+            <PositionsTable
+              accountId={selectedWallet.account_id}
+              environment={selectedWallet.environment}
+              autoRefresh={true}
+              refreshInterval={15}
+              refreshTrigger={refreshTrigger}
+              onPositionClosed={handlePositionClosed}
+            />
+          </TabsContent>
+        </Tabs>
+      )}
+
+      {/* 如果选中的钱包是disabled状态 */}
+      {selectedWallet && !selectedWallet.is_active && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+          <h3 className="font-semibold text-red-900 mb-2">该钱包已被禁用</h3>
+          <p className="text-sm text-red-800">
+            请在AI Traders管理页面重新启用该钱包后再进行交易。
+          </p>
+        </div>
+      )}
     </div>
   );
 }

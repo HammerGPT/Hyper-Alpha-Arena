@@ -23,6 +23,7 @@ import type { ManualOrderRequest, HyperliquidBalance, HyperliquidPosition } from
 
 interface OrderFormProps {
   accountId: number;
+  environment: 'testnet' | 'mainnet';
   availableSymbols: string[];
   maxLeverage: number;
   defaultLeverage: number;
@@ -34,6 +35,7 @@ type OrderType = 'market' | 'limit';
 
 export default function OrderForm({
   accountId,
+  environment,
   availableSymbols,
   maxLeverage,
   defaultLeverage,
