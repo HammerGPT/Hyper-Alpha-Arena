@@ -6,6 +6,24 @@
 [![GitHub stars](https://img.shields.io/github/stars/HammerGPT/Hyper-Alpha-Arena)](https://github.com/HammerGPT/Hyper-Alpha-Arena/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/HammerGPT/Hyper-Alpha-Arena)](https://github.com/HammerGPT/Hyper-Alpha-Arena/network)
 
+> **🚨 BREAKING CHANGE - Multi-Wallet Architecture (v0.6.0)**
+>
+> **For users upgrading from v0.5.x or earlier:** This version introduces a major architectural change. Each AI Trader can now configure separate wallets for Testnet and Mainnet environments.
+>
+> **⚠️ MIGRATION REQUIRED**: You must run the migration script to preserve your existing wallet configurations:
+> ```bash
+> cd backend
+> python database/migrations/migrate_to_multi_wallet.py
+> ```
+>
+> **What Changed:**
+> - New `hyperliquid_wallets` table for independent testnet/mainnet wallet storage
+> - Global trading mode switch (testnet/mainnet) applies to all AI Traders
+> - Environment isolation for cache, API calls, and data queries
+> - Enhanced wallet configuration UI with dual-environment display
+>
+> See [Upgrading from v0.5.x](#upgrading-from-v05x-multi-wallet-migration) section below for detailed instructions.
+
 ## Overview
 
 Hyper Alpha Arena is a production-ready AI trading platform where Large Language Models (LLMs) autonomously execute cryptocurrency trading strategies. Inspired by [nof1 Alpha Arena](https://nof1.ai), this platform enables AI models like GPT-5, Claude, and Deepseek to make intelligent trading decisions based on real-time market data and execute trades automatically.
@@ -16,31 +34,34 @@ Hyper Alpha Arena is a production-ready AI trading platform where Large Language
 - **Hyperliquid Testnet (Paper Trading)**: Risk-free testing with real market mechanics, free test funds, and actual order book - a superior paper trading experience
 - **Hyperliquid Mainnet**: Live trading on decentralized perpetual exchange with 1-50x leverage support (real capital at risk)
 
-> **⚠️ Important Update (v0.5.1)**: Traditional paper mode has been removed. **Hyperliquid Testnet now serves as the paper trading environment**, offering realistic market conditions with real order matching, free test funds, and zero risk. Existing users: please see upgrade instructions below.
-
-**Current Status**: v0.5.1 - Paper mode removed in favor of Hyperliquid Testnet for superior paper trading experience.
+**Current Status**: v0.6.0 - Multi-Wallet Architecture with independent testnet/mainnet wallet management.
 
 
 ## Features
 
-### Current Features (v0.5.0)
+### Current Features (v0.6.0)
 
-#### Paper Trading Features
+#### Core Trading Features
 - **Multi-Model LLM Support**: OpenAI API compatible models (GPT-5, Claude, Deepseek, etc.)
+- **Multi-Wallet Architecture**: Each AI Trader can configure separate wallets for Testnet and Mainnet
+- **Global Trading Mode**: Centralized environment switch affecting all AI Traders simultaneously
 - **Prompt Template Management**:
   - Customizable AI trading prompts with visual editor
   - Account-specific prompt binding system with Hyperliquid-specific templates
   - Default, Pro, and Hyperliquid templates with leverage education
   - Automatic fallback to default template for unbound accounts
-- **Paper Trading Engine**: Simulated order matching and position management for risk-free strategy testing
 - **Real-time Market Data**: Live cryptocurrency price feeds from multiple exchanges via ccxt
 - **AI Trader Management**: Create and manage multiple AI trading agents with independent configurations
 
-#### Hyperliquid Real Trading Features (🔥 NEW in v0.5.0)
+#### Hyperliquid Trading Features
 - **Perpetual Contract Trading**: Real order execution on Hyperliquid DEX
   - Market and limit orders with 1-50x leverage support
   - Long and short positions with automatic liquidation price calculation
   - Cross-margin mode with real-time margin usage monitoring
+- **Environment Isolation**: Strict separation of Testnet and Mainnet
+  - Separate wallet configurations per environment
+  - Environment-aware caching with `(account_id, environment)` composite keys
+  - API call isolation preventing cross-environment data contamination
 - **Risk Management**: Built-in safety mechanisms
   - Maximum leverage limits (configurable per account, 1-50x)
   - Margin usage alerts (auto-pause trading at 80% usage)
@@ -49,6 +70,10 @@ Hyper Alpha Arena is a production-ready AI trading platform where Large Language
   - Leverage-aware AI prompts with risk management education
   - Automatic leverage selection based on market confidence
   - Full integration with existing AI decision engine
+- **Enhanced Monitoring**:
+  - API rate limit tracking for Hyperliquid wallets
+  - Detailed exchange action logging
+  - Environment validation with clear error messages
 
 ## Screenshots
 
@@ -113,34 +138,83 @@ docker compose up -d --build # (or docker-compose up -d --build)
 - Data will be preserved when you stop/restart containers
 - Only `docker-compose down -v` will delete data (don't use `-v` flag unless you want to reset everything)
 
-### Upgrading from v0.5.0 (Paper Mode Removal)
+---
 
-**⚠️ Important**: Traditional paper mode has been completely removed in v0.5.1+. Use Hyperliquid Testnet instead for paper trading.
+### Upgrading from v0.5.x (Multi-Wallet Migration)
 
-**Quick Update** (preserves all data):
+**⚠️ IMPORTANT**: v0.6.0 introduces a breaking change with the new Multi-Wallet Architecture. You must run the migration script to preserve your wallet configurations.
+
+**What's New:**
+- Each AI Trader can now configure separate Testnet and Mainnet wallets
+- Global trading mode switch controls which environment all AI Traders use
+- Enhanced environment isolation prevents data contamination between testnet/mainnet
+
+**Migration Steps:**
+
+1. **Backup Your Data** (Recommended):
 ```bash
 cd Hyper-Alpha-Arena
-git pull origin main
-docker compose down
-docker compose up -d --build
+docker-compose exec postgres pg_dump -U alpha_user alpha_arena > backup_$(date +%Y%m%d).sql
 ```
 
-**After Update:**
-- Paper mode option removed from UI
-- Switch to "Testnet" mode for paper trading
-- All historical data preserved
-- Get Testnet key: https://app.hyperliquid-testnet.xyz/
-- Request free test funds from faucet
+2. **Pull Latest Code**:
+```bash
+git pull origin main
+```
+
+3. **Rebuild Containers** (This will auto-create the new `hyperliquid_wallets` table):
+```bash
+docker-compose down
+docker-compose up -d --build
+```
+
+4. **Run Migration Script** (Critical Step):
+```bash
+# Wait for containers to be healthy
+docker-compose ps
+
+# Run migration
+docker-compose exec app python database/migrations/migrate_to_multi_wallet.py
+```
+
+**Expected Migration Output:**
+```
+============================================================
+Starting migration to multi-wallet architecture
+============================================================
+Creating hyperliquid_wallets table...
+✓ hyperliquid_wallets table created
+Migrating Account private keys to hyperliquid_wallets...
+Found X accounts with Hyperliquid configuration
+  Account Y (Name): migrated wallet 0x...
+Migration complete: X wallets migrated, 0 skipped
+✓ Global trading_mode initialized to 'testnet'
+============================================================
+Migration completed successfully!
+============================================================
+```
+
+5. **Verify Migration**:
+- Open http://localhost:8802
+- Navigate to **AI Traders** → Select a trader → **Hyperliquid Wallet**
+- You should see your wallet configurations migrated to the new UI
+- Check **System Logs** for any migration warnings
+
+**Troubleshooting:**
+- If migration reports "0 wallets migrated", your accounts may not have had Hyperliquid configured previously
+- If you see "wallet already exists" messages, the migration has already been run
+- Old wallet configurations remain in the `accounts` table for backup purposes
+- Contact support if you encounter errors during migration
 
 ---
 
 ### Upgrading from Previous Versions (v0.4.x or earlier)
 
-**For v0.4.x or earlier users upgrading to v0.5.0+:**
+**For v0.4.x or earlier users upgrading to v0.6.0:**
 
-Due to significant database schema changes (wallet address tracking for multi-model support), we recommend two approaches:
+Due to significant database schema changes (wallet address tracking and multi-wallet architecture), we recommend a clean installation for older versions:
 
-#### Option 1: Clean Installation (Recommended for Most Users)
+**Clean Installation** (Deletes Historical Data):
 
 ```bash
 # ⚠️ This will delete all historical data
@@ -149,33 +223,11 @@ git pull origin main
 docker-compose up -d --build
 ```
 
-**Why clean installation?**
-- Old trading records don't have wallet addresses and won't appear in wallet-specific views
-- Simpler and faster than running migration scripts
-- Guaranteed compatibility with the new version
-
-#### Option 2: Preserve Historical Data (Advanced Users)
-
-If you must keep historical data, run migration scripts manually:
-
-```bash
-cd backend
-source .venv/bin/activate
-
-# Run all migrations
-python database/migrations/add_wallet_address_to_ai_decision_logs.py
-python database/migrations/add_wallet_address_to_hyperliquid_trades.py
-python database/migrations/add_wallet_address_to_hyperliquid_tables.py
-python database/migrations/add_wallet_address_to_snapshot_tables.py
-
-# Restart containers
-docker-compose restart
-```
-
-**Important Limitations:**
-- Historical records without wallet addresses will not display in wallet-specific views (Hyperliquid page, asset charts)
-- The data remains in the database but is filtered out by the new UI
-- Only new trades after migration will have wallet address tracking
+**Why clean installation for v0.4.x?**
+- Multiple breaking schema changes between v0.4.x and v0.6.0
+- Old trading records lack wallet addresses and environment tracking
+- Migration from v0.4.x → v0.6.0 requires multiple sequential migration scripts
+- Clean start ensures compatibility and avoids partial migration issues
 
 ### First-Time Setup
 
@@ -213,34 +265,59 @@ docker-compose restart
    - Export your private key from your wallet
    - ⚠️ **WARNING**: This is your real money wallet - keep private key secure!
 
-**Step 2: Configure in Hyper Alpha Arena**
+**Step 2: Configure Wallets for AI Trader**
 
 1. Open http://localhost:8802
-2. Navigate to **Hyperliquid** page in the sidebar
-3. Click **Environment Switcher** to select Testnet or Mainnet
-4. In the **Configuration Panel**:
+2. Navigate to **AI Traders** section in the sidebar
+3. Create or select an existing AI Trader
+4. Scroll down to **Hyperliquid Wallets** section
+5. You'll see two wallet configuration panels:
+   - **Testnet Wallet**: For paper trading (risk-free)
+   - **Mainnet Wallet**: For real trading (real funds)
+6. For each wallet you want to configure:
    - Enter your Hyperliquid private key (will be encrypted and stored securely)
-   - Set maximum leverage (1-50x, recommended: 5x for beginners)
-   - Click **Save Configuration**
-5. Your balance and positions will load automatically
+   - Set maximum leverage (1-50x, recommended: 3x for testing, 5x for mainnet)
+   - Set default leverage (1-3x recommended)
+   - Click **Save Wallet**
+7. Your wallet address will be automatically parsed from the private key
+8. Balance information will load automatically after configuration
 
-**Step 3: Configure Market Watchlist (Hyperliquid Trading)**
+**Step 3: Set Global Trading Mode**
 
-1. Navigate to **AI Trader Management → Market Watchlist**
-2. Select up to 10 symbols you want the AI to monitor (the order you pick determines the model’s evaluation order)
-3. Save your selection — Hyperliquid prompts, model decisions, and live data will only cover these symbols
-4. You can adjust the list anytime; paper-trading mode continues using its default fixed symbols
+1. Navigate to **Settings** (gear icon in sidebar) or **Hyperliquid** page
+2. Find the **Global Trading Environment** section
+3. Choose your mode:
+   - **TESTNET**: All AI Traders will use their testnet wallets (recommended for initial testing)
+   - **MAINNET**: All AI Traders will use their mainnet wallets (⚠️ REAL MONEY)
+4. Confirm the switch (especially important when switching to mainnet)
 
-**Step 4: Configure AI Trader for Hyperliquid**
+**Note on Multi-Wallet Architecture:**
+- Each AI Trader can have both testnet and mainnet wallets configured simultaneously
+- The global trading mode determines which wallet is active
+- You can switch modes instantly without reconfiguring wallets
+- Only configure mainnet wallets after thorough testnet testing
 
-1. Navigate to **AI Traders** section
-2. Create or edit an AI trader
-3. In the configuration:
-   - Enable **Hyperliquid Trading**: Toggle ON
-   - Select **Environment**: Testnet or Mainnet
-   - Choose **Prompt Template**: Select "Hyperliquid Pro" (includes leverage education)
-   - Configure trading strategy triggers
-4. The AI will now trade perpetual contracts on Hyperliquid
+**Step 4: Configure Market Watchlist**
+
+1. Navigate to **Hyperliquid** page → **Market Watchlist** section
+2. Select up to 10 symbols you want the AI to monitor (e.g., BTC, ETH, SOL)
+3. The order you select determines the AI's evaluation priority
+4. Save your selection
+5. This watchlist applies to all AI Traders and affects:
+   - Hyperliquid-specific AI prompts
+   - Model decision scope
+   - Live market data queries
+
+**Step 5: Enable Auto Trading**
+
+1. In your AI Trader configuration
+2. Toggle **Auto Trading** to ON
+3. Configure trading strategy:
+   - Trigger Mode: Real-time (recommended for active trading)
+   - Trigger Interval: 60-150 seconds
+   - Price Threshold: 0.5-2.0%
+4. Choose appropriate **Prompt Template**: "Hyperliquid Pro" includes leverage education
+5. Monitor initial trades carefully in **System Logs**
 
 **Step 5: Monitor Your Trading**
 
@@ -267,7 +344,11 @@ Supported models include:
 - **Anthropic**: Claude (via compatible endpoints)
 - **Custom APIs**: Any OpenAI-compatible endpoint
 
-**Important Note for Hyperliquid Trading**: Currently, we recommend using **one AI model per Hyperliquid wallet address** to maintain accurate performance statistics. Multi-model support for the same wallet address will be available in a future update.
+**Multi-Wallet Architecture Benefits:**
+- Each AI Trader has independent wallet configurations for testnet and mainnet
+- No wallet address conflicts between different AI models
+- Accurate per-model performance tracking across both environments
+- Seamless environment switching without reconfiguration
 
 The platform automatically handles model-specific configurations and parameter differences.
 
@@ -298,32 +379,53 @@ The platform automatically handles model-specific configurations and parameter d
 - [✅] **Prompt template system** - Hyperliquid-specific AI prompts
 - [✅] **Database snapshots** - Historical position and balance tracking
 
-### Phase 3: Enhancement & Optimization 🔄 (In Progress - v0.6.0)
-- [🔄] Multi-model account management and performance tracking
-- [ ] Multiple trading pair support (currently BTC-focused)
-- [ ] Enhanced prompt template UI with visual editor
-- [ ] Advanced order types (stop-loss, take-profit, trailing stops)
-- [ ] Multi-timeframe analysis for AI decision-making
-- [ ] Enhanced risk analytics dashboard
+### Phase 2.5: Multi-Wallet Architecture ✅ (Completed - v0.6.0)
+- [✅] **Independent wallet management** - Each AI Trader can configure separate testnet/mainnet wallets
+- [✅] **Global trading mode** - Centralized environment switch for all AI Traders
+- [✅] **Environment isolation enhancement** - Composite cache keys `(account_id, environment)`
+- [✅] **Wallet configuration UI redesign** - Dual-environment wallet panels with balance display
+- [✅] **Trade page refactor** - Global trading console with multi-wallet selector
+- [✅] **API rate limit tracking** - Monitor Hyperliquid request quota per wallet
+- [✅] **Exchange action logging** - Detailed API call history for debugging
+- [✅] **Migration tooling** - Automated script for upgrading from v0.5.x
+- [✅] **Environment parameter propagation** - All API calls and cache operations environment-aware
 
-### Phase 4: Trading Platform Expansion 📋 (Planned - v0.7.0)
+### Phase 3: Enhancement & Optimization 🔄 (In Progress - v0.7.0)
+- [🔄] Enhanced risk analytics dashboard with liquidation risk scoring
+- [ ] Multiple trading pair support expansion (beyond current BTC, ETH, SOL focus)
+- [ ] Advanced order types (stop-loss, take-profit, trailing stops)
+- [ ] Multi-timeframe analysis for AI decision-making (1m, 5m, 15m, 1h charts)
+- [ ] Backtesting framework with historical market data replay
+- [ ] Performance comparison tools for A/B testing different AI models
+
+### Phase 4: Trading Platform Expansion 📋 (Planned - v0.8.0)
 - [ ] Binance spot and futures trading
 - [ ] Bybit perpetual contracts
 - [ ] OKX derivatives trading
 - [ ] Exchange aggregation for best execution
+- [ ] Cross-exchange arbitrage detection
 
 ### Phase 5: Advanced Features 🚀 (Long Term - v1.0.0+)
 - [ ] AI agent marketplace and strategy sharing
-- [ ] Multi-user support with role-based access
-- [ ] Backtesting framework with historical data
-- [ ] Mobile app for trade monitoring
-- [ ] Advanced portfolio analytics and reporting
+- [ ] Multi-user support with role-based access control
+- [ ] Mobile app for real-time trade monitoring and alerts
+- [ ] Advanced portfolio analytics and reporting dashboard
+- [ ] Social trading features with strategy copying
 
 ## Key Improvements Over Original Project
 
+### 🔥 Major Enhancements in v0.6.0
+
+**Multi-Wallet Architecture**:
+   - Each AI Trader maintains independent testnet and mainnet wallet configurations
+   - Global trading mode switch enables instant environment changes without reconfiguration
+   - Enhanced environment isolation with composite cache keys preventing data contamination
+   - Dual-environment UI panels showing both testnet and mainnet balances simultaneously
+   - Automated migration tooling for seamless upgrades from previous versions
+
 ### 🔥 Major Enhancements in v0.5.0
 
- **Complete Hyperliquid DEX Integration**:
+**Complete Hyperliquid DEX Integration**:
    - Full perpetual contract trading on testnet and mainnet
    - 1-50x leverage support with AI-driven selection
    - Real-time position tracking and P&L calculation
