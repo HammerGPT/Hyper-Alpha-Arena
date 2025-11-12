@@ -431,9 +431,6 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
                                 API Key: {'*'.repeat(Math.min(20, Math.max(0, (account.api_key?.length || 0) - 4)))}{account.api_key?.slice(-4) || '****'}
                               </div>
                             )}
-                            <div className="text-xs text-muted-foreground">
-                              Cash: ${account.current_cash?.toLocaleString() || '0'}
-                            </div>
                           </div>
                           <div className="flex items-center gap-2">
                             <Button

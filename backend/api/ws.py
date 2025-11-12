@@ -720,7 +720,10 @@ async def _send_snapshot(db: Session, account_id: int):
 
 
 async def websocket_endpoint(websocket: WebSocket):
+    client_host = websocket.client.host if websocket.client else "unknown"
+    logging.info(f"[WS] New WebSocket connection from {client_host}")
     await websocket.accept()
+    logging.info(f"[WS] WebSocket connection accepted from {client_host}")
     try:
         manager.set_event_loop(asyncio.get_running_loop())
     except RuntimeError:
@@ -754,11 +757,14 @@ async def websocket_endpoint(websocket: WebSocket):
                     break
                 continue
             kind = msg.get("type")
+            logging.info(f"[WS] Received message type: {kind}")
             db: Session = SessionLocal()
             try:
                 if kind == "bootstrap":
                     #  mode: Create or get default default user
                     username = msg.get("username", "default")
+                    trading_mode = msg.get("trading_mode", "paper")
+                    logging.info(f"[WS] Bootstrap request: username={username}, trading_mode={trading_mode}")
                     user = get_or_create_user(db, username)
                     
                     # Get existing account for this user
@@ -777,16 +783,20 @@ async def websocket_endpoint(websocket: WebSocket):
 
                     # Register the connection (handles None account_id gracefully)
                     manager.register(account_id, websocket)
-                    
+                    logging.info(f"[WS] Registered connection for account_id={account_id}")
+
                     # Send bootstrap confirmation with account info
                     try:
                         if account:
+                            logging.info(f"[WS] Sending bootstrap_ok for account {account.id}")
                             await manager.send_to_account(account_id, {
                                 "type": "bootstrap_ok",
                                 "user": {"id": user.id, "username": user.username},
                                 "account": {"id": account.id, "name": account.name, "user_id": account.user_id}
                             })
+                            logging.info(f"[WS] Sending snapshot for account {account.id}")
                             await _send_snapshot(db, account_id)
+                            logging.info(f"[WS] Bootstrap complete for account {account.id}")
                         else:
                             # Send bootstrap with no account info
                             await websocket.send_text(json.dumps({

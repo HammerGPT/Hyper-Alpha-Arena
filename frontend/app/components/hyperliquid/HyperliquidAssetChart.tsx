@@ -21,7 +21,7 @@ interface HyperliquidAssetData {
   timestamp: number
   datetime_str: string
   account_id: number
-  total_equity: number
+  total_assets: number
   username: string
   wallet_address?: string | null
 }
@@ -30,14 +30,12 @@ interface HyperliquidAssetChartProps {
   accountId: number
   refreshTrigger?: number
   environment?: HyperliquidEnvironment
-  walletAddress?: string
 }
 
 export default function HyperliquidAssetChart({
   accountId,
   refreshTrigger,
   environment,
-  walletAddress,
 }: HyperliquidAssetChartProps) {
   const [data, setData] = useState<HyperliquidAssetData[]>([])
   const [loading, setLoading] = useState(true)
@@ -52,14 +50,10 @@ export default function HyperliquidAssetChart({
 
       const params = new URLSearchParams({
         timeframe: '5m',
-        trading_mode: 'hyperliquid',
+        trading_mode: environment || 'testnet',
       })
       if (environment) {
         params.set('environment', environment)
-      }
-
-      if (walletAddress) {
-        params.set('wallet_address', walletAddress)
       }
 
       const response = await fetch(`/api/account/asset-curve?${params.toString()}`)
@@ -75,7 +69,7 @@ export default function HyperliquidAssetChart({
     } finally {
       setLoading(false)
     }
-  }, [environment, walletAddress])
+  }, [environment])
 
   useEffect(() => {
     fetchData()
@@ -98,7 +92,7 @@ export default function HyperliquidAssetChart({
       }
 
       const point = timeGroups.get(item.timestamp)!
-      point[item.username] = item.total_equity
+      point[item.username] = item.total_assets
 
       accounts.set(item.account_id, {
         username: item.username,
@@ -117,7 +111,7 @@ export default function HyperliquidAssetChart({
       chartData[0][accountsData[0].username] || 1000 : 1000
 
     // Calculate Y-axis domain with smart padding
-    const allValues = data.map(item => item.total_equity).filter(val => typeof val === 'number')
+    const allValues = data.map(item => item.total_assets).filter(val => typeof val === 'number')
 
     if (allValues.length === 0) return { chartData, accountsData, yAxisDomain: [0, 1000], baseline }
 

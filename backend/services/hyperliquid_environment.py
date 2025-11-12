@@ -321,6 +321,10 @@ def get_account_hyperliquid_config(db: Session, account_id: int) -> Dict[str, An
     """
     Get Hyperliquid configuration for an account
 
+    NEW BEHAVIOR (Multi-wallet architecture):
+    - Checks HyperliquidWallet table for testnet/mainnet wallets
+    - Falls back to Account table for backward compatibility
+
     Args:
         db: Database session
         account_id: Target account ID
@@ -332,15 +336,44 @@ def get_account_hyperliquid_config(db: Session, account_id: int) -> Dict[str, An
     if not account:
         raise ValueError(f"Account {account_id} not found")
 
+    # Check for wallets in new multi-wallet architecture
+    testnet_wallet = db.query(HyperliquidWallet).filter(
+        HyperliquidWallet.account_id == account_id,
+        HyperliquidWallet.environment == "testnet",
+        HyperliquidWallet.is_active == "true"
+    ).first()
+
+    mainnet_wallet = db.query(HyperliquidWallet).filter(
+        HyperliquidWallet.account_id == account_id,
+        HyperliquidWallet.environment == "mainnet",
+        HyperliquidWallet.is_active == "true"
+    ).first()
+
+    # Determine if Hyperliquid is enabled (has at least one wallet)
+    has_any_wallet = bool(testnet_wallet or mainnet_wallet)
+
+    # For backward compatibility, also check old Account table fields
+    has_testnet = bool(testnet_wallet or account.hyperliquid_testnet_private_key)
+    has_mainnet = bool(mainnet_wallet or account.hyperliquid_mainnet_private_key)
+
+    # Determine enabled status: has any wallet OR old hyperliquid_enabled flag
+    enabled = has_any_wallet or (account.hyperliquid_enabled == "true")
+
+    # Get global trading mode as the current environment
+    current_environment = get_global_trading_mode(db)
+
     return {
         'account_id': account_id,
         'account_name': account.name,
-        'hyperliquid_enabled': account.hyperliquid_enabled == "true",
-        'environment': account.hyperliquid_environment,
+        'hyperliquid_enabled': enabled,
+        'environment': current_environment,  # Use global trading mode
         'max_leverage': account.max_leverage,
         'default_leverage': account.default_leverage,
-        'testnet_configured': bool(account.hyperliquid_testnet_private_key),
-        'mainnet_configured': bool(account.hyperliquid_mainnet_private_key)
+        'testnet_configured': has_testnet,
+        'mainnet_configured': has_mainnet,
+        # Additional info for frontend (optional, for WalletConfigPanel)
+        'hasTestnetKey': has_testnet,
+        'hasMainnetKey': has_mainnet
     }
 
 

@@ -209,14 +209,13 @@ def _build_hyperliquid_asset_curve(
     snapshot_db = SnapshotSessionLocal()
 
     try:
-        # Get active accounts with Hyperliquid environment configured
+        # Get all active AI accounts
+        # Note: We don't filter by environment at Account level anymore (multi-wallet architecture)
+        # Instead, we rely on HyperliquidAccountSnapshot filtering by environment
         account_query = db.query(Account).filter(
             Account.is_active == "true",
+            Account.account_type == "AI",
         )
-
-        env_filter_value = environment if environment in {"testnet", "mainnet"} else None
-        if env_filter_value:
-            account_query = account_query.filter(Account.hyperliquid_environment == env_filter_value)
 
         accounts = account_query.all()
 
@@ -224,6 +223,8 @@ def _build_hyperliquid_asset_curve(
             return []
 
         account_map = {account.id: account for account in accounts}
+
+        env_filter_value = environment if environment in {"testnet", "mainnet"} else None
 
         # Build bucket query for Hyperliquid snapshots
         time_seconds = cast(func.extract('epoch', HyperliquidAccountSnapshot.created_at), Integer)
@@ -282,7 +283,10 @@ def _build_hyperliquid_asset_curve(
                 "datetime_str": _ensure_utc(created_at).strftime("%Y-%m-%d %H:%M:%S"),
                 "account_id": account_id,
                 "username": account.name,
-                "total_equity": float(total_equity),
+                "user_id": account.user_id,
+                "total_assets": float(total_equity),  # For Hyperliquid, total_assets = total_equity
+                "cash": 0.0,  # Not tracked separately in Hyperliquid snapshots
+                "positions_value": float(total_equity),  # Approximate as total_equity
                 "wallet_address": snap_wallet,
             })
 

@@ -76,6 +76,8 @@ def _get_hyperliquid_positions(db: Session, account_id: Optional[int], environme
     Returns:
         Dict with generated_at, trading_mode, and accounts list
     """
+    from database.models import HyperliquidWallet
+
     # Get all AI accounts or specific account
     accounts_query = db.query(Account).filter(
         Account.account_type == "AI",
@@ -89,15 +91,18 @@ def _get_hyperliquid_positions(db: Session, account_id: Optional[int], environme
     snapshots = []
 
     for account in accounts:
-        # Get appropriate private key based on environment
-        if environment == "testnet":
-            encrypted_key = account.hyperliquid_testnet_private_key
-        else:  # mainnet
-            encrypted_key = account.hyperliquid_mainnet_private_key
+        # Check if wallet exists for this environment (multi-wallet architecture)
+        wallet = db.query(HyperliquidWallet).filter(
+            HyperliquidWallet.account_id == account.id,
+            HyperliquidWallet.environment == environment,
+            HyperliquidWallet.is_active == "true"
+        ).first()
 
-        if not encrypted_key:
-            logger.warning(f"Account {account.id} missing {environment} private key, skipping")
+        if not wallet:
+            logger.debug(f"Account {account.name} (ID: {account.id}) has no {environment} wallet configured, skipping")
             continue
+
+        encrypted_key = wallet.private_key_encrypted
 
         try:
             cached_state = get_cached_account_state(account.id)

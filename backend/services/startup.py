@@ -49,14 +49,15 @@ def initialize_services():
         )
         logger.info("Price cache cleanup task started (2-minute interval)")
 
-        # Start market data stream and subscribe asset snapshot handler
+        # Start market data stream
+        # NOTE: Paper trading snapshot service disabled - using Hyperliquid snapshots only
         combined_symbols = build_market_stream_symbols()
         print("Starting market data stream...")
         start_market_stream(combined_symbols, interval_seconds=1.5)
         print("Market data stream started")
-        subscribe_price_updates(handle_price_update)
-        print("Asset snapshot handler subscribed")
-        logger.info("Market data stream initialized with asset snapshot handler")
+        # subscribe_price_updates(handle_price_update)  # DISABLED: Paper trading snapshot
+        # print("Asset snapshot handler subscribed")
+        logger.info("Market data stream initialized")
 
         # Subscribe strategy manager to price updates
         from services.trading_strategy import handle_price_update as strategy_price_update

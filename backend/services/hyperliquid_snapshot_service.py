@@ -4,10 +4,11 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from database.connection import SessionLocal
-from database.models import Account
+from database.models import Account, HyperliquidWallet
 from database.snapshot_connection import SnapshotSessionLocal
 from database.snapshot_models import HyperliquidAccountSnapshot
-from services.hyperliquid_environment import get_hyperliquid_client
+from services.hyperliquid_environment import get_hyperliquid_client, get_global_trading_mode
+from api.ws import broadcast_arena_asset_update, manager
 
 logger = logging.getLogger(__name__)
 
@@ -42,20 +43,51 @@ class HyperliquidSnapshotService:
         try:
             # PostgreSQL handles concurrent access natively
 
-            # Find all active accounts with Hyperliquid environment configured
-            accounts = main_db.query(Account).filter(
+            # Get global trading mode to determine which wallets to snapshot
+            global_environment = get_global_trading_mode(main_db)
+            if not global_environment:
+                logger.debug("[HYPERLIQUID SNAPSHOT] No global trading mode set, skipping")
+                return
+
+            # Find all active AI accounts that have a wallet configured for the current environment
+            # Using JOIN to ensure only accounts with wallets are processed
+            accounts = main_db.query(Account).join(
+                HyperliquidWallet,
+                Account.id == HyperliquidWallet.account_id
+            ).filter(
                 Account.is_active == "true",
-                Account.hyperliquid_environment.isnot(None)
-            ).all()
+                Account.account_type == "AI",
+                HyperliquidWallet.environment == global_environment,
+                HyperliquidWallet.is_active == "true"
+            ).distinct().all()
 
             if not accounts:
+                logger.debug(f"[HYPERLIQUID SNAPSHOT] No accounts with {global_environment} wallets found")
                 return
 
             snapshot_count = 0
+            accounts_payload = []
+            total_available = 0.0
+            total_used = 0.0
+            total_equity = 0.0
+
             for account in accounts:
                 try:
-                    await self._take_account_snapshot(account, main_db, snapshot_db)
-                    snapshot_count += 1
+                    account_data = await self._take_account_snapshot(account, global_environment, main_db, snapshot_db)
+                    if account_data:
+                        snapshot_count += 1
+                        accounts_payload.append({
+                            "account_id": account.id,
+                            "account_name": account.name,
+                            "model": account.model,
+                            "available_cash": round(account_data["available_balance"], 2),
+                            "frozen_cash": round(account_data["used_margin"], 2),
+                            "positions_value": round(account_data["used_margin"], 2),  # For Hyperliquid, positions_value = used_margin
+                            "total_assets": round(account_data["total_equity"], 2),
+                        })
+                        total_available += account_data["available_balance"]
+                        total_used += account_data["used_margin"]
+                        total_equity += account_data["total_equity"]
                 except Exception as e:
                     logger.error(
                         f"[HYPERLIQUID SNAPSHOT] Failed for account {account.id} ({account.name}): {e}",
@@ -63,7 +95,27 @@ class HyperliquidSnapshotService:
                     )
 
             snapshot_db.commit()
-            logger.debug(f"[HYPERLIQUID SNAPSHOT] Took {snapshot_count} snapshots")
+            logger.debug(f"[HYPERLIQUID SNAPSHOT] Took {snapshot_count} snapshots for {global_environment}")
+
+            # Broadcast arena asset update to WebSocket clients
+            if accounts_payload and manager.has_connections():
+                from datetime import datetime, timezone
+                update_payload = {
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
+                    "totals": {
+                        "available_cash": round(total_available, 2),
+                        "frozen_cash": round(total_used, 2),
+                        "positions_value": round(total_used, 2),
+                        "total_assets": round(total_equity, 2),
+                    },
+                    "symbols": {},  # Hyperliquid positions are tracked separately
+                    "accounts": accounts_payload,
+                }
+                try:
+                    manager.schedule_task(broadcast_arena_asset_update(update_payload))
+                    logger.debug(f"[HYPERLIQUID SNAPSHOT] Broadcasted arena asset update for {len(accounts_payload)} accounts")
+                except Exception as broadcast_err:
+                    logger.debug(f"[HYPERLIQUID SNAPSHOT] Failed to broadcast arena asset update: {broadcast_err}")
 
         except Exception as e:
             logger.error(f"[HYPERLIQUID SNAPSHOT] Error: {e}", exc_info=True)
@@ -72,16 +124,21 @@ class HyperliquidSnapshotService:
             main_db.close()
             snapshot_db.close()
 
-    async def _take_account_snapshot(self, account: Account, main_db: Session, snapshot_db: Session):
-        """Take snapshot for a single Hyperliquid account"""
-        environment = account.hyperliquid_environment
+    async def _take_account_snapshot(self, account: Account, environment: str, main_db: Session, snapshot_db: Session):
+        """Take snapshot for a single Hyperliquid account
+
+        Returns:
+            dict: Account state data with keys: total_equity, available_balance, used_margin
+            None: If snapshot failed
+        """
         if not environment:
-            logger.warning(f"[HYPERLIQUID SNAPSHOT] Account {account.id} has no environment set")
-            return
+            logger.warning(f"[HYPERLIQUID SNAPSHOT] No environment provided for account {account.id}")
+            return None
 
         try:
             # Use existing API to get Hyperliquid client and account state
-            client = get_hyperliquid_client(main_db, account.id)
+            # Pass environment explicitly to ensure correct wallet is used
+            client = get_hyperliquid_client(main_db, account.id, override_environment=environment)
             account_state = client.get_account_state(main_db)
             try:
                 # Fetch positions to refresh caches for UI consumers
@@ -111,11 +168,14 @@ class HyperliquidSnapshotService:
                 f"used=${account_state['used_margin']:.2f}"
             )
 
+            return account_state
+
         except Exception as e:
             logger.error(
                 f"[HYPERLIQUID SNAPSHOT] Failed to get account state for account {account.id}: {e}",
                 exc_info=True
             )
+            return None
 
     def stop(self):
         """Stop snapshot service"""
