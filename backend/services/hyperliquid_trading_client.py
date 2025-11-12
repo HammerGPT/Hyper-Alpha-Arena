@@ -245,7 +245,7 @@ class HyperliquidTradingClient:
             }
 
             logger.debug(f"Account state: equity=${result['total_equity']:.2f}, available=${result['available_balance']:.2f}")
-            update_account_state_cache(self.account_id, result)
+            update_account_state_cache(self.account_id, result, self.environment)
             self._record_exchange_action(
                 action_type="fetch_account_state",
                 status="success",
@@ -346,7 +346,7 @@ class HyperliquidTradingClient:
                 })
 
             logger.debug(f"Found {len(positions)} open positions")
-            update_positions_cache(self.account_id, positions)
+            update_positions_cache(self.account_id, positions, self.environment)
             self._record_exchange_action(
                 action_type="fetch_positions",
                 status="success",

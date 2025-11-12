@@ -34,7 +34,7 @@ export default function HyperliquidPage() {
     setSelectedWallet(wallet);
     setRefreshTrigger((prev) => prev + 1);
     // Give components time to start loading, then clear switching flag
-    setTimeout(() => setIsWalletSwitching(false), 300);
+    setTimeout(() => setIsWalletSwitching(false), 1000);
   };
 
   const handleOrderPlaced = () => {

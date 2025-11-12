@@ -229,8 +229,13 @@ async def get_balance(
                     If not specified, uses global trading mode
     """
     try:
+        # Determine environment to use
+        if environment is None:
+            from services.hyperliquid_environment import get_global_trading_mode
+            environment = get_global_trading_mode(db)
+
         if not force_refresh:
-            cached_entry = get_cached_account_state(account_id)
+            cached_entry = get_cached_account_state(account_id, environment)
             if cached_entry:
                 payload = dict(cached_entry["data"])
                 payload["source"] = "cache"
@@ -273,15 +278,14 @@ async def get_positions(
                     If not specified, uses global trading mode
     """
     try:
+        # Determine environment to use
+        if environment is None:
+            from services.hyperliquid_environment import get_global_trading_mode
+            environment = get_global_trading_mode(db)
+
         if not force_refresh:
-            cached_entry = get_cached_positions(account_id)
+            cached_entry = get_cached_positions(account_id, environment)
             if cached_entry:
-                account_cache = get_cached_account_state(account_id)
-                environment = (
-                    account_cache["data"].get("environment")
-                    if account_cache and isinstance(account_cache.get("data"), dict)
-                    else "unknown"
-                )
                 return {
                     'account_id': account_id,
                     'environment': environment,
