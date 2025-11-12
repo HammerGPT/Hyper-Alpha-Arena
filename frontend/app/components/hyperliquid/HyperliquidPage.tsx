@@ -45,13 +45,13 @@ export default function HyperliquidPage() {
   return (
     <div className="container mx-auto p-6 h-full overflow-y-scroll">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold">🚀 Hyperliquid Trade</h1>
+        <h1 className="text-3xl font-bold">Hyperliquid Trade</h1>
         <p className="text-gray-600 mt-1">
-          手动交易操作台
+          Manual Trading Operations
         </p>
       </div>
 
-      {/* 钱包选择器 */}
+      {/* Wallet Selector */}
       <div className="mb-6">
         <WalletSelector
           selectedWalletId={selectedWallet?.wallet_id || null}
@@ -59,7 +59,7 @@ export default function HyperliquidPage() {
         />
       </div>
 
-      {/* 如果选中钱包且钱包是active状态，显示交易界面 */}
+      {/* Trading interface if wallet is selected and active */}
       {selectedWallet && selectedWallet.is_active && (
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="grid w-full grid-cols-3 mb-6">
@@ -180,12 +180,12 @@ export default function HyperliquidPage() {
         </Tabs>
       )}
 
-      {/* 如果选中的钱包是disabled状态 */}
+      {/* Disabled wallet warning */}
       {selectedWallet && !selectedWallet.is_active && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-          <h3 className="font-semibold text-red-900 mb-2">该钱包已被禁用</h3>
+          <h3 className="font-semibold text-red-900 mb-2">Wallet Disabled</h3>
           <p className="text-sm text-red-800">
-            请在AI Traders管理页面重新启用该钱包后再进行交易。
+            Please re-enable this wallet in the AI Traders management page before trading.
           </p>
         </div>
       )}

@@ -64,7 +64,7 @@ export default function WalletSelector({
     return (
       <div className="text-center text-muted-foreground py-4">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
-        加载钱包列表...
+        Loading wallets...
       </div>
     )
   }
@@ -75,11 +75,11 @@ export default function WalletSelector({
         <div className="text-center">
           <AlertTriangle className="w-12 h-12 text-yellow-600 mx-auto mb-3" />
           <h3 className="font-semibold text-yellow-900 mb-2">
-            系统暂无可用的Hyperliquid钱包
+            No Hyperliquid Wallets Available
           </h3>
           <p className="text-sm text-yellow-800">
-            请先在AI Traders管理页面为账户配置Hyperliquid钱包。<br/>
-            配置完成后即可在此页面进行手动交易操作。
+            Please configure Hyperliquid wallets for your AI Traders first.<br/>
+            Once configured, you can perform manual trading operations here.
           </p>
         </div>
       </div>
@@ -91,7 +91,7 @@ export default function WalletSelector({
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <label className="text-sm font-medium text-muted-foreground">💼 选择交易钱包</label>
+        <label className="text-sm font-medium text-muted-foreground">💼 Select Trading Wallet</label>
       </div>
 
       <select
@@ -118,10 +118,10 @@ export default function WalletSelector({
       {selectedWallet && (
         <div className="flex items-center gap-4 text-xs text-muted-foreground border-t border-border pt-3">
           <span>
-            绑定AI Trader: <strong className="text-foreground">{selectedWallet.account_name}</strong>
+            AI Trader: <strong className="text-foreground">{selectedWallet.account_name}</strong>
           </span>
           <span className="flex items-center gap-1">
-            环境:
+            Environment:
             <Badge
               variant={selectedWallet.environment === 'testnet' ? 'default' : 'destructive'}
               className="uppercase text-[10px] ml-1"
@@ -130,7 +130,7 @@ export default function WalletSelector({
             </Badge>
           </span>
           <span>
-            杠杆限制: <strong className="text-foreground">{selectedWallet.max_leverage}x</strong>
+            Max Leverage: <strong className="text-foreground">{selectedWallet.max_leverage}x</strong>
           </span>
         </div>
       )}
