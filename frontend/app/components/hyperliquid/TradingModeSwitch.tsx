@@ -97,7 +97,7 @@ export default function TradingModeSwitch() {
                   isTestnet ? 'text-green-600' : 'text-orange-600'
                 }`}
               >
-                {isTestnet ? '🧪 TESTNET' : '💰 MAINNET'}
+                {isTestnet ? 'TESTNET' : 'MAINNET'}
               </div>
             </div>
             <div className="text-sm text-muted-foreground mt-1">
@@ -116,7 +116,7 @@ export default function TradingModeSwitch() {
             disabled={isTestnet}
             className="h-20 flex-col"
           >
-            <div className="text-2xl mb-1">🧪</div>
+            <div className="text-lg font-semibold mb-1">TEST</div>
             <div>Testnet</div>
             <div className="text-xs opacity-70">Paper Trading</div>
           </Button>
@@ -126,7 +126,7 @@ export default function TradingModeSwitch() {
             disabled={!isTestnet}
             className="h-20 flex-col"
           >
-            <div className="text-2xl mb-1">💰</div>
+            <div className="text-lg font-semibold mb-1">MAIN</div>
             <div>Mainnet</div>
             <div className="text-xs opacity-70">Real Funds</div>
           </Button>

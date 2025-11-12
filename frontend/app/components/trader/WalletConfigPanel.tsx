@@ -231,7 +231,7 @@ export default function WalletConfigPanel({
           <div className="flex items-center gap-2">
             <Wallet className="h-4 w-4 text-muted-foreground" />
             <Badge variant={badgeVariant} className="text-xs">
-              {environment === 'testnet' ? '🧪 TESTNET' : '💰 MAINNET'}
+              {environment === 'testnet' ? 'TESTNET' : 'MAINNET'}
             </Badge>
           </div>
           {wallet && !editing && (
