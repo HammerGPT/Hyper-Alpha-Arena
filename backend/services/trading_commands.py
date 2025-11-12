@@ -531,33 +531,39 @@ def place_ai_driven_hyperliquid_order(
                     save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
                     continue
 
-                upper_bound = price * 1.05
-                lower_bound = price * 0.95
-
-                if max_price is not None and max_price > upper_bound:
-                    logger.warning(
-                        f"AI max_price {max_price} exceeds +5% band from market {price}; clamping to {upper_bound}"
-                    )
-                    max_price = upper_bound
-
-                if min_price is not None and min_price < lower_bound:
-                    logger.warning(
-                        f"AI min_price {min_price} below -5% band from market {price}; clamping to {lower_bound}"
-                    )
-                    min_price = lower_bound
-
                 order_result = None
 
                 if operation == "buy":
                     order_value = available_balance * target_portion
                     quantity = round(order_value / price, 6)
 
-                    price_to_use = max_price if max_price is not None else price
-                    if abs(price_to_use - price) / price > 0.05:
-                        logger.warning(
-                            f"BUY price {price_to_use} deviates >5% from market {price}; using market price"
+                    # Price validation for BUY operation
+                    if max_price is not None:
+                        price_deviation_percent = abs(max_price - price) / price * 100
+
+                        if price_deviation_percent > 1.0:
+                            logger.warning(
+                                f"⚠️  AI COMPLIANCE ISSUE - BUY {symbol}: "
+                                f"AI provided max_price ${max_price:.2f} exceeds Hyperliquid 1% oracle limit. "
+                                f"Market: ${price:.2f}, Deviation: {price_deviation_percent:.2f}%. "
+                                f"Order will likely be REJECTED by exchange. "
+                                f"Check prompt compliance in System Logs."
+                            )
+                        price_to_use = max_price
+                        logger.info(
+                            f"Using AI-provided max_price for BUY {symbol}: "
+                            f"market=${price:.2f}, order=${price_to_use:.2f}, "
+                            f"deviation={price_deviation_percent:.2f}%"
                         )
+                    else:
+                        # AI did not provide max_price - use market price
                         price_to_use = price
+                        logger.warning(
+                            f"⚠️  AI COMPLIANCE ISSUE - BUY {symbol}: "
+                            f"AI did not provide max_price in decision. "
+                            f"Using market price: ${price_to_use:.2f}. "
+                            f"Prompt should require max_price for all BUY operations."
+                        )
 
                     logger.info(
                         f"[HYPERLIQUID {environment.upper()}] Placing BUY order: "
@@ -579,12 +585,33 @@ def place_ai_driven_hyperliquid_order(
                     order_value = available_balance * target_portion
                     quantity = round(order_value / price, 6)
 
-                    price_to_use = min_price if min_price is not None else price
-                    if abs(price_to_use - price) / price > 0.05:
-                        logger.warning(
-                            f"SELL price {price_to_use} deviates >5% from market {price}; using market price"
+                    # Price validation for SELL operation
+                    if min_price is not None:
+                        price_deviation_percent = abs(min_price - price) / price * 100
+
+                        if price_deviation_percent > 1.0:
+                            logger.warning(
+                                f"⚠️  AI COMPLIANCE ISSUE - SELL {symbol}: "
+                                f"AI provided min_price ${min_price:.2f} exceeds Hyperliquid 1% oracle limit. "
+                                f"Market: ${price:.2f}, Deviation: {price_deviation_percent:.2f}%. "
+                                f"Order will likely be REJECTED by exchange. "
+                                f"Check prompt compliance in System Logs."
+                            )
+                        price_to_use = min_price
+                        logger.info(
+                            f"Using AI-provided min_price for SELL {symbol}: "
+                            f"market=${price:.2f}, order=${price_to_use:.2f}, "
+                            f"deviation={price_deviation_percent:.2f}%"
                         )
+                    else:
+                        # AI did not provide min_price - use market price
                         price_to_use = price
+                        logger.warning(
+                            f"⚠️  AI COMPLIANCE ISSUE - SELL {symbol}: "
+                            f"AI did not provide min_price in decision. "
+                            f"Using market price: ${price_to_use:.2f}. "
+                            f"Prompt should require min_price for all SELL operations."
+                        )
 
                     logger.info(
                         f"[HYPERLIQUID {environment.upper()}] Placing SELL order: "
@@ -614,6 +641,11 @@ def place_ai_driven_hyperliquid_order(
                         is_long = (position_to_close.get('szi', 0) or 0) > 0
                     else:
                         # Fall back to portfolio snapshot from prompt context
+                        logger.warning(
+                            f"⚠️  Position {symbol} not found in real-time positions list. "
+                            f"Using portfolio snapshot data from AI prompt context. "
+                            f"This may indicate position was closed by another operation or data sync issue."
+                        )
                         portfolio_positions = portfolio.get('positions') or {}
                         fallback_position = portfolio_positions.get(symbol)
                         if not fallback_position:
@@ -624,6 +656,12 @@ def place_ai_driven_hyperliquid_order(
                         position_size = abs(quantity)
                         is_long = quantity > 0
 
+                    # Validate position exists and size is non-zero
+                    if position_size <= 0:
+                        logger.warning(f"No position to close for {symbol} (size={position_size}), skipping close operation")
+                        save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
+                        continue
+
                     close_size = position_size * target_portion
 
                     logger.info(
@@ -632,7 +670,34 @@ def place_ai_driven_hyperliquid_order(
                     )
 
                     current_price = prices.get(symbol, 0)
-                    close_price = min_price if min_price else current_price * (0.95 if is_long else 1.05)
+
+                    # Price validation for Hyperliquid 1% oracle limit
+                    if min_price:
+                        price_deviation_percent = abs(min_price - current_price) / current_price * 100
+
+                        if price_deviation_percent > 1.0:
+                            logger.warning(
+                                f"⚠️  AI COMPLIANCE ISSUE - CLOSE {symbol}: "
+                                f"AI provided min_price ${min_price:.2f} exceeds Hyperliquid 1% oracle limit. "
+                                f"Market: ${current_price:.2f}, Deviation: {price_deviation_percent:.2f}%. "
+                                f"Order will likely be REJECTED by exchange. "
+                                f"Check prompt compliance in System Logs."
+                            )
+                        close_price = min_price
+                        logger.info(
+                            f"Using AI-provided min_price for CLOSE {symbol}: "
+                            f"market=${current_price:.2f}, order=${close_price:.2f}, "
+                            f"deviation={price_deviation_percent:.2f}%"
+                        )
+                    else:
+                        # AI did not provide min_price - use safe default
+                        close_price = current_price * (0.995 if is_long else 1.005)
+                        logger.warning(
+                            f"⚠️  AI COMPLIANCE ISSUE - CLOSE {symbol}: "
+                            f"AI did not provide min_price in decision. "
+                            f"Using fallback price: market=${current_price:.2f}, order=${close_price:.2f}. "
+                            f"Prompt should require min_price for all CLOSE operations."
+                        )
 
                     order_result = client.place_order(
                         db=db,
