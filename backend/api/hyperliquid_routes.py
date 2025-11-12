@@ -89,6 +89,7 @@ class ManualOrderRequest(BaseModel):
     price: Optional[float] = Field(None, gt=0, description="Price for limit orders")
     leverage: int = Field(1, ge=1, le=50, description="Position leverage")
     reduce_only: bool = Field(False, description="Only close existing positions")
+    environment: Optional[str] = Field(None, description="Environment override ('testnet' or 'mainnet')")
 
     class Config:
         json_schema_extra = {
@@ -211,6 +212,7 @@ async def get_config(
 async def get_balance(
     account_id: int,
     force_refresh: bool = False,
+    environment: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """
@@ -219,6 +221,12 @@ async def get_balance(
     Unless force_refresh is True, this endpoint returns the most recent cached
     snapshot captured by the backend. This avoids excessive direct calls to
     Hyperliquid when rendering dashboards.
+
+    Args:
+        account_id: Target account ID
+        force_refresh: If True, fetch directly from Hyperliquid instead of cache
+        environment: Optional environment override ("testnet" or "mainnet")
+                    If not specified, uses global trading mode
     """
     try:
         if not force_refresh:
@@ -229,7 +237,7 @@ async def get_balance(
                 payload["cached_at"] = _ts_to_iso(cached_entry["timestamp"])
                 return payload
 
-        client = get_hyperliquid_client(db, account_id)
+        client = get_hyperliquid_client(db, account_id, override_environment=environment)
         balance = client.get_account_state(db)
         balance["source"] = "live"
         ts_ms = balance.get("timestamp")
@@ -249,6 +257,7 @@ async def get_balance(
 async def get_positions(
     account_id: int,
     force_refresh: bool = False,
+    environment: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """
@@ -256,6 +265,12 @@ async def get_positions(
 
     By default, this uses the latest cached snapshot taken by the backend.
     Set force_refresh=true to fetch directly from Hyperliquid.
+
+    Args:
+        account_id: Target account ID
+        force_refresh: If True, fetch directly from Hyperliquid instead of cache
+        environment: Optional environment override ("testnet" or "mainnet")
+                    If not specified, uses global trading mode
     """
     try:
         if not force_refresh:
@@ -276,7 +291,7 @@ async def get_positions(
                     'cached_at': _ts_to_iso(cached_entry["timestamp"]),
                 }
 
-        client = get_hyperliquid_client(db, account_id)
+        client = get_hyperliquid_client(db, account_id, override_environment=environment)
         positions = client.get_positions(db)
         return {
             'account_id': account_id,
@@ -308,9 +323,13 @@ async def place_manual_order(
     - Emergency position closing
 
     **Warning**: This bypasses AI decision-making. Use with caution.
+
+    Args:
+        account_id: Target account ID
+        request: Order request with optional environment override
     """
     try:
-        client = get_hyperliquid_client(db, account_id)
+        client = get_hyperliquid_client(db, account_id, override_environment=request.environment)
 
         # Validate leverage against account limits
         from database.models import Account

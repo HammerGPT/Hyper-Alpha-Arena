@@ -27,10 +27,14 @@ export default function HyperliquidPage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [selectedWallet, setSelectedWallet] = useState<WalletOption | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [isWalletSwitching, setIsWalletSwitching] = useState(false);
 
   const handleWalletSelect = (wallet: WalletOption) => {
+    setIsWalletSwitching(true);
     setSelectedWallet(wallet);
     setRefreshTrigger((prev) => prev + 1);
+    // Give components time to start loading, then clear switching flag
+    setTimeout(() => setIsWalletSwitching(false), 300);
   };
 
   const handleOrderPlaced = () => {
@@ -61,8 +65,18 @@ export default function HyperliquidPage() {
 
       {/* Trading interface if wallet is selected and active */}
       {selectedWallet && selectedWallet.is_active && (
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-3 mb-6">
+        <div className="relative">
+          {isWalletSwitching && (
+            <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-10 flex items-center justify-center rounded-lg">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                <p className="text-sm text-gray-600">Loading wallet data...</p>
+              </div>
+            </div>
+          )}
+
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="grid w-full grid-cols-2 mb-6">
             <TabsTrigger value="overview" className="flex items-center space-x-2">
               <BarChart3 className="w-4 h-4" />
               <span>Overview</span>
@@ -70,10 +84,6 @@ export default function HyperliquidPage() {
             <TabsTrigger value="trade" className="flex items-center space-x-2">
               <PlusCircle className="w-4 h-4" />
               <span>Trade</span>
-            </TabsTrigger>
-            <TabsTrigger value="positions" className="flex items-center space-x-2">
-              <List className="w-4 h-4" />
-              <span>Positions</span>
             </TabsTrigger>
           </TabsList>
 
@@ -166,18 +176,8 @@ export default function HyperliquidPage() {
               </div>
             </div>
           </TabsContent>
-
-          <TabsContent value="positions" className="space-y-6">
-            <PositionsTable
-              accountId={selectedWallet.account_id}
-              environment={selectedWallet.environment}
-              autoRefresh={true}
-              refreshInterval={15}
-              refreshTrigger={refreshTrigger}
-              onPositionClosed={handlePositionClosed}
-            />
-          </TabsContent>
         </Tabs>
+        </div>
       )}
 
       {/* Disabled wallet warning */}

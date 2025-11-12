@@ -63,10 +63,16 @@ export async function switchEnvironment(
  * Account State & Balance
  */
 export async function getHyperliquidBalance(
-  accountId: number
+  accountId: number,
+  environment?: 'testnet' | 'mainnet'
 ): Promise<HyperliquidBalance> {
+  const params = new URLSearchParams();
+  if (environment) {
+    params.append('environment', environment);
+  }
+  const query = params.toString() ? `?${params.toString()}` : '';
   const response = await apiRequest(
-    `${HYPERLIQUID_API_BASE}/accounts/${accountId}/balance`
+    `${HYPERLIQUID_API_BASE}/accounts/${accountId}/balance${query}`
   );
   const data = await response.json();
   const lastUpdated =
@@ -97,10 +103,16 @@ export async function getHyperliquidAccountState(
  * Positions Management
  */
 export async function getHyperliquidPositions(
-  accountId: number
+  accountId: number,
+  environment?: 'testnet' | 'mainnet'
 ): Promise<HyperliquidPositionsResponse> {
+  const params = new URLSearchParams();
+  if (environment) {
+    params.append('environment', environment);
+  }
+  const query = params.toString() ? `?${params.toString()}` : '';
   const response = await apiRequest(
-    `${HYPERLIQUID_API_BASE}/accounts/${accountId}/positions`
+    `${HYPERLIQUID_API_BASE}/accounts/${accountId}/positions${query}`
   );
   const data = await response.json();
   const positions = Array.isArray(data.positions) ? data.positions : [];

@@ -80,6 +80,7 @@ export interface ManualOrderRequest {
   price?: number;
   reduce_only?: boolean;
   leverage?: number;
+  environment?: HyperliquidEnvironment;
 }
 
 export interface OrderResult {

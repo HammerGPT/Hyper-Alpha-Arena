@@ -74,7 +74,7 @@ export default function OrderForm({
 
   const loadBalance = async () => {
     try {
-      const data = await getHyperliquidBalance(accountId);
+      const data = await getHyperliquidBalance(accountId, environment);
       setBalance(data);
     } catch (error) {
       console.error('Failed to load balance:', error);
@@ -92,7 +92,7 @@ export default function OrderForm({
 
   const loadPositions = async () => {
     try {
-      const data = await getHyperliquidPositions(accountId);
+      const data = await getHyperliquidPositions(accountId, environment);
       setPositions(data);
     } catch (error) {
       console.error('Failed to load positions:', error);
@@ -170,6 +170,7 @@ export default function OrderForm({
         price: orderType === 'limit' ? parseFloat(price) : undefined,
         reduce_only: side === 'close',
         leverage: side !== 'close' ? leverage : 1,
+        environment,
       };
 
       const result = await placeManualOrder(accountId, request);

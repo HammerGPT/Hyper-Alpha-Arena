@@ -67,7 +67,7 @@ export default function BalanceCard({
         setIsInitialLoading(true);
       }
       setError(null);
-      const data = await getHyperliquidBalance(accountId);
+      const data = await getHyperliquidBalance(accountId, environment);
       setBalance(data);
       setHasLoaded(true);
     } catch (error: any) {

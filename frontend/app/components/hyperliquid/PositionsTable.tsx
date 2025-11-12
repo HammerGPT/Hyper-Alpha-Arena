@@ -61,7 +61,7 @@ export default function PositionsTable({
   const loadPositions = async () => {
     try {
       setLoading(true);
-      const data = await getHyperliquidPositions(accountId);
+      const data = await getHyperliquidPositions(accountId, environment);
       // Transform positions to display format
       const displayPositions: PositionDisplay[] = data.positions.map((pos) => {
         const side = getPositionSide(pos.szi);
@@ -116,6 +116,7 @@ export default function PositionsTable({
         size: position.sizeAbs,
         order_type: 'market',
         reduce_only: true,
+        environment,
       });
 
       toast.success(`Closed ${position.side} position for ${position.coin}`);
