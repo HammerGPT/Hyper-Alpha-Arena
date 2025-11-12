@@ -140,7 +140,9 @@ export default function HyperliquidAssetChart({
 
     const hasMultipleAccounts = accountsData.length > 1
     const paddingPercent = hasMultipleAccounts ? 0.05 : 0.15
-    const padding = range * paddingPercent
+
+    // When all values are the same (range = 0), use fixed padding based on baseline
+    const padding = range > 0 ? range * paddingPercent : baseline * 0.1
 
     return {
       chartData,
@@ -156,7 +158,11 @@ export default function HyperliquidAssetChart({
       (props: { cx?: number; cy?: number; index?: number; value?: number; payload?: any }) => {
         const { cx, cy, index, payload } = props
         if (cx == null || cy == null || index == null || !payload) return null
-        if (chartData.length === 0 || index !== chartData.length - 1) return null
+        if (chartData.length === 0) return null
+
+        // Find the last data point where this account has a value
+        const lastIndexWithValue = chartData.findLastIndex(point => typeof point[account.username] === 'number')
+        if (lastIndexWithValue === -1 || index !== lastIndexWithValue) return null
 
         const value = payload[account.username]
         if (typeof value !== 'number') return null

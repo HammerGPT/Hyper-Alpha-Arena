@@ -301,19 +301,9 @@ def _build_hyperliquid_asset_curve(
                 "wallet_address": snap_wallet,
             })
 
-        # Add accounts without snapshots with initial capital
-        now_utc = datetime.now(timezone.utc)
-        for account in accounts:
-            if account.id not in seen_accounts:
-                initial_capital = float(account.initial_capital or 1000)
-                result.append({
-                    "timestamp": _to_utc_timestamp(now_utc),
-                    "datetime_str": now_utc.strftime("%Y-%m-%d %H:%M:%S"),
-                    "account_id": account.id,
-                    "username": account.name,
-                    "total_equity": initial_capital,
-                    "wallet_address": wallet_address,
-                })
+        # No longer fill missing accounts with initial_capital
+        # Only return accounts that have actual snapshot data for this environment
+        # If an account doesn't have a wallet configured for this environment, it won't appear
 
         result.sort(key=lambda item: (item["timestamp"], item["account_id"]))
         return result

@@ -1,3 +1,12 @@
+/**
+ * ComprehensiveView - LEGACY PAPER TRADING COMPONENT
+ *
+ * @deprecated This component is kept for reference only. Paper trading mode has been removed.
+ *
+ * ACTIVE COMPONENT: Use HyperliquidView for Hyperliquid trading mode instead.
+ *
+ * DO NOT USE THIS COMPONENT for new features or modifications.
+ */
 import { useState, useEffect } from 'react'
 import AccountDataView from './AccountDataView'
 import { AIDecision } from '@/lib/api'

@@ -4,7 +4,7 @@
  * ARCHITECTURE:
  * - This component is the ACTIVE container for Hyperliquid mode (testnet/mainnet)
  * - Uses HyperliquidAssetChart for asset curve visualization with multi-account support
- * - Uses HyperliquidSummary for account summary display
+ * - Uses HyperliquidMultiAccountSummary for multi-account summary display
  * - Uses AlphaArenaFeed for real-time trading feed
  *
  * DO NOT CONFUSE WITH:
@@ -17,7 +17,7 @@ import React, { useState, useEffect } from 'react'
 import { useTradingMode } from '@/contexts/TradingModeContext'
 import { getArenaPositions } from '@/lib/api'
 import AlphaArenaFeed from '@/components/portfolio/AlphaArenaFeed'
-import HyperliquidSummary from '@/components/portfolio/HyperliquidSummary'
+import HyperliquidMultiAccountSummary from '@/components/portfolio/HyperliquidMultiAccountSummary'
 import HyperliquidAssetChart from './HyperliquidAssetChart'
 
 interface HyperliquidViewProps {
@@ -51,9 +51,13 @@ export default function HyperliquidView({ wsRef, refreshKey = 0 }: HyperliquidVi
     loadData()
   }, [tradingMode, refreshKey])
 
-  // Get first account ID for summary display (Hyperliquid summary shows one account)
-  const firstAccount = positionsData?.accounts?.[0]
-  const firstAccountId = firstAccount?.account_id
+  // Extract account list for multi-account summary
+  const accounts = positionsData?.accounts?.map((acc: any) => ({
+    account_id: acc.account_id,
+    account_name: acc.account_name,
+  })) || []
+
+  const firstAccountId = accounts[0]?.account_id
 
   if (loading && !positionsData) {
     return (
@@ -82,9 +86,10 @@ export default function HyperliquidView({ wsRef, refreshKey = 0 }: HyperliquidVi
           )}
         </div>
         <div className="border text-card-foreground shadow p-6 space-y-6">
-          <HyperliquidSummary
-            accountId={firstAccountId}
+          <HyperliquidMultiAccountSummary
+            accounts={accounts}
             refreshKey={refreshKey + chartRefreshKey}
+            selectedAccount={selectedAccount}
           />
         </div>
       </div>

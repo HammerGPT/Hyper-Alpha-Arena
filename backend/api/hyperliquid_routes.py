@@ -1062,6 +1062,12 @@ async def set_trading_mode(
 
         logger.warning(f"GLOBAL TRADING MODE CHANGED: {old_mode} -> {new_mode}")
 
+        # Clear all Hyperliquid caches when environment changes
+        # This ensures fresh data is fetched from the new environment
+        from services.hyperliquid_cache import clear_all_caches
+        clear_all_caches()
+        logger.info("Cleared all Hyperliquid caches after trading mode switch")
+
         return {
             'success': True,
             'mode': new_mode,

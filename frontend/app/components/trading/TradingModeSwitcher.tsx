@@ -23,6 +23,17 @@ export default function TradingModeSwitcher() {
     },
   ];
 
+  const handleModeClick = (mode: TradingMode) => {
+    console.log('[TradingModeSwitcher] Button clicked, target mode:', mode);
+    console.log('[TradingModeSwitcher] Current tradingMode:', tradingMode);
+    try {
+      setTradingMode(mode);
+      console.log('[TradingModeSwitcher] setTradingMode called successfully');
+    } catch (error) {
+      console.error('[TradingModeSwitcher] Error calling setTradingMode:', error);
+    }
+  };
+
   return (
     <div className="flex items-center space-x-2">
       <span className="text-xs font-medium text-gray-600">Mode:</span>
@@ -30,7 +41,7 @@ export default function TradingModeSwitcher() {
         {modes.map((mode) => (
           <button
             key={mode.value}
-            onClick={() => setTradingMode(mode.value)}
+            onClick={() => handleModeClick(mode.value)}
             className={`
               px-3 py-1.5 rounded text-xs font-medium transition-all
               ${

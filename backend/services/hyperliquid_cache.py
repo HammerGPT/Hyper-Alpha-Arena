@@ -77,6 +77,11 @@ def clear_account_cache(account_id: Optional[int] = None) -> None:
             _POSITIONS_CACHE.pop(account_id, None)
 
 
+def clear_all_caches() -> None:
+    """Clear all cached entries across all accounts."""
+    clear_account_cache(account_id=None)
+
+
 def get_cache_stats() -> Dict[str, Any]:
     """Return basic cache diagnostics."""
     with _cache_lock:

@@ -386,7 +386,11 @@ def get_completed_trades(
         snapshot_db = SnapshotSessionLocal()
         try:
             query = snapshot_db.query(HyperliquidTrade).order_by(desc(HyperliquidTrade.trade_time))
-            query = query.filter(HyperliquidTrade.environment == trading_mode)
+            # Strictly filter by environment and exclude NULL
+            query = query.filter(
+                HyperliquidTrade.environment == trading_mode,
+                HyperliquidTrade.environment.isnot(None)
+            )
             if account_id:
                 query = query.filter(HyperliquidTrade.account_id == account_id)
             if wallet_address:
@@ -555,7 +559,11 @@ def get_model_chat(
         if trading_mode == "paper":
             query = query.filter(AIDecisionLog.hyperliquid_environment == None)
         else:
-            query = query.filter(AIDecisionLog.hyperliquid_environment == trading_mode)
+            # For testnet/mainnet, strictly match environment and exclude NULL
+            query = query.filter(
+                AIDecisionLog.hyperliquid_environment == trading_mode,
+                AIDecisionLog.hyperliquid_environment.isnot(None)
+            )
 
     decision_rows = query.limit(limit).all()
 

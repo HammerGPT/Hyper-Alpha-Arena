@@ -140,6 +140,13 @@ export default function AlphaArenaFeed({
       try {
         const msg = JSON.parse(event.data)
 
+        // Filter by trading mode/environment first
+        const msgEnvironment = msg.trade?.environment || msg.decision?.environment || msg.trading_mode
+        if (msgEnvironment && msgEnvironment !== tradingMode) {
+          // Ignore messages from different trading environments
+          return
+        }
+
         // Only process messages for the active account or all accounts
         const msgAccountId = msg.trade?.account_id || msg.decision?.account_id
         const shouldProcess = activeAccount === 'all' || !msgAccountId || msgAccountId === activeAccount
