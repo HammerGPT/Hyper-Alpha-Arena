@@ -600,6 +600,7 @@ async def get_action_summary(
 @router.get("/accounts/{account_id}/rate-limit")
 async def get_account_rate_limit(
     account_id: int,
+    environment: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """
@@ -616,6 +617,8 @@ async def get_account_rate_limit(
 
     Args:
         account_id: Account ID
+        environment: Optional environment override ("testnet" or "mainnet")
+                    If not specified, uses global trading mode
         db: Database session
 
     Returns:
@@ -625,8 +628,13 @@ async def get_account_rate_limit(
         HTTPException: If account not found or Hyperliquid not enabled
     """
     try:
-        # Get Hyperliquid client for this account
-        client = get_hyperliquid_client(db, account_id)
+        # Determine environment to use
+        if environment is None:
+            from services.hyperliquid_environment import get_global_trading_mode
+            environment = get_global_trading_mode(db)
+
+        # Get Hyperliquid client for this account with environment override
+        client = get_hyperliquid_client(db, account_id, override_environment=environment)
 
         if not client:
             raise HTTPException(

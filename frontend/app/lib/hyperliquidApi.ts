@@ -307,7 +307,8 @@ export function getRiskLevel(marginPercent: number): 'low' | 'medium' | 'high' {
  * Rate Limit Management
  */
 export async function getWalletRateLimit(
-  accountId: number
+  accountId: number,
+  environment?: HyperliquidEnvironment
 ): Promise<{
   success: boolean;
   accountId: number;
@@ -323,9 +324,11 @@ export async function getWalletRateLimit(
     walletAddress: string;
   };
 }> {
-  const response = await apiRequest(
-    `${HYPERLIQUID_API_BASE}/accounts/${accountId}/rate-limit`
-  );
+  const url = environment
+    ? `${HYPERLIQUID_API_BASE}/accounts/${accountId}/rate-limit?environment=${environment}`
+    : `${HYPERLIQUID_API_BASE}/accounts/${accountId}/rate-limit`;
+
+  const response = await apiRequest(url);
   return response.json();
 }
 

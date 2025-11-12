@@ -50,7 +50,7 @@ export default function WalletApiUsage({ accountId, environment }: WalletApiUsag
   const handleUpdate = async () => {
     setLoading(true);
     try {
-      const response = await getWalletRateLimit(accountId);
+      const response = await getWalletRateLimit(accountId, environment);
 
       if (response.success && response.rateLimit) {
         const dataWithTimestamp = {
