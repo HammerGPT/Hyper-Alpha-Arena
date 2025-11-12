@@ -1,3 +1,18 @@
+/**
+ * HyperliquidView - Hyperliquid Trading Mode Main View
+ *
+ * ARCHITECTURE:
+ * - This component is the ACTIVE container for Hyperliquid mode (testnet/mainnet)
+ * - Uses HyperliquidAssetChart for asset curve visualization with multi-account support
+ * - Uses HyperliquidSummary for account summary display
+ * - Uses AlphaArenaFeed for real-time trading feed
+ *
+ * DO NOT CONFUSE WITH:
+ * - ComprehensiveView: Legacy paper trading component (deprecated, kept for reference)
+ * - AssetCurveWithData: Paper mode chart component (NOT used here)
+ *
+ * CURRENT STATUS: Active production component for multi-wallet Hyperliquid architecture
+ */
 import React, { useState, useEffect } from 'react'
 import { useTradingMode } from '@/contexts/TradingModeContext'
 import { getArenaPositions } from '@/lib/api'
@@ -15,6 +30,7 @@ export default function HyperliquidView({ wsRef, refreshKey = 0 }: HyperliquidVi
   const [loading, setLoading] = useState(true)
   const [positionsData, setPositionsData] = useState<any>(null)
   const [chartRefreshKey, setChartRefreshKey] = useState(0)
+  const [selectedAccount, setSelectedAccount] = useState<number | 'all'>('all')
   const environment = tradingMode === 'testnet' || tradingMode === 'mainnet' ? tradingMode : undefined
 
   // Load data from APIs
@@ -57,6 +73,7 @@ export default function HyperliquidView({ wsRef, refreshKey = 0 }: HyperliquidVi
               accountId={firstAccountId}
               refreshTrigger={chartRefreshKey}
               environment={environment}
+              selectedAccount={selectedAccount}
             />
           ) : (
             <div className="bg-card border border-border rounded-lg h-full flex items-center justify-center">
@@ -75,7 +92,11 @@ export default function HyperliquidView({ wsRef, refreshKey = 0 }: HyperliquidVi
       {/* Right Panel - Feed */}
       <div className="col-span-2 flex flex-col min-h-0">
         <div className="flex-1 min-h-0 border border-border rounded-lg bg-card shadow-sm px-4 py-3 flex flex-col">
-          <AlphaArenaFeed wsRef={wsRef} />
+          <AlphaArenaFeed
+            wsRef={wsRef}
+            selectedAccount={selectedAccount}
+            onSelectedAccountChange={setSelectedAccount}
+          />
         </div>
       </div>
     </div>

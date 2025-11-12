@@ -1,3 +1,17 @@
+/**
+ * HyperliquidAssetChart - Multi-Account Asset Curve Chart for Hyperliquid Mode
+ *
+ * Used by: HyperliquidView (line 6 import, line 56 usage)
+ *
+ * Features:
+ * - 5-minute bucketed asset snapshots
+ * - Multi-account display with individual curves
+ * - Baseline reference line for profit/loss visualization
+ * - Terminal dots with account logos and current values
+ *
+ * Data source: /api/account/asset-curve with environment parameter (testnet/mainnet)
+ * Backend field: total_assets (NOT total_equity - field name fixed in v0.5.1)
+ */
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
   LineChart,
@@ -30,12 +44,14 @@ interface HyperliquidAssetChartProps {
   accountId: number
   refreshTrigger?: number
   environment?: HyperliquidEnvironment
+  selectedAccount?: number | 'all'
 }
 
 export default function HyperliquidAssetChart({
   accountId,
   refreshTrigger,
   environment,
+  selectedAccount,
 }: HyperliquidAssetChartProps) {
   const [data, setData] = useState<HyperliquidAssetData[]>([])
   const [loading, setLoading] = useState(true)
@@ -55,6 +71,9 @@ export default function HyperliquidAssetChart({
       if (environment) {
         params.set('environment', environment)
       }
+      if (selectedAccount && selectedAccount !== 'all') {
+        params.set('account_id', String(selectedAccount))
+      }
 
       const response = await fetch(`/api/account/asset-curve?${params.toString()}`)
       if (!response.ok) {
@@ -69,7 +88,7 @@ export default function HyperliquidAssetChart({
     } finally {
       setLoading(false)
     }
-  }, [environment])
+  }, [environment, selectedAccount])
 
   useEffect(() => {
     fetchData()

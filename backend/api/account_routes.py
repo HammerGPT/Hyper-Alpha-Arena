@@ -494,9 +494,10 @@ async def get_asset_curve(
     trading_mode: str = "testnet",
     environment: Optional[str] = None,
     wallet_address: Optional[str] = None,
+    account_id: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
-    """Get asset curve data for all accounts with specified timeframe and trading mode"""
+    """Get asset curve data for all accounts (or specific account) with specified timeframe and trading mode"""
     try:
         from services.asset_curve_calculator import get_all_asset_curves_data_new
         data = get_all_asset_curves_data_new(
@@ -505,6 +506,7 @@ async def get_asset_curve(
             trading_mode=trading_mode,
             environment=environment,
             wallet_address=wallet_address,
+            account_id=account_id,
         )
         return data
     except Exception as e:

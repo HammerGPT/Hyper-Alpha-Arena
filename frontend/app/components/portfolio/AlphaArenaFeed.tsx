@@ -8,6 +8,7 @@ import {
   getArenaModelChat,
   getArenaPositions,
   getArenaTrades,
+  getAccounts,
 } from '@/lib/api'
 import { useArenaData } from '@/contexts/ArenaDataContext'
 import { useTradingMode } from '@/contexts/TradingModeContext'
@@ -70,6 +71,7 @@ export default function AlphaArenaFeed({
   const { tradingMode } = useTradingMode()
   const [activeTab, setActiveTab] = useState<FeedTab>('trades')
   const [allTraderOptions, setAllTraderOptions] = useState<ArenaAccountMeta[]>([])
+  const [loadingAccounts, setLoadingAccounts] = useState(false)
   const [internalSelectedAccount, setInternalSelectedAccount] = useState<number | 'all'>(
     selectedAccountProp ?? 'all',
   )
@@ -102,6 +104,7 @@ export default function AlphaArenaFeed({
 
   // Compute active account and cache key
   const activeAccount = useMemo(() => selectedAccountProp ?? internalSelectedAccount, [selectedAccountProp, internalSelectedAccount])
+  const prevActiveAccount = useRef<number | 'all'>(activeAccount)
   const cacheKey: CacheKey = useMemo(() => {
     const accountKey = activeAccount === 'all' ? 'all' : String(activeAccount)
     const walletKey = walletAddress ? walletAddress.toLowerCase() : 'nowallet'
@@ -224,6 +227,31 @@ export default function AlphaArenaFeed({
     }
   }, [wsRef, activeAccount, cacheKey, walletAddress, writeCache])
 
+  // Load accounts for dropdown - use dedicated API instead of positions data
+  const loadAccounts = useCallback(async () => {
+    try {
+      setLoadingAccounts(true)
+      const accounts = await getAccounts()
+      const accountMetas = accounts.map(acc => ({
+        account_id: acc.id,
+        name: acc.name,
+        model: acc.model ?? null,
+      }))
+      setAllTraderOptions(accountMetas)
+    } catch (err) {
+      console.error('[AlphaArenaFeed] Failed to load accounts:', err)
+    } finally {
+      setLoadingAccounts(false)
+    }
+  }, [])
+
+  // Load accounts immediately on mount
+  useEffect(() => {
+    if (allTraderOptions.length === 0 && !loadingAccounts) {
+      loadAccounts()
+    }
+  }, [])
+
   // Individual loaders for each data type
   const loadTradesData = useCallback(async () => {
     try {
@@ -315,14 +343,7 @@ export default function AlphaArenaFeed({
         setAccountsMeta(prev => {
           const metaMap = new Map(prev.map(m => [m.account_id, m]))
           metas.forEach(m => metaMap.set(m.account_id, m))
-          const merged = Array.from(metaMap.values())
-
-          // Update allTraderOptions when viewing 'all'
-          if (activeAccount === 'all') {
-            setAllTraderOptions(merged)
-          }
-
-          return merged
+          return Array.from(metaMap.values())
         })
         updateData(cacheKey, { accountsMeta: Array.from(new Map(metas.map(m => [m.account_id, m])).values()) })
       }
@@ -402,6 +423,21 @@ export default function AlphaArenaFeed({
     }
   }, [manualRefreshKey, refreshKey, loadTradesData, loadModelChatData, loadPositionsData])
 
+  // Reload data when account filter changes
+  useEffect(() => {
+    // Skip initial mount
+    if (prevActiveAccount.current !== activeAccount) {
+      prevActiveAccount.current = activeAccount
+
+      // Reload all data with new account filter
+      Promise.allSettled([
+        loadTradesData(),
+        loadModelChatData(),
+        loadPositionsData()
+      ])
+    }
+  }, [activeAccount, loadTradesData, loadModelChatData, loadPositionsData])
+
   const accountOptions = useMemo(() => {
     return allTraderOptions.sort((a, b) => a.name.localeCompare(b.name))
   }, [allTraderOptions])
@@ -417,6 +453,8 @@ export default function AlphaArenaFeed({
     onSelectedAccountChange?.(value)
     setExpandedChat(null)
     setExpandedSections({})
+
+    // Data reload will be triggered by useEffect when activeAccount updates
   }
 
   const toggleSection = (entryId: number, section: 'prompt' | 'reasoning' | 'decision') => {

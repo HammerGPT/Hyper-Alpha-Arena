@@ -103,9 +103,10 @@ def get_all_asset_curves_data_new(
     trading_mode: str = "testnet",
     environment: Optional[str] = None,
     wallet_address: Optional[str] = None,
+    account_id: Optional[int] = None,
 ) -> List[Dict]:
     """
-    Build asset curve data for all active accounts using cached SQL aggregation.
+    Build asset curve data for all active accounts (or specific account) using cached SQL aggregation.
     """
     bucket_minutes = TIMEFRAME_BUCKET_MINUTES.get(timeframe, TIMEFRAME_BUCKET_MINUTES["5m"])
 
@@ -120,6 +121,7 @@ def get_all_asset_curves_data_new(
             bucket_minutes,
             environment=effective_environment,
             wallet_address=wallet_address,
+            account_id=account_id,
         )
 
     # For other non-paper modes, return empty data for now
@@ -199,6 +201,7 @@ def _build_hyperliquid_asset_curve(
     bucket_minutes: int,
     environment: Optional[str] = None,
     wallet_address: Optional[str] = None,
+    account_id: Optional[int] = None,
 ) -> List[Dict]:
     """Build asset curve for Hyperliquid accounts with 5-minute bucketing"""
     bucket_seconds = bucket_minutes * 60
@@ -209,13 +212,17 @@ def _build_hyperliquid_asset_curve(
     snapshot_db = SnapshotSessionLocal()
 
     try:
-        # Get all active AI accounts
+        # Get all active AI accounts (or specific account)
         # Note: We don't filter by environment at Account level anymore (multi-wallet architecture)
         # Instead, we rely on HyperliquidAccountSnapshot filtering by environment
         account_query = db.query(Account).filter(
             Account.is_active == "true",
             Account.account_type == "AI",
         )
+
+        # Filter by specific account if provided
+        if account_id:
+            account_query = account_query.filter(Account.id == account_id)
 
         accounts = account_query.all()
 
@@ -239,6 +246,8 @@ def _build_hyperliquid_asset_curve(
             bucket_query = bucket_query.filter(HyperliquidAccountSnapshot.environment == env_filter_value)
         if wallet_address:
             bucket_query = bucket_query.filter(HyperliquidAccountSnapshot.wallet_address == wallet_address)
+        if account_id:
+            bucket_query = bucket_query.filter(HyperliquidAccountSnapshot.account_id == account_id)
 
         bucket_subquery = bucket_query.group_by(
             HyperliquidAccountSnapshot.account_id,
@@ -261,6 +270,8 @@ def _build_hyperliquid_asset_curve(
             rows_query = rows_query.filter(snapshot_alias.environment == env_filter_value)
         if wallet_address:
             rows_query = rows_query.filter(snapshot_alias.wallet_address == wallet_address)
+        if account_id:
+            rows_query = rows_query.filter(snapshot_alias.account_id == account_id)
 
         rows = rows_query.order_by(
             snapshot_alias.created_at.asc(),
