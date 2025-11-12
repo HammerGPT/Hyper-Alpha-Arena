@@ -368,12 +368,14 @@ def place_ai_driven_hyperliquid_order(
                 )
                 continue
 
-            environment = getattr(account, "hyperliquid_environment", "testnet")
+            # Get global trading mode (environment) for Hyperliquid
+            from services.hyperliquid_environment import get_global_trading_mode
+            environment = get_global_trading_mode(db)
             logger.info(f"Processing Hyperliquid trading for account: {account.name} (environment: {environment})")
 
             # Get Hyperliquid client (will check wallet configuration)
             try:
-                client = get_hyperliquid_client(db, account.id)
+                client = get_hyperliquid_client(db, account.id, override_environment=environment)
             except ValueError as wallet_err:
                 # Wallet not configured - log clear warning
                 logger.warning(
