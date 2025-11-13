@@ -54,25 +54,49 @@ class StrategyState:
     def should_trigger(self, symbol: str, event_time: datetime) -> bool:
         """Check if strategy should trigger based on price threshold or time interval"""
         if not self.enabled:
-            print(f"Strategy for account {self.account_id} is disabled")
             return False
 
-        now_ts = event_time.timestamp()
-        last_ts = self.last_trigger_at.timestamp() if self.last_trigger_at else 0
+        # Quick check without lock to avoid unnecessary contention
+        if self.running:
+            return False
 
-        # Check time interval trigger
-        time_trigger = (now_ts - last_ts) >= self.trigger_interval
-        print(f"Time check for {symbol}: now={now_ts}, last={last_ts}, interval={self.trigger_interval}, trigger={time_trigger}")
+        with self.lock:
+            # Double-check after acquiring lock
+            if self.running:
+                return False
 
-        # Check price threshold trigger
-        price_change = sampling_pool.get_price_change_percent(symbol)
-        price_trigger = (price_change is not None and
-                        abs(price_change) >= self.price_threshold)
-        print(f"Price check for {symbol}: change={price_change}, threshold={self.price_threshold}, trigger={price_trigger}")
+            now_ts = event_time.timestamp()
+            last_ts = self.last_trigger_at.timestamp() if self.last_trigger_at else 0
+            time_diff = now_ts - last_ts
 
-        result = time_trigger or price_trigger
-        print(f"Strategy trigger result for {symbol}: {result}")
-        return result
+            # Check time interval trigger
+            time_trigger = time_diff >= self.trigger_interval
+
+            # Check price threshold trigger
+            price_change = sampling_pool.get_price_change_percent(symbol)
+            price_trigger = (price_change is not None and
+                            abs(price_change) >= self.price_threshold)
+
+            if time_trigger or price_trigger:
+                # Immediately update timestamp and set running state
+                # This prevents duplicate triggers while AI is executing
+                self.last_trigger_at = event_time
+                self.running = True
+
+                # Build trigger reason for logging
+                trigger_reasons = []
+                if time_trigger:
+                    trigger_reasons.append(f"Time interval ({time_diff:.1f}s / {self.trigger_interval}s)")
+                if price_trigger:
+                    trigger_reasons.append(f"Price change ({price_change:.2f}% / {self.price_threshold}%)")
+
+                logger.info(
+                    f"Strategy triggered for account {self.account_id} on {symbol}: "
+                    f"{', '.join(trigger_reasons)}"
+                )
+                return True
+
+            return False
 
 
 class StrategyManager:
@@ -137,6 +161,14 @@ class StrategyManager:
                     )
                     self.strategies[strategy.account_id] = state
 
+                    # DEBUG: Print loaded strategy configuration
+                    print(
+                        f"[DEBUG] Loaded strategy for account {strategy.account_id} ({account.name}): "
+                        f"interval={strategy.trigger_interval}s ({strategy.trigger_interval/60:.1f}min), "
+                        f"threshold={strategy.price_threshold}%, enabled={strategy.enabled}, "
+                        f"last_trigger={state.last_trigger_at}"
+                    )
+
                 logger.info(f"Loaded {len(self.strategies)} strategies")
             finally:
                 db.close()
@@ -160,7 +192,6 @@ class StrategyManager:
     def handle_price_update(self, symbol: str, price: float, event_time: datetime):
         """Handle price update and check for strategy triggers"""
         try:
-            print(f"StrategyManager handling price update: {symbol} = {price}")
             # Add to sampling pool if needed
             with SessionLocal() as db:
                 global_config = db.query(GlobalSamplingConfig).first()
@@ -170,11 +201,8 @@ class StrategyManager:
                 sampling_pool.add_sample(symbol, price, event_time.timestamp())
 
             # Check each strategy for triggers
-            print(f"Checking {len(self.strategies)} strategies for triggers")
             for account_id, state in self.strategies.items():
-                print(f"Checking strategy for account {account_id}")
                 if state.should_trigger(symbol, event_time):
-                    print(f"Strategy triggered for account {account_id}!")
                     self._execute_strategy(account_id, symbol, event_time)
 
         except Exception as e:
@@ -187,18 +215,19 @@ class StrategyManager:
         if not state:
             return
 
-        with state.lock:
-            if state.running:
-                logger.debug(f"Strategy for account {account_id} already running, skipping")
-                return
-
-            state.running = True
-
+        # Note: running state and timestamp already set in should_trigger
         try:
-            logger.info(f"Executing strategy for account {account_id}, symbol {symbol}")
-
-            # Get sampling data for AI decision
-            samples = sampling_pool.get_samples(symbol)
+            # Immediately persist timestamp to database (before AI call)
+            with SessionLocal() as db:
+                from database.models import AccountStrategyConfig
+                strategy = db.query(AccountStrategyConfig).filter_by(account_id=account_id).first()
+                if strategy:
+                    strategy.last_trigger_at = event_time
+                    db.commit()
+                    logger.info(
+                        f"Strategy execution started for account {account_id}, "
+                        f"next trigger in {strategy.trigger_interval}s ({strategy.trigger_interval/60:.1f}min)"
+                    )
 
             # Check account configuration
             with SessionLocal() as db:
@@ -207,25 +236,15 @@ class StrategyManager:
                     logger.debug(f"Account {account_id} auto trading disabled, skipping strategy execution")
                     return
 
-            # Execute AI trading decision for Hyperliquid account
+            # Execute AI trading decision (may take 10-30 seconds, but won't block next trigger check)
             logger.info(f"Account {account_id} executing Hyperliquid trading")
             from services.trading_commands import place_ai_driven_hyperliquid_order
             place_ai_driven_hyperliquid_order(account_id=account_id)
 
-            # Update last trigger time
-            state.last_trigger_at = event_time
-
-            # Update database
-            with SessionLocal() as db:
-                from database.models import AccountStrategyConfig
-                strategy = db.query(AccountStrategyConfig).filter_by(account_id=account_id).first()
-                if strategy:
-                    strategy.last_trigger_at = event_time
-                    db.commit()
-
         except Exception as e:
             logger.error(f"Error executing strategy for account {account_id}: {e}")
         finally:
+            # Always reset running state
             state.running = False
 
     def get_strategy_status(self) -> Dict[str, Any]:
@@ -272,6 +291,14 @@ class HyperliquidStrategyManager(StrategyManager):
                     )
                     self.strategies[strategy.account_id] = state
 
+                    # DEBUG: Print loaded strategy configuration
+                    print(
+                        f"[HyperliquidStrategy DEBUG] Loaded strategy for account {strategy.account_id} ({account.name}): "
+                        f"interval={strategy.trigger_interval}s ({strategy.trigger_interval/60:.1f}min), "
+                        f"threshold={strategy.price_threshold}%, enabled={strategy.enabled}, "
+                        f"last_trigger={state.last_trigger_at}"
+                    )
+
                 logger.info(f"[HyperliquidStrategy] Loaded {len(self.strategies)} strategies")
             finally:
                 db.close()
@@ -287,37 +314,33 @@ class HyperliquidStrategyManager(StrategyManager):
         if not state:
             return
 
-        with state.lock:
-            if state.running:
-                logger.debug(f"[HyperliquidStrategy] Account {account_id} already running, skipping")
-                return
-            state.running = True
-
+        # Note: running state and timestamp already set in should_trigger
         try:
-            logger.info(f"[HyperliquidStrategy] Executing strategy for account {account_id}, symbol {symbol}")
+            # Immediately persist timestamp to database (before AI call)
+            with SessionLocal() as db:
+                strategy = db.query(AccountStrategyConfig).filter_by(account_id=account_id).first()
+                if strategy:
+                    strategy.last_trigger_at = event_time
+                    db.commit()
+                    logger.info(
+                        f"[HyperliquidStrategy] Strategy execution started for account {account_id}, "
+                        f"next trigger in {strategy.trigger_interval}s ({strategy.trigger_interval/60:.1f}min)"
+                    )
 
+            # Check account configuration
             with SessionLocal() as db:
                 account = db.query(Account).filter(Account.id == account_id).first()
                 if not account or account.auto_trading_enabled != "true":
                     logger.debug(f"[HyperliquidStrategy] Account {account_id} auto trading disabled, skipping")
                     return
 
-            # Execute Hyperliquid trading decision
+            # Execute Hyperliquid trading decision (may take 10-30 seconds, but won't block next trigger check)
             place_ai_driven_hyperliquid_order(account_id=account_id)
-
-            # Update in-memory timestamp
-            state.last_trigger_at = event_time
-
-            # Persist last trigger time
-            with SessionLocal() as db:
-                strategy = db.query(AccountStrategyConfig).filter_by(account_id=account_id).first()
-                if strategy:
-                    strategy.last_trigger_at = event_time
-                    db.commit()
 
         except Exception as e:
             logger.error(f"[HyperliquidStrategy] Error executing strategy for account {account_id}: {e}")
         finally:
+            # Always reset running state
             state.running = False
 
 
@@ -340,7 +363,6 @@ def handle_price_update(symbol: str, price: float, event_time: Optional[datetime
     if event_time is None:
         event_time = datetime.now(timezone.utc)
 
-    print(f"Global handle_price_update called: {symbol} = {price}")
 
     # Use Hyperliquid strategy manager only
     hyper_strategy_manager.handle_price_update(symbol, price, event_time)

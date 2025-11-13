@@ -227,11 +227,27 @@ class SystemLogHandler(logging.Handler):
                 import traceback
                 details["exception"] = ''.join(traceback.format_exception(*record.exc_info))
 
-            # 只记录WARNING及以上级别
+            # 记录WARNING及以上级别,或者策略触发相关的INFO日志
             if record.levelno >= logging.WARNING:
                 system_logger.add_log(
                     level=level,
                     category=category,
+                    message=message,
+                    details=details
+                )
+            elif record.levelno == logging.INFO and "Strategy triggered" in message:
+                # 收集策略触发的INFO日志
+                system_logger.add_log(
+                    level=level,
+                    category="ai_decision",
+                    message=message,
+                    details=details
+                )
+            elif record.levelno == logging.INFO and "Strategy execution completed" in message:
+                # 收集策略执行完成的INFO日志
+                system_logger.add_log(
+                    level=level,
+                    category="ai_decision",
                     message=message,
                     details=details
                 )
