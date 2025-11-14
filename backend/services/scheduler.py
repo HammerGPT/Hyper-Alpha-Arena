@@ -324,40 +324,25 @@ def _ensure_market_data_ready() -> None:
 
 
 def reset_auto_trading_job():
-    """Reset the auto trading job after account configuration changes"""
-    try:
-        # Import constants from auto_trader module
-        from services.auto_trader import AI_TRADE_JOB_ID
-        from services.trading_commands import place_ai_driven_crypto_order
+    """DEPRECATED: Legacy function from paper trading module
 
-        # Define interval (5 minutes)
-        AI_TRADE_INTERVAL_SECONDS = 300
+    This function is now DISABLED and performs no operations.
 
-        # Ensure market data is ready before scheduling trading tasks
-        _ensure_market_data_ready()
+    Historical issue (GitHub #31):
+    - This function used to unconditionally start a fixed 300-second APScheduler task
+    - That task called place_ai_driven_crypto_order() for ALL accounts every 5 minutes
+    - This conflicted with Hyperliquid strategy manager's per-account trigger intervals
+    - Result: Users configured 600s interval but got double triggers at ~300s intervals
 
-        # Ensure scheduler is started
-        if not task_scheduler.is_running():
-            task_scheduler.start()
-            logger.info("Started scheduler for auto trading job reset")
-
-        # Remove existing auto trading job if it exists
-        if task_scheduler.scheduler and task_scheduler.scheduler.get_job(AI_TRADE_JOB_ID):
-            task_scheduler.remove_task(AI_TRADE_JOB_ID)
-            logger.info(f"Removed existing auto trading job: {AI_TRADE_JOB_ID}")
-
-        # Re-add the auto trading job with updated configuration
-        task_scheduler.add_interval_task(
-            task_func=lambda: place_ai_driven_crypto_order(max_ratio=0.2),
-            interval_seconds=AI_TRADE_INTERVAL_SECONDS,
-            task_id=AI_TRADE_JOB_ID
-        )
-
-        logger.info(f"Auto trading job reset successfully - interval: {AI_TRADE_INTERVAL_SECONDS}s")
-
-    except Exception as e:
-        logger.error(f"Failed to reset auto trading job: {e}")
-        raise
+    Current behavior:
+    - No-op function (does nothing)
+    - All trading is now managed exclusively by Hyperliquid strategy manager
+    - Strategy manager respects per-account trigger intervals configured in strategy settings
+    """
+    logger.info(
+        "reset_auto_trading_job() called but DISABLED (paper trading legacy). "
+        "All trading managed by Hyperliquid strategy manager. See GitHub issue #31."
+    )
 
 
 
