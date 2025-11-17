@@ -11,8 +11,27 @@ Key features:
 import logging
 import time
 import json
+import math
+import requests
 from typing import Dict, List, Optional, Any
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP, ROUND_FLOOR, ROUND_CEILING, InvalidOperation, getcontext
+from eth_account import Account as EthAccount
+from eth_account.messages import encode_defunct, _hash_eip191_message
+from eth_utils import keccak
+
+# Try different function names across eth_account versions
+encode_typed_data_func = None
+try:
+    # eth_account >= 0.6.0
+    from eth_account.messages import encode_typed_data
+    encode_typed_data_func = encode_typed_data
+except ImportError:
+    try:
+        # Some versions use encode_structured_data
+        from eth_account.messages import encode_structured_data
+        encode_typed_data_func = encode_structured_data
+    except ImportError:
+        encode_typed_data_func = None
 
 import ccxt
 from sqlalchemy.orm import Session
@@ -23,6 +42,8 @@ from services.hyperliquid_cache import (
     update_account_state_cache,
     update_positions_cache,
 )
+
+getcontext().prec = 28
 
 logger = logging.getLogger(__name__)
 
@@ -58,23 +79,35 @@ class HyperliquidTradingClient:
 
         self.account_id = account_id
         self.environment = environment
+
+        # Ensure private key has 0x prefix for consistency
+        if not private_key.startswith('0x'):
+            private_key = '0x' + private_key
         self.private_key = private_key
+
+        import sys
+        print(f"[DEBUG __init__] account_id={account_id}, environment={environment}, wallet_address={wallet_address}", file=sys.stderr, flush=True)
 
         # Derive wallet address from private key if not provided
         if not wallet_address:
             try:
                 from eth_account import Account as EthAccount
                 eth_account = EthAccount.from_key(private_key)
-                self.wallet_address = eth_account.address
+                # Lowercase address as recommended by Hyperliquid docs
+                self.wallet_address = eth_account.address.lower()
                 logger.info(f"Derived wallet address from private key: {self.wallet_address}")
             except Exception as e:
                 logger.error(f"Failed to derive wallet address from private key: {e}", exc_info=True)
                 self.wallet_address = None
         else:
-            self.wallet_address = wallet_address
+            # Lowercase address as recommended by Hyperliquid docs
+            self.wallet_address = wallet_address.lower()
+            logger.info(f"Using provided wallet address: {self.wallet_address}")
 
         if not self.wallet_address:
             raise ValueError("Wallet address could not be derived from private key. Please check key format.")
+
+        logger.info(f"[FINAL] Using wallet address: {self.wallet_address}")
 
         # Set API endpoint based on environment
         if environment == "testnet":
@@ -82,7 +115,7 @@ class HyperliquidTradingClient:
         else:
             self.api_url = "https://api.hyperliquid.xyz"
 
-        # Initialize CCXT exchange with authentication
+        # Initialize CCXT exchange with authentication (for balance/position queries)
         try:
             self.exchange = ccxt.hyperliquid({
                 'sandbox': (environment == "testnet"),
@@ -93,11 +126,34 @@ class HyperliquidTradingClient:
             })
 
             logger.info(
-                f"HyperliquidClient initialized: account_id={account_id} "
+                f"CCXT HyperliquidClient initialized: account_id={account_id} "
                 f"environment={environment.upper()} wallet={self.wallet_address}"
             )
         except Exception as e:
-            logger.error(f"Failed to initialize Hyperliquid exchange: {e}")
+            logger.error(f"Failed to initialize CCXT Hyperliquid exchange: {e}")
+            raise
+
+        # Initialize official Hyperliquid SDK (for order placement)
+        try:
+            from hyperliquid.exchange import Exchange
+            from eth_account import Account as EthAccount
+
+            # Create eth_account wallet for SDK
+            self.eth_wallet = EthAccount.from_key(private_key)
+
+            # Initialize SDK Exchange
+            self.sdk_exchange = Exchange(
+                wallet=self.eth_wallet,
+                base_url=self.api_url,
+                account_address=self.wallet_address
+            )
+
+            logger.info(
+                f"Official SDK Exchange initialized: account_id={account_id} "
+                f"environment={environment.upper()} wallet={self.wallet_address}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize Hyperliquid SDK: {e}")
             raise
 
     def _serialize_payload(self, payload: Optional[Any]) -> Optional[str]:
@@ -851,11 +907,650 @@ class HyperliquidTradingClient:
             raise
 
 
+    def _get_asset_precision(self, symbol: str) -> Dict[str, Any]:
+        """
+        Fetch asset precision requirements from Hyperliquid /info endpoint
+
+        Returns:
+            Dict with:
+                - price_decimals: Inferred decimal places for price (for logging/fallback)
+                - size_decimals: Size decimal places from meta
+                - price_tick: Decimal tick size for price alignment
+                - size_step: Decimal step for size alignment
+        """
+        proxies = {'http': None, 'https': None}
+        info_url = f"{self.api_url}/info"
+
+        try:
+            # Default fallbacks
+            price_decimals = 1
+            price_tick = Decimal('0.1')
+            size_decimals = 5
+            size_step = Decimal('1').scaleb(-size_decimals)
+
+            # Fetch meta for size precision
+            meta_payload = {"type": "meta"}
+            response = requests.post(info_url, json=meta_payload, timeout=10, proxies=proxies)
+            response.raise_for_status()
+
+            data = response.json()
+            universe = data.get('universe', [])
+
+            for asset in universe:
+                if asset.get('name') == symbol:
+                    size_decimals = asset.get('szDecimals', 5)
+                    break
+
+            size_step = Decimal('1').scaleb(-size_decimals)
+
+            # Fetch order book to infer tick size
+            try:
+                l2_payload = {"type": "l2Book", "coin": symbol}
+                l2_response = requests.post(info_url, json=l2_payload, timeout=10, proxies=proxies)
+                l2_response.raise_for_status()
+                l2_data = l2_response.json()
+
+                price_samples: List[Decimal] = []
+                levels = l2_data.get('levels', [])
+                for side in levels:
+                    for level in side[:10]:
+                        px = level.get('px')
+                        if px is not None:
+                            try:
+                                price_samples.append(Decimal(str(px)))
+                            except (InvalidOperation, ValueError):
+                                continue
+
+                if price_samples:
+                    inferred_tick = self._infer_price_tick(price_samples)
+                    if inferred_tick is not None and inferred_tick > 0:
+                        price_tick = inferred_tick
+                        price_decimals = max(0, -price_tick.as_tuple().exponent)
+                        logger.info(
+                            f"[PRECISION] {symbol} inferred tick={price_tick} "
+                            f"(price_decimals={price_decimals})"
+                        )
+                    else:
+                        max_decimals = max(0, max(-p.as_tuple().exponent for p in price_samples))
+                        price_decimals = max_decimals
+                        price_tick = Decimal('1').scaleb(-price_decimals)
+                        logger.warning(
+                            f"[PRECISION] {symbol} unable to compute tick, "
+                            f"using decimals-based fallback price_tick={price_tick}"
+                        )
+                else:
+                    logger.warning(f"[PRECISION] {symbol} no order book data, using default tick={price_tick}")
+
+            except Exception as e:
+                logger.warning(f"[PRECISION] Failed to fetch order book for {symbol}: {e}, using defaults")
+
+            logger.info(
+                f"[PRECISION] {symbol} final precision: price_tick={price_tick}, size_step={size_step}, "
+                f"price_decimals={price_decimals}, size_decimals={size_decimals}"
+            )
+
+            return {
+                'price_decimals': price_decimals,
+                'size_decimals': size_decimals,
+                'price_tick': price_tick,
+                'size_step': size_step,
+            }
+
+        except Exception as e:
+            logger.error(f"[PRECISION] Failed to fetch precision for {symbol}: {e}")
+            # Fallback to conservative defaults
+            return {
+                'price_decimals': 1,
+                'size_decimals': 5,
+                'price_tick': Decimal('0.1'),
+                'size_step': Decimal('1e-5'),
+            }
+
+    def _round_to_precision(
+        self,
+        value: float,
+        price_decimals: int,
+        size_decimals: int,
+        is_price: bool = True,
+        price_tick: Optional[Decimal] = None,
+        size_step: Optional[Decimal] = None,
+        is_buy: Optional[bool] = None,
+        force_aggressive: bool = False,
+    ) -> float:
+        """
+        Round a price or size to the required precision/tick size.
+
+        Args:
+            value: Value to round
+            price_decimals: Number of decimal places for prices (fallback)
+            size_decimals: Number of decimal places for sizes (fallback)
+            is_price: True for prices, False for sizes
+            price_tick: Explicit tick size for prices
+            size_step: Explicit step for sizes
+        """
+        if value is None or math.isnan(value) or math.isinf(value):
+            return value
+
+        if is_price and force_aggressive and is_buy is not None:
+            slippage = Decimal('1.0005') if is_buy else Decimal('0.9995')
+            try:
+                value = float(Decimal(str(value)) * slippage)
+            except (InvalidOperation, TypeError, ValueError):
+                value = value * float(slippage)
+
+        if is_price:
+            step = price_tick if price_tick is not None else Decimal('1').scaleb(-price_decimals)
+            return self._round_to_step(value, step, sigfigs=5, prefer_up=is_buy, force_aggressive=force_aggressive)
+        else:
+            step = size_step if size_step is not None else Decimal('1').scaleb(-size_decimals)
+            return self._round_to_step(value, step)
+
+    def _round_to_step(
+        self,
+        value: float,
+        step: Decimal,
+        sigfigs: Optional[int] = None,
+        prefer_up: Optional[bool] = None,
+        force_aggressive: bool = False,
+    ) -> float:
+        """
+        Snap a numeric value to the nearest multiple of `step`, optionally limiting significant figures.
+        """
+        try:
+            step_dec = step if isinstance(step, Decimal) else Decimal(str(step))
+        except (InvalidOperation, TypeError, ValueError):
+            step_dec = Decimal('0')
+
+        if step_dec <= 0:
+            base_dec = self._limit_sigfigs(value, sigfigs, prefer_up) if sigfigs else Decimal(str(value))
+            return float(base_dec)
+
+        try:
+            base_dec = Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError):
+            base_dec = Decimal(str(float(value)))
+
+        limited_base = self._limit_sigfigs(base_dec, sigfigs, prefer_up) if sigfigs else base_dec
+
+        try:
+            steps = (limited_base / step_dec).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+            quantized = steps * step_dec
+        except InvalidOperation:
+            return float(limited_base)
+
+        if prefer_up is True and quantized < limited_base:
+            quantized += step_dec
+        elif prefer_up is False and quantized > limited_base:
+            quantized -= step_dec
+
+        if quantized <= 0:
+            quantized = step_dec
+
+        if force_aggressive:
+            if prefer_up is True:
+                quantized += step_dec
+            elif prefer_up is False:
+                quantized -= step_dec
+                if quantized <= 0:
+                    quantized = step_dec
+
+        return float(quantized.normalize())
+
+    def _limit_sigfigs(self, value: Any, sigfigs: Optional[int], prefer_up: Optional[bool] = None) -> Decimal:
+        """
+        Limit a numeric value to a maximum number of significant figures.
+        """
+        if not sigfigs or sigfigs <= 0:
+            return Decimal(str(value))
+
+        try:
+            dec = Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError):
+            dec = Decimal(str(float(value)))
+
+        if dec.is_zero():
+            return Decimal('0')
+
+        numeric = float(dec)
+        if math.isnan(numeric) or math.isinf(numeric):
+            return dec
+
+        exponent = math.floor(math.log10(abs(numeric)))
+        quant_exp = exponent - sigfigs + 1
+        quant = Decimal('1').scaleb(quant_exp)
+
+        rounding_mode = ROUND_HALF_UP
+        if prefer_up is True:
+            rounding_mode = ROUND_CEILING if dec >= 0 else ROUND_FLOOR
+        elif prefer_up is False:
+            rounding_mode = ROUND_FLOOR if dec >= 0 else ROUND_CEILING
+
+        try:
+            return dec.quantize(quant, rounding=rounding_mode)
+        except InvalidOperation:
+            return dec
+
+    def _infer_price_tick(self, prices: List[Decimal]) -> Optional[Decimal]:
+        """
+        Infer the minimal tick size from a list of Decimal price samples.
+        """
+        unique_prices = sorted(set([p for p in prices if p is not None]))
+        if len(unique_prices) < 2:
+            return None
+
+        diffs: List[Decimal] = []
+        for first, second in zip(unique_prices, unique_prices[1:]):
+            diff = second - first
+            if diff > 0:
+                diffs.append(diff)
+
+        if not diffs:
+            return None
+
+        tick = diffs[0]
+        for diff in diffs[1:]:
+            tick = self._decimal_gcd(tick, diff)
+            if tick == 0:
+                tick = diff
+
+        if tick <= 0:
+            tick = min(diffs)
+
+        return tick.normalize()
+
+    def _decimal_gcd(self, a: Decimal, b: Decimal) -> Decimal:
+        """
+        Compute the GCD for two Decimal numbers by scaling to integers.
+        """
+        from math import gcd
+
+        a = abs(a)
+        b = abs(b)
+
+        if a == 0:
+            return b
+        if b == 0:
+            return a
+
+        scale = max(-a.as_tuple().exponent, -b.as_tuple().exponent, 0)
+        factor = Decimal(10) ** scale
+
+        try:
+            a_int = int((a * factor).to_integral_value(rounding=ROUND_HALF_UP))
+            b_int = int((b * factor).to_integral_value(rounding=ROUND_HALF_UP))
+        except InvalidOperation:
+            return Decimal('0')
+
+        gcd_value = gcd(a_int, b_int)
+        if gcd_value == 0:
+            return Decimal('0')
+
+        result = Decimal(gcd_value) / factor
+        return result.normalize()
+
+    def place_order_with_tpsl(
+        self,
+        db: Session,
+        symbol: str,
+        is_buy: bool,
+        size: float,
+        price: float,
+        leverage: int = 1,
+        time_in_force: str = "Ioc",
+        reduce_only: bool = False,
+        take_profit_price: Optional[float] = None,
+        stop_loss_price: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """
+        Place order with take profit and stop loss using Hyperliquid official SDK
+
+        Args:
+            db: Database session
+            symbol: Asset symbol (e.g., "BTC")
+            is_buy: True for long, False for short
+            size: Order quantity
+            price: Order price
+            leverage: Position leverage (1-50)
+            time_in_force: Order time in force - "Ioc" (market-like), "Gtc" (limit), "Alo" (maker only)
+            reduce_only: Only close existing positions
+            take_profit_price: Optional take profit trigger price
+            stop_loss_price: Optional stop loss trigger price
+
+        Returns:
+            Dict with order results including TP/SL order IDs
+        """
+        import sys
+        print(f"[DEBUG ENTRY] place_order_with_tpsl called: symbol={symbol}, price={price}, size={size}, TP={take_profit_price}, SL={stop_loss_price}", file=sys.stderr, flush=True)
+
+        self._validate_environment(db)
+
+        # Validate parameters
+        if leverage < 1 or leverage > 50:
+            raise ValueError(f"Invalid leverage: {leverage}. Must be 1-50")
+        if size <= 0 or not isinstance(size, (int, float)) or size != size:  # Check for NaN
+            raise ValueError(f"Invalid size: {size}. Must be a positive number")
+        if price <= 0 or not isinstance(price, (int, float)) or price != price:  # Check for NaN
+            raise ValueError(f"Invalid price: {price}. Must be a positive number")
+
+        # Validate time_in_force
+        valid_tif = ["Ioc", "Gtc", "Alo"]
+        if time_in_force not in valid_tif:
+            raise ValueError(f"Invalid time_in_force: {time_in_force}. Must be one of {valid_tif}")
+
+        # ===== Dynamic Precision Handling =====
+        # Fetch asset-specific precision requirements from Hyperliquid
+        # This works for ALL assets (BTC, ETH, SOL, etc.) and handles AI-generated imprecise numbers
+        print(f"[PRECISION] Fetching precision for {symbol}...", file=sys.stderr, flush=True)
+
+        precision = self._get_asset_precision(symbol)
+        price_decimals = precision['price_decimals']
+        size_decimals = precision['size_decimals']
+        price_tick = precision.get('price_tick')
+        size_step = precision.get('size_step')
+
+        print(
+            f"[PRECISION] {symbol} - price_decimals: {price_decimals}, size_decimals: {size_decimals}, "
+            f"price_tick: {price_tick}, size_step: {size_step}",
+            file=sys.stderr,
+            flush=True,
+        )
+        print(f"[PRECISION] Original values - price: {price}, size: {size}, TP: {take_profit_price}, SL: {stop_loss_price}", file=sys.stderr, flush=True)
+
+        # Round price to tick precision
+        original_price = price
+        is_ioc_order = time_in_force.lower() == "ioc"
+
+        price = self._round_to_precision(
+            price,
+            price_decimals,
+            size_decimals,
+            is_price=True,
+            price_tick=price_tick,
+            size_step=size_step,
+            is_buy=is_buy,
+            force_aggressive=is_ioc_order,
+        )
+        print(f"[PRECISION] Price adjusted: {original_price} -> {price}", file=sys.stderr, flush=True)
+
+        # Round size using official step
+        original_size = size
+        size = self._round_to_precision(
+            size,
+            price_decimals,
+            size_decimals,
+            is_price=False,
+            price_tick=price_tick,
+            size_step=size_step,
+        )
+        print(f"[PRECISION] Size adjusted: {original_size} -> {size}", file=sys.stderr, flush=True)
+
+        # Round TP/SL prices if provided
+        if take_profit_price is not None:
+            original_tp = take_profit_price
+            take_profit_price = self._round_to_precision(
+                take_profit_price,
+                price_decimals,
+                size_decimals,
+                is_price=True,
+                price_tick=price_tick,
+                size_step=size_step,
+                is_buy=not is_buy,
+            )
+            print(f"[PRECISION] TP adjusted: {original_tp} -> {take_profit_price}", file=sys.stderr, flush=True)
+
+        if stop_loss_price is not None:
+            original_sl = stop_loss_price
+            stop_loss_price = self._round_to_precision(
+                stop_loss_price,
+                price_decimals,
+                size_decimals,
+                is_price=True,
+                price_tick=price_tick,
+                size_step=size_step,
+                is_buy=not is_buy,
+            )
+            print(f"[PRECISION] SL adjusted: {original_sl} -> {stop_loss_price}", file=sys.stderr, flush=True)
+
+        logger.info(
+            f"[SDK] Placing order on {self.environment.upper()}: "
+            f"{symbol} {'BUY' if is_buy else 'SELL'} size={size} price={price} "
+            f"leverage={leverage}x TIF={time_in_force} TP={take_profit_price} SL={stop_loss_price}"
+        )
+
+        try:
+            # Set leverage before placing order
+            try:
+                self.exchange.set_leverage(leverage, f"{symbol}/USDC:USDC")
+                logger.debug(f"Set leverage to {leverage}x for {symbol}")
+                self._record_exchange_action(
+                    action_type="set_leverage",
+                    status="success",
+                    symbol=symbol,
+                    leverage=leverage,
+                    request_payload={"symbol": symbol, "leverage": leverage},
+                )
+            except Exception as lev_err:
+                logger.warning(f"Failed to set leverage (may already be set): {lev_err}")
+                self._record_exchange_action(
+                    action_type="set_leverage",
+                    status="error",
+                    symbol=symbol,
+                    leverage=leverage,
+                    request_payload={"symbol": symbol, "leverage": leverage},
+                    error_message=str(lev_err),
+                )
+
+            # Prepare order type with TIF
+            order_type = {"limit": {"tif": time_in_force}}
+
+            # Place main order using SDK
+            logger.info(f"[SDK] Placing main order: {symbol} {'BUY' if is_buy else 'SELL'} {size}@{price} TIF={time_in_force}")
+
+            main_result = self.sdk_exchange.order(
+                name=symbol,
+                is_buy=is_buy,
+                sz=size,
+                limit_px=price,
+                order_type=order_type,
+                reduce_only=reduce_only
+            )
+
+            logger.info(f"[SDK] Main order result: {main_result}")
+
+            # Parse main order result
+            order_status = main_result.get("status", "error")
+            order_id = None
+            filled_amount = 0
+            average_price = 0
+            error_msg = None
+
+            if order_status == "ok":
+                data = main_result.get("response", {}).get("data", {})
+                statuses = data.get("statuses", [])
+
+                if statuses:
+                    main_status = statuses[0]
+
+                    if "filled" in main_status:
+                        filled_info = main_status["filled"]
+                        order_id = str(filled_info.get("oid", ""))
+                        filled_amount = float(filled_info.get("totalSz", 0))
+                        average_price = float(filled_info.get("avgPx", 0))
+                        status = "filled"
+                    elif "resting" in main_status:
+                        resting_info = main_status["resting"]
+                        order_id = str(resting_info.get("oid", ""))
+                        status = "resting"
+                    elif "error" in main_status:
+                        error_msg = main_status["error"]
+                        status = "error"
+                    else:
+                        status = "error"
+                        error_msg = f"Unknown status in response: {main_status}"
+                else:
+                    status = "error"
+                    error_msg = "No statuses in response"
+            else:
+                status = "error"
+                error_msg = main_result.get("response", "Unknown error")
+
+            # Place TP/SL orders if main order succeeded and prices provided
+            tp_order_id = None
+            sl_order_id = None
+
+            if status in ["filled", "resting"] and (take_profit_price or stop_loss_price):
+                # Place TP order
+                if take_profit_price:
+                    try:
+                        logger.info(f"[SDK] Placing TP order: {symbol} {'SELL' if is_buy else 'BUY'} {size}@{take_profit_price}")
+
+                        tp_order_type = {"trigger": {
+                            "triggerPx": take_profit_price,
+                            "isMarket": False,
+                            "tpsl": "tp"
+                        }}
+
+                        tp_result = self.sdk_exchange.order(
+                            name=symbol,
+                            is_buy=not is_buy,  # Opposite direction
+                            sz=size,
+                            limit_px=take_profit_price,
+                            order_type=tp_order_type,
+                            reduce_only=True
+                        )
+
+                        logger.info(f"[SDK] TP order result: {tp_result}")
+
+                        if tp_result.get("status") == "ok":
+                            tp_statuses = tp_result.get("response", {}).get("data", {}).get("statuses", [])
+                            if tp_statuses:
+                                tp_status = tp_statuses[0]
+                                if "resting" in tp_status:
+                                    tp_order_id = str(tp_status["resting"].get("oid", ""))
+                                elif "filled" in tp_status:
+                                    tp_order_id = str(tp_status["filled"].get("oid", ""))
+                    except Exception as tp_err:
+                        logger.error(f"[SDK] Failed to place TP order: {tp_err}", exc_info=True)
+
+                # Place SL order
+                if stop_loss_price:
+                    try:
+                        logger.info(f"[SDK] Placing SL order: {symbol} {'SELL' if is_buy else 'BUY'} {size}@{stop_loss_price}")
+
+                        sl_order_type = {"trigger": {
+                            "triggerPx": stop_loss_price,
+                            "isMarket": False,
+                            "tpsl": "sl"
+                        }}
+
+                        sl_result = self.sdk_exchange.order(
+                            name=symbol,
+                            is_buy=not is_buy,  # Opposite direction
+                            sz=size,
+                            limit_px=stop_loss_price,
+                            order_type=sl_order_type,
+                            reduce_only=True
+                        )
+
+                        logger.info(f"[SDK] SL order result: {sl_result}")
+
+                        if sl_result.get("status") == "ok":
+                            sl_statuses = sl_result.get("response", {}).get("data", {}).get("statuses", [])
+                            if sl_statuses:
+                                sl_status = sl_statuses[0]
+                                if "resting" in sl_status:
+                                    sl_order_id = str(sl_status["resting"].get("oid", ""))
+                                elif "filled" in sl_status:
+                                    sl_order_id = str(sl_status["filled"].get("oid", ""))
+                    except Exception as sl_err:
+                        logger.error(f"[SDK] Failed to place SL order: {sl_err}", exc_info=True)
+
+            # Construct result
+            order_result = {
+                "status": status,
+                "environment": self.environment,
+                "symbol": symbol,
+                "is_buy": is_buy,
+                "size": size,
+                "leverage": leverage,
+                "order_id": order_id,
+                "filled_amount": filled_amount,
+                "average_price": average_price,
+                "wallet_address": self.wallet_address,
+                "timestamp": int(time.time() * 1000),
+                # TP/SL specific fields
+                "tp_order_id": tp_order_id,
+                "tp_trigger_price": take_profit_price,
+                "sl_order_id": sl_order_id,
+                "sl_trigger_price": stop_loss_price,
+            }
+
+            if error_msg:
+                order_result["error"] = error_msg
+
+            logger.info(
+                f"[SDK] Order result: status={status} order_id={order_id} "
+                f"filled={filled_amount}/{size} avg_price={average_price} "
+                f"TP={tp_order_id} SL={sl_order_id}"
+            )
+
+            self._record_exchange_action(
+                action_type="create_order_with_tpsl",
+                status="success" if status != "error" else "error",
+                symbol=symbol,
+                side="buy" if is_buy else "sell",
+                leverage=leverage,
+                size=size,
+                price=price,
+                request_payload={
+                    "symbol": symbol,
+                    "is_buy": is_buy,
+                    "size": size,
+                    "price": price,
+                    "leverage": leverage,
+                    "time_in_force": time_in_force,
+                    "take_profit_price": take_profit_price,
+                    "stop_loss_price": stop_loss_price
+                },
+                response_payload=main_result,
+                error_message=error_msg,
+            )
+
+            return order_result
+
+        except Exception as e:
+            logger.error(f"[SDK] Failed to place order: {e}", exc_info=True)
+            self._record_exchange_action(
+                action_type="create_order_with_tpsl",
+                status="error",
+                symbol=symbol,
+                side="buy" if is_buy else "sell",
+                leverage=leverage,
+                size=size,
+                price=price,
+                request_payload={
+                    "symbol": symbol,
+                    "is_buy": is_buy,
+                    "size": size,
+                    "price": price
+                },
+                response_payload=None,
+                error_message=str(e),
+            )
+            return {
+                "status": "error",
+                "error": str(e),
+                "environment": self.environment,
+                "symbol": symbol
+            }
+
+
 # Factory function for creating clients
 def create_hyperliquid_client(
     account_id: int,
     private_key: str,
-    environment: str
+    environment: str,
+    wallet_address: str = None
 ) -> HyperliquidTradingClient:
     """
     Factory function to create Hyperliquid trading client
@@ -864,6 +1559,7 @@ def create_hyperliquid_client(
         account_id: Database account ID
         private_key: Hyperliquid private key
         environment: "testnet" or "mainnet"
+        wallet_address: Optional wallet address (if not provided, derived from private key)
 
     Returns:
         Initialized HyperliquidTradingClient
@@ -871,5 +1567,6 @@ def create_hyperliquid_client(
     return HyperliquidTradingClient(
         account_id=account_id,
         private_key=private_key,
+        wallet_address=wallet_address,
         environment=environment
     )

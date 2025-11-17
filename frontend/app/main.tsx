@@ -31,9 +31,11 @@ import PromptManager from '@/components/prompt/PromptManager'
 import TraderManagement from '@/components/trader/TraderManagement'
 import { HyperliquidPage } from '@/components/hyperliquid'
 import HyperliquidView from '@/components/hyperliquid/HyperliquidView'
+// Remove CallbackPage import - handle inline
 import { AIDecision, getAccounts } from '@/lib/api'
 import { ArenaDataProvider } from '@/contexts/ArenaDataContext'
 import { TradingModeProvider, useTradingMode } from '@/contexts/TradingModeContext'
+import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 
 interface User {
   id: number
@@ -73,6 +75,7 @@ const PAGE_TITLES: Record<string, string> = {
 
 function App() {
   const { tradingMode } = useTradingMode()
+  const { setUser: setAuthUser } = useAuth()
   const [user, setUser] = useState<User | null>(null)
   const [account, setAccount] = useState<Account | null>(null)
   const [overview, setOverview] = useState<Overview | null>(null)
@@ -85,9 +88,110 @@ function App() {
   const [currentPage, setCurrentPage] = useState<string>('comprehensive')
   const tradingModeRef = useRef(tradingMode)
 
-  // Temporary: Check URL hash for page routing
+  // Check URL hash and pathname for page routing
   useEffect(() => {
     const hash = window.location.hash.slice(1)
+    const pathname = window.location.pathname
+
+    // Handle OAuth callback
+    if (pathname === '/callback') {
+      const handleCallback = async () => {
+        try {
+          const urlParams = new URLSearchParams(window.location.search)
+          const sessionParam = urlParams.get('session')
+
+          const { decodeArenaSession, exchangeCodeForToken, getUserInfo } = await import('@/lib/auth')
+          const Cookies = await import('js-cookie')
+
+          if (sessionParam) {
+            const session = decodeArenaSession(sessionParam)
+            if (!session || !session.token.access_token) {
+              console.error('Invalid session payload received')
+              toast.error('Login failed: Invalid session payload')
+              window.location.href = '/'
+              return
+            }
+
+            Cookies.default.set('arena_token', session.token.access_token, { expires: 7 })
+            Cookies.default.set('arena_user', JSON.stringify(session.user), { expires: 7 })
+            setAuthUser(session.user)
+            toast.success('Login successful!')
+            window.location.href = '/'
+            return
+          }
+
+          // Handle direct token parameter (from Casdoor relay)
+          const tokenParam = urlParams.get('token')
+          if (tokenParam) {
+            console.log('[Callback] Received token from relay server, length:', tokenParam.length)
+
+            try {
+              // Fetch user info with the token
+              const userData = await getUserInfo(tokenParam)
+              if (!userData) {
+                console.error('[Callback] Failed to get user information')
+                toast.error('Login failed: Unable to get user information')
+                window.location.href = '/'
+                return
+              }
+
+              // Save token and user data
+              Cookies.default.set('arena_token', tokenParam, { expires: 7 })
+              Cookies.default.set('arena_user', JSON.stringify(userData), { expires: 7 })
+              setAuthUser(userData)
+              toast.success('Login successful!')
+              window.location.href = '/'
+              return
+            } catch (err) {
+              console.error('[Callback] Error processing token:', err)
+              toast.error('Login failed: Unable to process token')
+              window.location.href = '/'
+              return
+            }
+          }
+
+          const code = urlParams.get('code')
+          const state = urlParams.get('state')
+
+          if (!code) {
+            console.error('No authorization code received')
+            toast.error('Login failed: No authorization code received')
+            window.location.href = '/'
+            return
+          }
+
+          const accessToken = await exchangeCodeForToken(code, state || '')
+          if (!accessToken) {
+            console.error('Failed to get access token')
+            toast.error('Login failed: Unable to get access token')
+            window.location.href = '/'
+            return
+          }
+
+          const userData = await getUserInfo(accessToken)
+          if (!userData) {
+            console.error('Failed to get user information')
+            toast.error('Login failed: Unable to get user information')
+            window.location.href = '/'
+            return
+          }
+
+          Cookies.default.set('arena_token', accessToken, { expires: 7 })
+          Cookies.default.set('arena_user', JSON.stringify(userData), { expires: 7 })
+          setAuthUser(userData)
+          toast.success('Login successful!')
+          window.location.href = '/'
+        } catch (err) {
+          console.error('Callback error:', err)
+          toast.error('Login error occurred')
+          window.location.href = '/'
+        }
+      }
+
+      handleCallback()
+      return
+    }
+
     if (hash && PAGE_TITLES[hash]) {
       setCurrentPage(hash)
     }
@@ -494,10 +598,8 @@ function App() {
       <div className="flex-1 flex flex-col">
         <Header
           title={pageTitle}
-          currentUser={user}
           currentAccount={account}
           showAccountSelector={currentPage === 'comprehensive'}
-          onUserChange={switchUser}
         />
         {renderMainContent()}
       </div>
@@ -507,11 +609,13 @@ function App() {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <TradingModeProvider>
-      <ArenaDataProvider>
-        <Toaster position="top-right" />
-        <App />
-      </ArenaDataProvider>
-    </TradingModeProvider>
+    <AuthProvider>
+      <TradingModeProvider>
+        <ArenaDataProvider>
+          <Toaster position="top-right" />
+          <App />
+        </ArenaDataProvider>
+      </TradingModeProvider>
+    </AuthProvider>
   </React.StrictMode>,
 )

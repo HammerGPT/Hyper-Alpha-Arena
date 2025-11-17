@@ -345,6 +345,27 @@ from api.ws import websocket_endpoint
 
 app.websocket("/ws")(websocket_endpoint)
 
+# Serve auth config file
+@app.get("/auth-config.json")
+async def serve_auth_config():
+    """Serve the auth configuration file"""
+    static_dir = os.path.join(os.path.dirname(__file__), "static")
+    config_path = os.path.join(static_dir, "auth-config.json")
+
+    if os.path.exists(config_path):
+        return FileResponse(
+            config_path,
+            media_type="application/json",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
+            }
+        )
+    else:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Auth config not found")
+
 # Serve frontend index.html for root and SPA routes
 @app.get("/")
 async def serve_root():
@@ -369,7 +390,7 @@ async def serve_root():
 async def serve_spa(full_path: str):
     """Serve the frontend index.html for SPA routes that don't match API/static"""
     # Skip API and static routes
-    if full_path.startswith("api") or full_path.startswith("static") or full_path.startswith("docs") or full_path.startswith("openapi.json"):
+    if full_path.startswith("api") or full_path.startswith("static") or full_path.startswith("docs") or full_path.startswith("openapi.json") or full_path == "auth-config.json":
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Not found")
     

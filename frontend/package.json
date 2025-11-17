@@ -7,12 +7,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@radix-ui/react-select": "^2.2.6",
     "@radix-ui/react-slot": "^1.2.3",
     "chart.js": "^4.5.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "js-cookie": "^3.0.5",
     "lightweight-charts": "^5.0.9",
     "lucide-react": "^0.536.0",
     "react": "^18.2.0",
@@ -25,6 +28,7 @@
   },
   "devDependencies": {
     "@babel/parser": "^7.28.5",
+    "@types/js-cookie": "^3.0.6",
     "@types/node": "^20.11.20",
     "@types/react": "^19.1.9",
     "@types/react-dom": "^19.1.7",

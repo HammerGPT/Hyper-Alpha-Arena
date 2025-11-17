@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react'
-import { Moon, Sun } from 'lucide-react'
+import { User, LogOut, UserCog } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import TradingModeSwitcher from '@/components/trading/TradingModeSwitcher'
-
-interface User {
-  id: number
-  username: string
-}
+import { useAuth } from '@/contexts/AuthContext'
+import { getSignInUrl } from '@/lib/auth'
 
 interface Account {
   id: number
@@ -20,43 +26,18 @@ interface Account {
 
 interface HeaderProps {
   title?: string
-  currentUser?: User | null
   currentAccount?: Account | null
   showAccountSelector?: boolean
-  onUserChange?: (username: string) => void
 }
 
-export default function Header({ title = 'Hyper Alpha Arena', currentUser, currentAccount, showAccountSelector = false, onUserChange }: HeaderProps) {
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    if (typeof document === 'undefined') return 'dark'
-    return document.documentElement.classList.contains('dark') ? 'dark' : 'light'
-  })
+export default function Header({ title = 'Hyper Alpha Arena', currentAccount, showAccountSelector = false }: HeaderProps) {
+  const { user, loading, authEnabled, logout } = useAuth()
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const stored = window.localStorage.getItem('theme')
-    if (stored === 'light' || stored === 'dark') {
-      setTheme(stored)
-    } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      setTheme('dark')
+  const handleSignUp = async () => {
+    const signInUrl = await getSignInUrl()
+    if (signInUrl) {
+      window.location.href = signInUrl
     }
-  }, [])
-
-  useEffect(() => {
-    if (typeof document === 'undefined') return
-    const root = document.documentElement
-    if (theme === 'dark') {
-      root.classList.add('dark')
-    } else {
-      root.classList.remove('dark')
-    }
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem('theme', theme)
-    }
-  }, [theme])
-
-  const toggleTheme = () => {
-    setTheme(prev => (prev === 'dark' ? 'light' : 'dark'))
   }
 
   return (
@@ -67,16 +48,58 @@ export default function Header({ title = 'Hyper Alpha Arena', currentUser, curre
           <h1 className="text-xl font-bold">{title}</h1>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <TradingModeSwitcher />
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={toggleTheme}
-            aria-label="Toggle theme"
-          >
-            {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          </Button>
+
+          {authEnabled && (
+            <>
+              {loading ? (
+                <div className="w-20 h-9 bg-muted animate-pulse rounded-md" />
+              ) : user ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" className="relative h-9 w-9 rounded-full p-0">
+                      <Avatar className="h-9 w-9">
+                        <AvatarImage src={user.avatar} alt={user.displayName || user.name} />
+                        <AvatarFallback className="text-xs">
+                          {user.displayName?.[0] || user.name?.[0] || "U"}
+                        </AvatarFallback>
+                      </Avatar>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="w-56" align="end" forceMount>
+                    <DropdownMenuLabel className="font-normal">
+                      <div className="flex flex-col space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                          {user.displayName || user.name}
+                        </p>
+                        <p className="text-xs leading-none text-muted-foreground">
+                          {user.email}
+                        </p>
+                      </div>
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => window.open('https://account.akooi.com/account', '_blank')}>
+                      <UserCog className="mr-2 h-4 w-4" />
+                      <span>My Account</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={logout}>
+                      <LogOut className="mr-2 h-4 w-4" />
+                      <span>Sign Out</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <Button
+                  onClick={handleSignUp}
+                  size="sm"
+                  className="px-4 py-2 text-sm font-medium"
+                >
+                  Sign Up
+                </Button>
+              )}
+            </>
+          )}
         </div>
       </div>
     </header>

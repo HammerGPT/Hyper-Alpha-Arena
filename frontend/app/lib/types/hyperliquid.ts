@@ -76,10 +76,12 @@ export interface ManualOrderRequest {
   symbol: string;
   is_buy: boolean;
   size: number;
-  order_type: 'market' | 'limit';
-  price?: number;
+  price: number;
+  time_in_force: 'Ioc' | 'Gtc' | 'Alo';
   reduce_only?: boolean;
   leverage?: number;
+  take_profit_price?: number;
+  stop_loss_price?: number;
   environment?: HyperliquidEnvironment;
 }
 

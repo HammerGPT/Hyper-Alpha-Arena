@@ -1,0 +1,7 @@
+{
+  "authProvider": "https://account.akooi.com",
+  "clientId": "4db5ed37c6d34d03d656",
+  "appName": "hyper-alpha-arena",
+  "organizationName": "built-in",
+  "redirectPath": "/callback"
+}

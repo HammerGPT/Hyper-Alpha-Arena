@@ -31,7 +31,7 @@ interface OrderFormProps {
 }
 
 type OrderSide = 'long' | 'short' | 'close';
-type OrderType = 'market' | 'limit';
+type TimeInForce = 'Ioc' | 'Gtc' | 'Alo';
 
 export default function OrderForm({
   accountId,
@@ -43,10 +43,12 @@ export default function OrderForm({
 }: OrderFormProps) {
   const [symbol, setSymbol] = useState(availableSymbols[0] || 'BTC');
   const [side, setSide] = useState<OrderSide>('long');
-  const [orderType, setOrderType] = useState<OrderType>('market');
+  const [timeInForce, setTimeInForce] = useState<TimeInForce>('Ioc');
   const [size, setSize] = useState('');
   const [price, setPrice] = useState('');
   const [leverage, setLeverage] = useState(defaultLeverage);
+  const [takeProfitPrice, setTakeProfitPrice] = useState('');
+  const [stopLossPrice, setStopLossPrice] = useState('');
   const [loading, setLoading] = useState(false);
   const [balance, setBalance] = useState<HyperliquidBalance | null>(null);
   const [currentPrice, setCurrentPrice] = useState<number>(0);
@@ -66,11 +68,12 @@ export default function OrderForm({
   }, [symbol]);
 
   useEffect(() => {
-    if (orderType === 'limit' && currentPrice > 0) {
-      const adjustedPrice = side === 'long' ? currentPrice * 0.99 : currentPrice * 1.01;
+    if (currentPrice > 0 && !price) {
+      // Auto-fill price based on side (slightly favorable to get filled)
+      const adjustedPrice = side === 'long' ? currentPrice * 1.001 : currentPrice * 0.999;
       setPrice(adjustedPrice.toFixed(2));
     }
-  }, [orderType, currentPrice, side]);
+  }, [currentPrice, side]);
 
   const loadBalance = async () => {
     try {
@@ -101,7 +104,7 @@ export default function OrderForm({
 
   const calculateMaxSize = () => {
     if (!balance || balance.availableBalance <= 0) return 0;
-    const priceToUse = orderType === 'limit' && price ? parseFloat(price) : currentPrice;
+    const priceToUse = price ? parseFloat(price) : currentPrice;
     if (!priceToUse || priceToUse <= 0) return 0;
     return (balance.availableBalance * leverage) / priceToUse;
   };
@@ -126,6 +129,28 @@ export default function OrderForm({
     }
   };
 
+  const handleAutoFillTakeProfit = () => {
+    const priceToUse = price ? parseFloat(price) : currentPrice;
+    if (priceToUse > 0) {
+      // 10% profit for long, 10% profit for short
+      const tpPrice = side === 'long'
+        ? priceToUse * 1.1
+        : priceToUse * 0.9;
+      setTakeProfitPrice(tpPrice.toFixed(2));
+    }
+  };
+
+  const handleAutoFillStopLoss = () => {
+    const priceToUse = price ? parseFloat(price) : currentPrice;
+    if (priceToUse > 0) {
+      // 5% loss for long, 5% loss for short
+      const slPrice = side === 'long'
+        ? priceToUse * 0.95
+        : priceToUse * 1.05;
+      setStopLossPrice(slPrice.toFixed(2));
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -134,8 +159,8 @@ export default function OrderForm({
       return;
     }
 
-    if (orderType === 'limit' && (!price || parseFloat(price) <= 0)) {
-      toast.error('Please enter a valid price for limit order');
+    if (!price || parseFloat(price) <= 0) {
+      toast.error('Please enter a valid price');
       return;
     }
 
@@ -166,10 +191,12 @@ export default function OrderForm({
         symbol,
         is_buy: isBuy,
         size: parseFloat(size),
-        order_type: orderType,
-        price: orderType === 'limit' ? parseFloat(price) : undefined,
+        price: parseFloat(price),
+        time_in_force: timeInForce,
         reduce_only: side === 'close',
         leverage: side !== 'close' ? leverage : 1,
+        take_profit_price: takeProfitPrice && parseFloat(takeProfitPrice) > 0 ? parseFloat(takeProfitPrice) : undefined,
+        stop_loss_price: stopLossPrice && parseFloat(stopLossPrice) > 0 ? parseFloat(stopLossPrice) : undefined,
         environment,
       };
 
@@ -205,6 +232,9 @@ export default function OrderForm({
       setSize('');
       setPrice('');
       setLeverage(defaultLeverage);
+      setTakeProfitPrice('');
+      setStopLossPrice('');
+      setTimeInForce('Ioc');
 
       // Reload balance, positions and notify parent
       await loadBalance();
@@ -291,35 +321,47 @@ export default function OrderForm({
               <TrendingDown className="w-4 h-4 mr-1" />
               Short
             </Button>
-            <Button
+            {/* Removed: Close Position button - use PositionsTable for closing positions */}
+            {/* <Button
               type="button"
               variant={side === 'close' ? 'default' : 'outline'}
               onClick={() => setSide('close')}
             >
               Close Position
-            </Button>
+            </Button> */}
           </div>
         </div>
 
-        {/* Order Type */}
+        {/* Time In Force */}
         <div className="space-y-2">
-          <label className="block text-sm font-medium">Order Type</label>
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              type="button"
-              variant={orderType === 'market' ? 'default' : 'outline'}
-              onClick={() => setOrderType('market')}
-            >
-              Market
-            </Button>
-            <Button
-              type="button"
-              variant={orderType === 'limit' ? 'default' : 'outline'}
-              onClick={() => setOrderType('limit')}
-            >
-              Limit
-            </Button>
-          </div>
+          <label htmlFor="timeInForce" className="block text-sm font-medium">
+            Time In Force
+          </label>
+          <Select value={timeInForce} onValueChange={(value: TimeInForce) => setTimeInForce(value)}>
+            <SelectTrigger id="timeInForce">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Ioc">
+                <div className="flex flex-col items-start">
+                  <span className="font-medium">Ioc (Recommended)</span>
+                  <span className="text-xs text-gray-500">Immediate or Cancel - executes like market order</span>
+                </div>
+              </SelectItem>
+              <SelectItem value="Gtc">
+                <div className="flex flex-col items-start">
+                  <span className="font-medium">Gtc</span>
+                  <span className="text-xs text-gray-500">Good Till Canceled - limit order stays on book</span>
+                </div>
+              </SelectItem>
+              <SelectItem value="Alo">
+                <div className="flex flex-col items-start">
+                  <span className="font-medium">Alo (Advanced)</span>
+                  <span className="text-xs text-gray-500">Add Liquidity Only - maker-only orders</span>
+                </div>
+              </SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         {/* Size Input */}
@@ -334,7 +376,7 @@ export default function OrderForm({
                 variant="outline"
                 size="sm"
                 onClick={handleMaxSize}
-                disabled={!balance || balance.availableBalance <= 0 || (!currentPrice && orderType === 'market')}
+                disabled={!balance || balance.availableBalance <= 0 || !currentPrice}
               >
                 Max
               </Button>
@@ -366,12 +408,12 @@ export default function OrderForm({
           </div>
           {side !== 'close' && !canAfford && size && parseFloat(size) > 0 && (
             <p className="text-sm text-red-600">
-              资金不足，最大可用: {calculateMaxSize().toFixed(4)} {symbol}
+              Insufficient funds, max available: {calculateMaxSize().toFixed(4)} {symbol}
             </p>
           )}
           {side === 'close' && !getCurrentPosition() && (
             <p className="text-sm text-yellow-600">
-              当前没有 {symbol} 持仓
+              No {symbol} position found
             </p>
           )}
         </div>
@@ -403,40 +445,113 @@ export default function OrderForm({
           </div>
         )}
 
-        {/* Price Input (for limit orders) */}
-        {orderType === 'limit' && (
-          <div className="space-y-2">
-            <div className="flex justify-between items-center">
-              <label htmlFor="price" className="block text-sm font-medium">
-                Price
-              </label>
-              {currentPrice > 0 && (
-                <span className="text-sm text-gray-500">
-                  市价: ${currentPrice.toFixed(2)}
-                </span>
-              )}
-            </div>
-            <div className="relative">
-              <Input
-                id="price"
-                type="number"
-                step="0.01"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                placeholder="0.00"
-                className="pr-16"
-              />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-500">
-                USDC
+        {/* Price Input */}
+        <div className="space-y-2">
+          <div className="flex justify-between items-center">
+            <label htmlFor="price" className="block text-sm font-medium">
+              Limit Price
+            </label>
+            {currentPrice > 0 && (
+              <span className="text-sm text-gray-500">
+                Market: ${currentPrice.toFixed(2)}
               </span>
-            </div>
-            {price && currentPrice > 0 && (
-              <p className="text-sm text-gray-600">
-                {side === 'long' ? '买入' : '卖出'}价格
-                {((parseFloat(price) - currentPrice) / currentPrice * 100).toFixed(2)}%
-                {parseFloat(price) > currentPrice ? '高于' : '低于'}市价
-              </p>
             )}
+          </div>
+          <div className="relative">
+            <Input
+              id="price"
+              type="number"
+              step="0.01"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              placeholder="0.00"
+              className="pr-16"
+            />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-500">
+              USDC
+            </span>
+          </div>
+          {price && currentPrice > 0 && (
+            <p className="text-sm text-gray-600">
+              {side === 'long' ? 'Buy' : 'Sell'} price is{' '}
+              {((parseFloat(price) - currentPrice) / currentPrice * 100).toFixed(2)}%{' '}
+              {parseFloat(price) > currentPrice ? 'above' : 'below'} market
+            </p>
+          )}
+        </div>
+
+        {/* Take Profit / Stop Loss (only for open positions) */}
+        {side !== 'close' && (
+          <div className="space-y-4">
+            {/* Take Profit */}
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <label htmlFor="takeProfit" className="block text-sm font-medium">
+                  Take Profit Price (Optional)
+                </label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAutoFillTakeProfit}
+                  disabled={!price && !currentPrice}
+                >
+                  Auto Fill
+                </Button>
+              </div>
+              <div className="relative">
+                <Input
+                  id="takeProfit"
+                  type="number"
+                  step="0.01"
+                  value={takeProfitPrice}
+                  onChange={(e) => setTakeProfitPrice(e.target.value)}
+                  placeholder="0.00"
+                  className="pr-16"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-500">
+                  USDC
+                </span>
+              </div>
+              <p className="text-xs text-gray-500">
+                Auto-fill sets +10% profit target from entry price
+              </p>
+            </div>
+
+            {/* Stop Loss */}
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <label htmlFor="stopLoss" className="block text-sm font-medium">
+                  Stop Loss Price (Optional)
+                </label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAutoFillStopLoss}
+                  disabled={!price && !currentPrice}
+                >
+                  Auto Fill
+                </Button>
+              </div>
+              <div className="relative">
+                <Input
+                  id="stopLoss"
+                  type="number"
+                  step="0.01"
+                  value={stopLossPrice}
+                  onChange={(e) => setStopLossPrice(e.target.value)}
+                  placeholder="0.00"
+                  className="pr-16"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-500">
+                  USDC
+                </span>
+              </div>
+              <p className="text-xs text-gray-500">
+                Auto-fill sets -5% stop loss from entry price
+              </p>
+            </div>
           </div>
         )}
 
@@ -518,6 +633,9 @@ export default function OrderForm({
               setSize('');
               setPrice('');
               setLeverage(defaultLeverage);
+              setTakeProfitPrice('');
+              setStopLossPrice('');
+              setTimeInForce('Ioc');
             }}
           >
             Cancel

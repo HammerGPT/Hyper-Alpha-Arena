@@ -18,6 +18,7 @@ import {
   getPositionSide,
   formatPnl,
   formatLeverage,
+  getCurrentPrice,
 } from '@/lib/hyperliquidApi';
 import type { PositionDisplay } from '@/lib/types/hyperliquid';
 import { cn } from '@/lib/utils';
@@ -109,12 +110,20 @@ export default function PositionsTable({
     setClosingPositionId(positionId);
 
     try {
-      // Close position by placing opposite order with reduceOnly flag
+      const marketPrice = await getCurrentPrice(position.coin);
+      const executionPrice = marketPrice || position.entryPx || 0;
+
+      if (!executionPrice || executionPrice <= 0) {
+        throw new Error('Unable to determine market price for closing the position');
+      }
+
       await placeManualOrder(accountId, {
         symbol: position.coin,
         is_buy: position.side === 'SHORT', // Opposite side to close
         size: position.sizeAbs,
-        order_type: 'market',
+        price: executionPrice,
+        time_in_force: 'Ioc',
+        leverage: 1,
         reduce_only: true,
         environment,
       });

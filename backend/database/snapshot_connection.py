@@ -14,13 +14,25 @@ logger = logging.getLogger(__name__)
 # Snapshot database URL from environment or default
 SNAPSHOT_DATABASE_URL = os.environ.get('SNAPSHOT_DATABASE_URL', "postgresql://alpha_user:alpha_pass@localhost/alpha_snapshots")
 
+# Reuse the same pool tuning knobs as the primary database
+POOL_SIZE = int(os.environ.get("DB_POOL_SIZE", "20"))
+POOL_MAX_OVERFLOW = int(os.environ.get("DB_POOL_MAX_OVERFLOW", "20"))
+POOL_RECYCLE = int(os.environ.get("DB_POOL_RECYCLE", "1800"))
+POOL_TIMEOUT = int(os.environ.get("DB_POOL_TIMEOUT", "30"))
+
 def _ensure_snapshot_engine():
     """Create snapshot database if it does not already exist."""
     url = make_url(SNAPSHOT_DATABASE_URL)
     db_name = url.database
 
     try:
-        engine = create_engine(SNAPSHOT_DATABASE_URL)
+        engine = create_engine(
+            SNAPSHOT_DATABASE_URL,
+            pool_size=POOL_SIZE,
+            max_overflow=POOL_MAX_OVERFLOW,
+            pool_recycle=POOL_RECYCLE,
+            pool_timeout=POOL_TIMEOUT,
+        )
         with engine.connect():
             logger.debug("Snapshot database %s reachable", db_name)
         return engine
@@ -40,7 +52,13 @@ def _ensure_snapshot_engine():
         finally:
             admin_engine.dispose()
 
-        engine = create_engine(SNAPSHOT_DATABASE_URL)
+        engine = create_engine(
+            SNAPSHOT_DATABASE_URL,
+            pool_size=POOL_SIZE,
+            max_overflow=POOL_MAX_OVERFLOW,
+            pool_recycle=POOL_RECYCLE,
+            pool_timeout=POOL_TIMEOUT,
+        )
         with engine.connect():
             logger.debug("Snapshot database %s ready after creation", db_name)
         return engine

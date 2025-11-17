@@ -537,6 +537,11 @@ def place_ai_driven_hyperliquid_order(
                     order_value = available_balance * target_portion
                     quantity = round(order_value / price, 6)
 
+                    # Extract TP/SL and time_in_force from AI decision
+                    take_profit_price = decision.get("take_profit_price")
+                    stop_loss_price = decision.get("stop_loss_price")
+                    time_in_force = decision.get("time_in_force", "Ioc")  # Default to Ioc (market-like)
+
                     # Price validation for BUY operation
                     if max_price is not None:
                         price_deviation_percent = abs(max_price - price) / price * 100
@@ -567,23 +572,32 @@ def place_ai_driven_hyperliquid_order(
 
                     logger.info(
                         f"[HYPERLIQUID {environment.upper()}] Placing BUY order: "
-                        f"{symbol} size={quantity} leverage={leverage}x"
+                        f"{symbol} size={quantity} leverage={leverage}x TIF={time_in_force} "
+                        f"TP={take_profit_price} SL={stop_loss_price}"
                     )
 
-                    order_result = client.place_order(
+                    # Use native API for all orders
+                    order_result = client.place_order_with_tpsl(
                         db=db,
                         symbol=symbol,
                         is_buy=True,
                         size=quantity,
-                        order_type="market",
                         price=price_to_use,
                         leverage=leverage,
-                        reduce_only=False
+                        time_in_force=time_in_force,
+                        reduce_only=False,
+                        take_profit_price=take_profit_price,
+                        stop_loss_price=stop_loss_price
                     )
 
                 elif operation == "sell":
                     order_value = available_balance * target_portion
                     quantity = round(order_value / price, 6)
+
+                    # Extract TP/SL and time_in_force from AI decision
+                    take_profit_price = decision.get("take_profit_price")
+                    stop_loss_price = decision.get("stop_loss_price")
+                    time_in_force = decision.get("time_in_force", "Ioc")  # Default to Ioc (market-like)
 
                     # Price validation for SELL operation
                     if min_price is not None:
@@ -615,18 +629,22 @@ def place_ai_driven_hyperliquid_order(
 
                     logger.info(
                         f"[HYPERLIQUID {environment.upper()}] Placing SELL order: "
-                        f"{symbol} size={quantity} leverage={leverage}x"
+                        f"{symbol} size={quantity} leverage={leverage}x TIF={time_in_force} "
+                        f"TP={take_profit_price} SL={stop_loss_price}"
                     )
 
-                    order_result = client.place_order(
+                    # Use native API for all orders
+                    order_result = client.place_order_with_tpsl(
                         db=db,
                         symbol=symbol,
                         is_buy=False,
                         size=quantity,
-                        order_type="market",
                         price=price_to_use,
                         leverage=leverage,
-                        reduce_only=False
+                        time_in_force=time_in_force,
+                        reduce_only=False,
+                        take_profit_price=take_profit_price,
+                        stop_loss_price=stop_loss_price
                     )
 
                 elif operation == "close":
@@ -699,15 +717,18 @@ def place_ai_driven_hyperliquid_order(
                             f"Prompt should require min_price for all CLOSE operations."
                         )
 
-                    order_result = client.place_order(
+                    # Use native API for close orders (force Ioc for immediate execution)
+                    order_result = client.place_order_with_tpsl(
                         db=db,
                         symbol=symbol,
                         is_buy=(not is_long),
                         size=close_size,
-                        order_type="market",
                         price=close_price,
                         leverage=1,
-                        reduce_only=True
+                        time_in_force="Ioc",  # Always use Ioc for closing positions
+                        reduce_only=True,
+                        take_profit_price=None,
+                        stop_loss_price=None
                     )
 
                 else:

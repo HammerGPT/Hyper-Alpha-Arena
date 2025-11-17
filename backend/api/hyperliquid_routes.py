@@ -85,10 +85,12 @@ class ManualOrderRequest(BaseModel):
     symbol: str = Field(..., description="Asset symbol (e.g., 'BTC')")
     is_buy: bool = Field(..., description="True for long, False for short")
     size: float = Field(..., gt=0, description="Order size")
-    order_type: str = Field("market", pattern="^(market|limit)$")
-    price: Optional[float] = Field(None, gt=0, description="Price for limit orders")
+    price: float = Field(..., gt=0, description="Limit price for the order")
+    time_in_force: str = Field("Ioc", pattern="^(Ioc|Gtc|Alo)$", description="Time in force: Ioc (market-like), Gtc (limit order), Alo (maker only)")
     leverage: int = Field(1, ge=1, le=50, description="Position leverage")
     reduce_only: bool = Field(False, description="Only close existing positions")
+    take_profit_price: Optional[float] = Field(None, gt=0, description="Take profit trigger price")
+    stop_loss_price: Optional[float] = Field(None, gt=0, description="Stop loss trigger price")
     environment: Optional[str] = Field(None, description="Environment override ('testnet' or 'mainnet')")
 
     class Config:
@@ -97,9 +99,12 @@ class ManualOrderRequest(BaseModel):
                 "symbol": "BTC",
                 "is_buy": True,
                 "size": 0.01,
-                "order_type": "market",
+                "price": 50000.0,
+                "time_in_force": "Ioc",
                 "leverage": 2,
-                "reduce_only": False
+                "reduce_only": False,
+                "take_profit_price": 55000.0,
+                "stop_loss_price": 47500.0
             }
         }
 
@@ -344,16 +349,18 @@ async def place_manual_order(
                 detail=f"Leverage {request.leverage}x exceeds account maximum {account.max_leverage}x"
             )
 
-        # Place order
-        result = client.place_order(
+        # Place order using native Hyperliquid API with TP/SL support
+        result = client.place_order_with_tpsl(
             db=db,
             symbol=request.symbol,
             is_buy=request.is_buy,
             size=request.size,
-            order_type=request.order_type,
             price=request.price,
+            leverage=request.leverage,
+            time_in_force=request.time_in_force,
             reduce_only=request.reduce_only,
-            leverage=request.leverage
+            take_profit_price=request.take_profit_price,
+            stop_loss_price=request.stop_loss_price
         )
 
         return {

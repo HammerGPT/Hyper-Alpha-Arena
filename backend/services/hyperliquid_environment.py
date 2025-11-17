@@ -157,9 +157,12 @@ def get_hyperliquid_client(db: Session, account_id: int, override_environment: s
     # Try to get wallet from hyperliquid_wallets table (new architecture)
     wallet = db.query(HyperliquidWallet).filter(
         HyperliquidWallet.account_id == account_id,
-        HyperliquidWallet.environment == environment,
-        HyperliquidWallet.is_active == "true"
+        HyperliquidWallet.environment == environment
     ).first()
+
+    # Filter out inactive wallets if needed
+    if wallet and wallet.is_active and str(wallet.is_active).lower() == 'false':
+        wallet = None
 
     if wallet:
         # New architecture: use wallet table
@@ -183,14 +186,20 @@ def get_hyperliquid_client(db: Session, account_id: int, override_environment: s
     # Decrypt private key
     try:
         private_key = decrypt_private_key(encrypted_key)
+        import sys
+        print(f"[DEBUG] Decrypted private_key format: starts_with_0x={private_key.startswith('0x')}, length={len(private_key)}", file=sys.stderr, flush=True)
     except Exception as e:
         logger.error(f"Failed to decrypt private key for account {account_id}: {e}")
         raise ValueError(f"Private key decryption failed: {e}")
 
     # Create and return client
+    wallet_address = wallet.wallet_address if wallet else None
+    import sys
+    print(f"[DEBUG] get_hyperliquid_client: account_id={account_id}, environment={environment}, wallet={wallet}, wallet_address={wallet_address}", file=sys.stderr, flush=True)
     return create_hyperliquid_client(
         account_id=account_id,
         private_key=private_key,
+        wallet_address=wallet_address,
         environment=environment
     )
 

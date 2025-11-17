@@ -19,6 +19,9 @@ dependencies = [
     "pydantic-core>=2.14.0",
     "cryptography>=41.0.0",
     "eth-account>=0.10.0",
+    "msgpack>=1.0.0",
+    "eth-utils>=2.0.0",
+    "hyperliquid-python-sdk>=0.20.0",
 ]
 
 [tool.uv]
