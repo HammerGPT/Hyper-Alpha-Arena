@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import TradingModeSwitcher from '@/components/trading/TradingModeSwitcher'
+import ExchangeModal from '@/components/exchange/ExchangeModal'
 import { useAuth } from '@/contexts/AuthContext'
 import { getSignInUrl } from '@/lib/auth'
 
@@ -32,6 +33,7 @@ interface HeaderProps {
 
 export default function Header({ title = 'Hyper Alpha Arena', currentAccount, showAccountSelector = false }: HeaderProps) {
   const { user, loading, authEnabled, logout } = useAuth()
+  const [isExchangeModalOpen, setIsExchangeModalOpen] = useState(false)
 
   const handleSignUp = async () => {
     const signInUrl = await getSignInUrl()
@@ -46,9 +48,23 @@ export default function Header({ title = 'Hyper Alpha Arena', currentAccount, sh
         <div className="flex items-center gap-3">
           <img src="/static/logo_app.png" alt="Logo" className="h-8 w-8 object-contain" />
           <h1 className="text-xl font-bold">{title}</h1>
+
+          {/* Exchanges Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsExchangeModalOpen(true)}
+            className="px-3 py-2 text-sm font-medium"
+          >
+            <img src="/static/exchange.png" alt="Exchange" className="mr-2 h-4 w-4" />
+            Exchanges
+            <span className="ml-1">🔥</span>
+          </Button>
+          <span className="text-xs text-muted-foreground ml-2">Up to 30% fee discount</span>
         </div>
 
         <div className="flex items-center gap-3">
+
           <TradingModeSwitcher />
 
           {authEnabled && (
@@ -102,6 +118,12 @@ export default function Header({ title = 'Hyper Alpha Arena', currentAccount, sh
           )}
         </div>
       </div>
+
+      {/* Exchange Modal */}
+      <ExchangeModal
+        isOpen={isExchangeModalOpen}
+        onClose={() => setIsExchangeModalOpen(false)}
+      />
     </header>
   )
 }
