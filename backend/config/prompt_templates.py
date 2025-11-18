@@ -26,8 +26,8 @@ Follow these rules:
 - For "sell" or "close": target_portion_of_balance is the % of the current position to exit (0.0-1.0)
 - For "hold": keep target_portion_of_balance at 0
 - leverage must be an integer between 1 and {max_leverage} (for perpetual contracts)
-- max_price: For "buy" operations, set maximum acceptable price (slippage protection)
-- min_price: For "sell"/"close" operations, set minimum acceptable price (slippage protection)
+- max_price: For "buy" operations and closing SHORT positions, set maximum acceptable price (slippage protection)
+- min_price: For "sell" operations and closing LONG positions, set minimum acceptable price (slippage protection)
 - Price should be current market price +/- your acceptable slippage (typically 1-5%)
 - Provide comprehensive reasoning for every decision, especially when allocating across multiple coins.
 - Never invent trades for symbols that are not in the market data
@@ -132,8 +132,8 @@ FIELD TYPE REQUIREMENTS:
 - symbol: string (exactly one of: BTC, ETH, SOL, BNB, XRP, DOGE)
 - target_portion_of_balance: number (float between 0.0 and 1.0)
 - leverage: integer (between 1 and {max_leverage}, required for perpetual contracts)
-- max_price: number (required for "buy" operations - maximum acceptable price for slippage protection)
-- min_price: number (required for "sell"/"close" operations - minimum acceptable price for slippage protection)
+- max_price: number (required for "buy" operations and closing SHORT positions - maximum acceptable price for slippage protection)
+- min_price: number (required for "sell" operations and closing LONG positions - minimum acceptable price for slippage protection)
 - reason: string describing the core signal(s)
 - trading_strategy: string providing deeper context, including risk management and exit logic
 """
@@ -176,6 +176,30 @@ Current prices (USD):
 
 === LATEST CRYPTO NEWS ===
 {news_section}
+
+=== HYPERLIQUID PRICE LIMITS (CRITICAL) ===
+⚠️ ALL orders must have prices within ±1% of oracle price or will be rejected.
+
+For BUY/LONG operations:
+  - max_price MUST be ≤ current_market_price × 1.01
+
+For SELL/SHORT operations (opening short):
+  - min_price MUST be ≥ current_market_price × 0.99
+
+For CLOSE operations:
+  - Closing LONG positions: min_price MUST be ≥ current_market_price × 0.99
+  - Closing SHORT positions: max_price MUST be ≤ current_market_price × 1.01
+
+⚠️ CRITICAL: CLOSE orders use IOC (Immediate or Cancel) execution and must match against existing order book entries immediately:
+  - When closing LONG positions (selling to close): Your min_price must be competitive enough to match existing buy orders. If set too high, the order will fail.
+  - When closing SHORT positions (buying to close): Your max_price must be competitive enough to match existing sell orders. If set too low, the order will fail.
+
+Examples:
+  - BTC market price $50,000 → max_price range: $49,500-$50,500
+  - ETH closing long at $3,000 → min_price range: $2,970-$3,030
+  - BNB closing short at $920 → max_price range: $910.80-$929.20
+
+Failure to comply = immediate order rejection with "Price too far from oracle" error.
 
 === PERPETUAL CONTRACT TRADING RULES ===
 You are trading real perpetual contracts on Hyperliquid. Key concepts:
@@ -269,8 +293,8 @@ FIELD TYPE REQUIREMENTS:
 - symbol: string (must match one of: {selected_symbols_csv})
 - target_portion_of_balance: number (float between 0.0 and 1.0)
 - leverage: integer (between 1 and {max_leverage}, REQUIRED field)
-- max_price: number (required for "buy" operations - maximum acceptable price for slippage protection)
-- min_price: number (required for "sell"/"close" operations - minimum acceptable price for slippage protection)
+- max_price: number (required for "buy" operations and closing SHORT positions - maximum acceptable price for slippage protection)
+- min_price: number (required for "sell" operations and closing LONG positions - minimum acceptable price for slippage protection)
 - reason: string explaining the key catalyst, risk, or signal (no strict length limit, but stay focused)
 - trading_strategy: string covering entry thesis, leverage reasoning, liquidation awareness, and exit plan
 """

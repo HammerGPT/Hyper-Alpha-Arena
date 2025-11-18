@@ -36,6 +36,39 @@ from services.hyperliquid_symbol_service import (
 logger = logging.getLogger(__name__)
 
 AI_TRADING_SYMBOLS: List[str] = ["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE"]
+ORACLE_PRICE_DEVIATION_LIMIT_PERCENT = 1.0
+
+
+def _enforce_price_bounds(
+    *,
+    symbol: str,
+    account_name: str,
+    operation: str,
+    current_price: float,
+    requested_price: float,
+) -> Tuple[float, float, bool]:
+    """Clamp requested price into ±1% oracle window and log adjustments."""
+
+    if current_price <= 0 or requested_price <= 0:
+        return requested_price, 0.0, False
+
+    limit = ORACLE_PRICE_DEVIATION_LIMIT_PERCENT / 100
+    lower_bound = current_price * (1 - limit)
+    upper_bound = current_price * (1 + limit)
+
+    clamped_price = max(min(requested_price, upper_bound), lower_bound)
+    deviation_percent = abs(requested_price - current_price) / current_price * 100
+    was_adjusted = clamped_price != requested_price
+
+    if was_adjusted:
+        logger.warning(
+            f"[AI COMPLIANCE] {operation.upper()} {symbol} price from AI for {account_name} "
+            f"violates Hyperliquid ±1% rule. market=${current_price:.2f}, "
+            f"requested=${requested_price:.2f}, deviation={deviation_percent:.2f}%. "
+            f"Adjusted to ${clamped_price:.2f}."
+        )
+
+    return clamped_price, deviation_percent, was_adjusted
 
 
 def _get_symbol_name(symbol: str) -> str:
@@ -544,24 +577,21 @@ def place_ai_driven_hyperliquid_order(
 
                     # Price validation for BUY operation
                     if max_price is not None:
-                        price_deviation_percent = abs(max_price - price) / price * 100
-
-                        if price_deviation_percent > 1.0:
-                            logger.warning(
-                                f"⚠️  AI COMPLIANCE ISSUE - BUY {symbol}: "
-                                f"AI provided max_price ${max_price:.2f} exceeds Hyperliquid 1% oracle limit. "
-                                f"Market: ${price:.2f}, Deviation: {price_deviation_percent:.2f}%. "
-                                f"Order will likely be REJECTED by exchange. "
-                                f"Check prompt compliance in System Logs."
-                            )
                         price_to_use = max_price
+                        price_to_use, price_deviation_percent, _ = _enforce_price_bounds(
+                            symbol=symbol,
+                            account_name=account.name,
+                            operation="buy",
+                            current_price=price,
+                            requested_price=price_to_use,
+                        )
                         logger.info(
                             f"Using AI-provided max_price for BUY {symbol}: "
                             f"market=${price:.2f}, order=${price_to_use:.2f}, "
                             f"deviation={price_deviation_percent:.2f}%"
                         )
                     else:
-                        # AI did not provide max_price - use market price
+                        # AI did not provide max_price - use market price (already within 1%)
                         price_to_use = price
                         logger.warning(
                             f"⚠️  AI COMPLIANCE ISSUE - BUY {symbol}: "
@@ -601,17 +631,14 @@ def place_ai_driven_hyperliquid_order(
 
                     # Price validation for SELL operation
                     if min_price is not None:
-                        price_deviation_percent = abs(min_price - price) / price * 100
-
-                        if price_deviation_percent > 1.0:
-                            logger.warning(
-                                f"⚠️  AI COMPLIANCE ISSUE - SELL {symbol}: "
-                                f"AI provided min_price ${min_price:.2f} exceeds Hyperliquid 1% oracle limit. "
-                                f"Market: ${price:.2f}, Deviation: {price_deviation_percent:.2f}%. "
-                                f"Order will likely be REJECTED by exchange. "
-                                f"Check prompt compliance in System Logs."
-                            )
                         price_to_use = min_price
+                        price_to_use, price_deviation_percent, _ = _enforce_price_bounds(
+                            symbol=symbol,
+                            account_name=account.name,
+                            operation="sell",
+                            current_price=price,
+                            requested_price=price_to_use,
+                        )
                         logger.info(
                             f"Using AI-provided min_price for SELL {symbol}: "
                             f"market=${price:.2f}, order=${price_to_use:.2f}, "
@@ -690,31 +717,83 @@ def place_ai_driven_hyperliquid_order(
                     current_price = prices.get(symbol, 0)
 
                     # Price validation for Hyperliquid 1% oracle limit
-                    if min_price:
-                        price_deviation_percent = abs(min_price - current_price) / current_price * 100
+                    max_price_close = decision.get("max_price")
 
-                        if price_deviation_percent > 1.0:
+                    if is_long:
+                        ai_close_price = min_price
+                        price_field_used = "min_price"
+                    else:
+                        ai_close_price = max_price_close if max_price_close is not None else min_price
+                        price_field_used = "max_price" if max_price_close is not None else "min_price"
+
+                        if max_price_close is None and min_price is not None:
                             logger.warning(
                                 f"⚠️  AI COMPLIANCE ISSUE - CLOSE {symbol}: "
-                                f"AI provided min_price ${min_price:.2f} exceeds Hyperliquid 1% oracle limit. "
-                                f"Market: ${current_price:.2f}, Deviation: {price_deviation_percent:.2f}%. "
-                                f"Order will likely be REJECTED by exchange. "
-                                f"Check prompt compliance in System Logs."
+                                f"Short position provided min_price instead of max_price. "
+                                f"Treating min_price=${min_price:.2f} as max_price for compatibility."
                             )
-                        close_price = min_price
+
+                    if ai_close_price:
+                        close_price = ai_close_price
+                        close_price, price_deviation_percent, _ = _enforce_price_bounds(
+                            symbol=symbol,
+                            account_name=account.name,
+                            operation="close",
+                            current_price=current_price,
+                            requested_price=close_price,
+                        )
+
+                        # Check if close price is on the wrong side of market
+                        if not is_long and close_price < current_price:
+                            # Close Short: buy price too low, raise to slightly above market
+                            logger.warning(
+                                f"⚠️  AI COMPLIANCE ISSUE - CLOSE {symbol}: "
+                                f"Short close limit ${close_price:.2f} sits below market ${current_price:.2f}. "
+                                f"Adjusting to ensure IOC buy can match resting asks."
+                            )
+                            close_price, price_deviation_percent, _ = _enforce_price_bounds(
+                                symbol=symbol,
+                                account_name=account.name,
+                                operation="close",
+                                current_price=current_price,
+                                requested_price=current_price * 1.005,
+                            )
+                        elif is_long and close_price > current_price:
+                            # Close Long: sell price too high, lower to slightly below market
+                            logger.warning(
+                                f"⚠️  AI COMPLIANCE ISSUE - CLOSE {symbol}: "
+                                f"Long close limit ${close_price:.2f} sits above market ${current_price:.2f}. "
+                                f"Adjusting to ensure IOC sell can match resting bids."
+                            )
+                            close_price, price_deviation_percent, _ = _enforce_price_bounds(
+                                symbol=symbol,
+                                account_name=account.name,
+                                operation="close",
+                                current_price=current_price,
+                                requested_price=current_price * 0.995,
+                            )
+
                         logger.info(
-                            f"Using AI-provided min_price for CLOSE {symbol}: "
+                            f"Using AI-provided {price_field_used} for CLOSE {symbol}: "
                             f"market=${current_price:.2f}, order=${close_price:.2f}, "
                             f"deviation={price_deviation_percent:.2f}%"
                         )
                     else:
-                        # AI did not provide min_price - use safe default
-                        close_price = current_price * (0.995 if is_long else 1.005)
+                        # AI did not provide relevant close price - use safe default
+                        fallback_multiplier = 0.995 if is_long else 1.005
+                        close_price = current_price * fallback_multiplier
+                        close_price, _, _ = _enforce_price_bounds(
+                            symbol=symbol,
+                            account_name=account.name,
+                            operation="close",
+                            current_price=current_price,
+                            requested_price=close_price,
+                        )
                         logger.warning(
                             f"⚠️  AI COMPLIANCE ISSUE - CLOSE {symbol}: "
-                            f"AI did not provide min_price in decision. "
+                            f"AI did not provide {'min_price' if is_long else 'max_price'} in decision. "
                             f"Using fallback price: market=${current_price:.2f}, order=${close_price:.2f}. "
-                            f"Prompt should require min_price for all CLOSE operations."
+                            f"Prompt should require {'min_price for closing longs' if is_long else 'max_price for closing shorts'} in all CLOSE operations."
                         )
 
                     # Use native API for close orders (force Ioc for immediate execution)
