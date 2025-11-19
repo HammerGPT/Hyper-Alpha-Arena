@@ -806,8 +806,16 @@ def call_ai_for_decision(
     model_lower = (account.model or "").lower()
 
     # Reasoning models that don't support temperature parameter
+    # Support multi-vendor reasoning models: OpenAI, DeepSeek, Qwen, Claude, Gemini, Grok
     is_reasoning_model = any(
-        marker in model_lower for marker in ["gpt-5", "o1-preview", "o1-mini", "o1-", "o3-", "o4-"]
+        marker in model_lower for marker in [
+            "gpt-5", "o1-preview", "o1-mini", "o1-", "o3-", "o4-",  # OpenAI
+            "deepseek-r1", "deepseek-reasoner",  # DeepSeek
+            "qwq", "qwen-plus-thinking", "qwen-max-thinking", "qwen3-thinking", "qwen-turbo-thinking",  # Qwen
+            "claude-4", "claude-sonnet-4-5",  # Claude (extended thinking)
+            "gemini-2.5", "gemini-3", "gemini-2.0-flash-thinking",  # Gemini (thinking mode)
+            "grok-3-mini"  # Grok (only mini has reasoning_content)
+        ]
     )
 
     # New models that use max_completion_tokens instead of max_tokens
@@ -857,6 +865,17 @@ def call_ai_for_decision(
         max_retries = 3
         response = None
         success = False
+
+        # Reasoning models need longer timeout (they think more, respond slower)
+        # For unknown models (not in our hardcoded list), use conservative longer timeout
+        # Better to wait longer than to fail due to timeout
+        if is_reasoning_model:
+            request_timeout = 120  # Known reasoning models
+        else:
+            # Unknown models: use 60s as conservative default (between 30s chat and 120s reasoning)
+            # This handles custom model names, future models, and proxy services
+            request_timeout = 60
+
         for endpoint in endpoints:
             for attempt in range(max_retries):
                 try:
@@ -864,7 +883,7 @@ def call_ai_for_decision(
                         endpoint,
                         headers=headers,
                         json=payload,
-                        timeout=30,
+                        timeout=request_timeout,
                         verify=False,  # Disable SSL verification for custom AI endpoints
                     )
 
@@ -947,6 +966,103 @@ def call_ai_for_decision(
             message = choice.get("message", {})
             finish_reason = choice.get("finish_reason", "")
             reasoning_text = _extract_text_from_message(message.get("reasoning"))
+
+            # Extract reasoning content from multi-vendor protocols (defensive design)
+            def _extract_reasoning_content_safe(api_result: dict) -> str:
+                """
+                Extract reasoning content from AI response (multi-vendor support)
+                Supports: OpenAI (o1/o3/gpt-5), DeepSeek (R1), Qwen (QwQ), Claude (thinking), Gemini (thoughts), Grok (3-mini)
+                Returns empty string on any error - never blocks main trading flow
+                """
+                try:
+                    reasoning_parts = []
+
+                    # Safe extraction: get choices and message with type checking
+                    choices = api_result.get("choices")
+                    if not choices or not isinstance(choices, list) or len(choices) == 0:
+                        return ""
+
+                    choice_item = choices[0]
+                    if not isinstance(choice_item, dict):
+                        return ""
+
+                    msg = choice_item.get("message")
+                    if not isinstance(msg, dict):
+                        return ""
+
+                    # Strategy 1: OpenAI/DeepSeek/Qwen/Grok standard format
+                    # message.reasoning (OpenAI o1/o3/gpt-5)
+                    # message.reasoning_content (DeepSeek R1, Qwen QwQ, Grok 3-mini)
+                    try:
+                        reasoning_field = msg.get("reasoning")
+                        if reasoning_field:
+                            extracted = _extract_text_from_message(reasoning_field)
+                            if extracted and extracted.strip():
+                                reasoning_parts.append(extracted.strip())
+                    except Exception:
+                        pass
+
+                    try:
+                        reasoning_content_field = msg.get("reasoning_content")
+                        if reasoning_content_field:
+                            extracted = _extract_text_from_message(reasoning_content_field)
+                            if extracted and extracted.strip():
+                                reasoning_parts.append(extracted.strip())
+                    except Exception:
+                        pass
+
+                    # Strategy 2: Claude format - thinking blocks in content array
+                    # {"content": [{"type": "thinking", "thinking": "..."}, {"type": "text", "text": "..."}]}
+                    try:
+                        content_array = msg.get("content")
+                        if isinstance(content_array, list):
+                            for block in content_array:
+                                if isinstance(block, dict) and block.get("type") == "thinking":
+                                    thinking_text = block.get("thinking")
+                                    if thinking_text and isinstance(thinking_text, str) and thinking_text.strip():
+                                        reasoning_parts.append(thinking_text.strip())
+                    except Exception:
+                        pass
+
+                    # Strategy 3: Gemini format - parts array with thought=true flag
+                    # {"parts": [{"text": "...", "thought": true}, {"text": "..."}]}
+                    try:
+                        parts_array = msg.get("parts")
+                        if isinstance(parts_array, list):
+                            for part in parts_array:
+                                if isinstance(part, dict) and part.get("thought") is True:
+                                    thought_text = part.get("text")
+                                    if thought_text and isinstance(thought_text, str) and thought_text.strip():
+                                        reasoning_parts.append(thought_text.strip())
+                    except Exception:
+                        pass
+
+                    # Strategy 4: Fallback - try other possible field names
+                    try:
+                        for field_name in ["chain_of_thought", "cot", "thinking", "thinking_log", "reasoning_log"]:
+                            field_value = msg.get(field_name)
+                            if field_value:
+                                extracted = _extract_text_from_message(field_value)
+                                if extracted and extracted.strip():
+                                    reasoning_parts.append(extracted.strip())
+                                    break  # Only take first match from fallback fields
+                    except Exception:
+                        pass
+
+                    # Merge all reasoning segments
+                    if reasoning_parts:
+                        merged = "\n\n--- [Reasoning Section] ---\n\n".join(reasoning_parts)
+                        logger.debug(f"Reasoning content extracted: {len(merged)} chars from API response")
+                        return merged
+
+                    return ""
+
+                except Exception as e:
+                    logger.warning(f"Failed to extract reasoning content from API response: {e}")
+                    return ""
+
+            # Extract reasoning content for later merging
+            api_reasoning_content = _extract_reasoning_content_safe(result)
 
             # Check if response was truncated due to length limit
             if finish_reason == "length":
@@ -1048,11 +1164,26 @@ def call_ai_for_decision(
                 entry = dict(raw_entry)
                 strategy_details = entry.get("trading_strategy")
 
+                # Merge API reasoning content with trading_strategy
+                # Priority: API reasoning (from reasoning models) > trading_strategy (from prompt) > fallback reasoning_text
                 entry["_prompt_snapshot"] = prompt
-                if isinstance(strategy_details, str) and strategy_details.strip():
+
+                if api_reasoning_content:
+                    # Reasoning model: merge trading_strategy and API reasoning content
+                    base_strategy = strategy_details if isinstance(strategy_details, str) and strategy_details.strip() else ""
+                    if base_strategy:
+                        # Combine strategy description from JSON and real CoT from API (seamless merge)
+                        entry["_reasoning_snapshot"] = f"{base_strategy}\n\n{api_reasoning_content}"
+                    else:
+                        # Only API reasoning content available
+                        entry["_reasoning_snapshot"] = api_reasoning_content
+                elif isinstance(strategy_details, str) and strategy_details.strip():
+                    # Chat model: use trading_strategy from JSON
                     entry["_reasoning_snapshot"] = strategy_details.strip()
                 else:
+                    # Fallback: use reasoning_text extracted earlier
                     entry["_reasoning_snapshot"] = reasoning_text or ""
+
                 entry["_raw_decision_text"] = snapshot_source
                 structured_decisions.append(entry)
 

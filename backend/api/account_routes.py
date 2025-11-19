@@ -703,8 +703,14 @@ async def test_llm_connection(payload: dict):
             model_lower = model.lower()
 
             # Reasoning models that don't support temperature parameter
+            # Support multi-vendor reasoning models: OpenAI, DeepSeek, Qwen, Claude, Gemini, Grok
             is_reasoning_model = any(x in model_lower for x in [
-                'gpt-5', 'o1-preview', 'o1-mini', 'o1-', 'o3-', 'o4-'
+                'gpt-5', 'o1-preview', 'o1-mini', 'o1-', 'o3-', 'o4-',  # OpenAI
+                'deepseek-r1', 'deepseek-reasoner',  # DeepSeek
+                'qwq', 'qwen-plus-thinking', 'qwen-max-thinking', 'qwen3-thinking', 'qwen-turbo-thinking',  # Qwen
+                'claude-4', 'claude-sonnet-4-5',  # Claude (extended thinking)
+                'gemini-2.5', 'gemini-3', 'gemini-2.0-flash-thinking',  # Gemini (thinking mode)
+                'grok-3-mini'  # Grok (only mini has reasoning_content)
             ])
 
             # o1 series specifically doesn't support system messages
