@@ -123,7 +123,15 @@ class HyperliquidTradingClient:
                 'rateLimit': 100,  # 100ms between requests
                 'privateKey': private_key,  # Hyperliquid requires privateKey field
                 'walletAddress': self.wallet_address,
+                'options': {
+                    'fetchMarkets': {
+                        'hip3': {
+                            'dex': []  # Empty list to skip HIP3 DEX markets (we only need perp markets)
+                        }
+                    }
+                }
             })
+            self._disable_hip3_markets()
 
             logger.info(
                 f"CCXT HyperliquidClient initialized: account_id={account_id} "
@@ -155,6 +163,23 @@ class HyperliquidTradingClient:
         except Exception as e:
             logger.error(f"Failed to initialize Hyperliquid SDK: {e}")
             raise
+
+    def _disable_hip3_markets(self) -> None:
+        """Ensure HIP3 market fetching is disabled in ccxt."""
+        try:
+            fetch_markets_options = self.exchange.options.setdefault('fetchMarkets', {})
+            hip3_options = fetch_markets_options.setdefault('hip3', {})
+            hip3_options['enabled'] = False
+            hip3_options['dex'] = []
+        except Exception as options_error:
+            logger.debug(f"Unable to update HIP3 fetch options: {options_error}")
+
+        if hasattr(self.exchange, 'fetch_hip3_markets'):
+            def _skip_hip3_markets(exchange_self, params=None):
+                logger.debug("Skipping HIP3 market fetch per deployment requirements")
+                return []
+            self.exchange.fetch_hip3_markets = _skip_hip3_markets.__get__(self.exchange, type(self.exchange))
+            logger.info("HIP3 market fetch disabled for Hyperliquid exchange instance")
 
     def _serialize_payload(self, payload: Optional[Any]) -> Optional[str]:
         if payload is None:

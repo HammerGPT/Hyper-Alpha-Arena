@@ -20,11 +20,36 @@ class HyperliquidClient:
             self.exchange = ccxt.hyperliquid({
                 'sandbox': False,  # Set to True for testnet
                 'enableRateLimit': True,
+                'options': {
+                    'fetchMarkets': {
+                        'hip3': {
+                            'dex': []  # Empty list to skip HIP3 DEX markets (we only need perp markets)
+                        }
+                    }
+                }
             })
+            self._disable_hip3_markets()
             logger.info("Hyperliquid exchange initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize Hyperliquid exchange: {e}")
             raise
+
+    def _disable_hip3_markets(self) -> None:
+        """Ensure HIP3 market fetching is disabled."""
+        try:
+            fetch_markets_options = self.exchange.options.setdefault('fetchMarkets', {})
+            hip3_options = fetch_markets_options.setdefault('hip3', {})
+            hip3_options['enabled'] = False
+            hip3_options['dex'] = []
+        except Exception as options_error:
+            logger.debug(f"Unable to update HIP3 fetch options: {options_error}")
+
+        if hasattr(self.exchange, 'fetch_hip3_markets'):
+            def _skip_hip3_markets(exchange_self, params=None):
+                logger.debug("Skipping HIP3 market fetch in market data client")
+                return []
+            self.exchange.fetch_hip3_markets = _skip_hip3_markets.__get__(self.exchange, type(self.exchange))
+            logger.info("HIP3 market fetch disabled for market data client")
 
     def get_last_price(self, symbol: str) -> Optional[float]:
         """Get the last price for a symbol"""
