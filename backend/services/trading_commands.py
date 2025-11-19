@@ -743,7 +743,7 @@ def place_ai_driven_hyperliquid_order(
                             requested_price=close_price,
                         )
 
-                        # Check if close price is on the wrong side of market
+                        # Check if close price is on the wrong side of market OR too close to oracle boundaries
                         if not is_long and close_price < current_price:
                             # Close Short: buy price too low, raise to slightly above market
                             logger.warning(
@@ -758,12 +758,40 @@ def place_ai_driven_hyperliquid_order(
                                 current_price=current_price,
                                 requested_price=current_price * 1.005,
                             )
+                        elif not is_long and close_price > current_price * 1.005:
+                            # Close Short: buy price too close to +1% oracle limit
+                            logger.warning(
+                                f"⚠️  AI COMPLIANCE ISSUE - CLOSE {symbol}: "
+                                f"Short close limit ${close_price:.2f} too close to oracle upper boundary. "
+                                f"Market ${current_price:.2f}. Adjusting to 1.005x for safer execution."
+                            )
+                            close_price, price_deviation_percent, _ = _enforce_price_bounds(
+                                symbol=symbol,
+                                account_name=account.name,
+                                operation="close",
+                                current_price=current_price,
+                                requested_price=current_price * 1.005,
+                            )
                         elif is_long and close_price > current_price:
                             # Close Long: sell price too high, lower to slightly below market
                             logger.warning(
                                 f"⚠️  AI COMPLIANCE ISSUE - CLOSE {symbol}: "
                                 f"Long close limit ${close_price:.2f} sits above market ${current_price:.2f}. "
                                 f"Adjusting to ensure IOC sell can match resting bids."
+                            )
+                            close_price, price_deviation_percent, _ = _enforce_price_bounds(
+                                symbol=symbol,
+                                account_name=account.name,
+                                operation="close",
+                                current_price=current_price,
+                                requested_price=current_price * 0.995,
+                            )
+                        elif is_long and close_price < current_price * 0.995:
+                            # Close Long: sell price too close to -1% oracle limit
+                            logger.warning(
+                                f"⚠️  AI COMPLIANCE ISSUE - CLOSE {symbol}: "
+                                f"Long close limit ${close_price:.2f} too close to oracle lower boundary. "
+                                f"Market ${current_price:.2f}. Adjusting to 0.995x for safer execution."
                             )
                             close_price, price_deviation_percent, _ = _enforce_price_bounds(
                                 symbol=symbol,
@@ -796,19 +824,87 @@ def place_ai_driven_hyperliquid_order(
                             f"Prompt should require {'min_price for closing longs' if is_long else 'max_price for closing shorts'} in all CLOSE operations."
                         )
 
-                    # Use native API for close orders (force Ioc for immediate execution)
-                    order_result = client.place_order_with_tpsl(
-                        db=db,
-                        symbol=symbol,
-                        is_buy=(not is_long),
-                        size=close_size,
-                        price=close_price,
-                        leverage=1,
-                        time_in_force="Ioc",  # Always use Ioc for closing positions
-                        reduce_only=True,
-                        take_profit_price=None,
-                        stop_loss_price=None
-                    )
+                    # Retry logic with progressive price adjustment for IoC close orders
+                    max_retries = 4
+                    retry_count = 0
+                    order_result = None
+
+                    # Progressive price multipliers for each retry (conservative start + dense sampling)
+                    # For long close (sell): move down to increase match probability
+                    # For short close (buy): move up to increase match probability
+                    # Strategy: Start conservatively, progressively sample through safe zone to boundary
+                    if is_long:
+                        price_multipliers = [0.996, 0.994, 0.992, 0.99]  # Selling: 0.6% coverage, 4 sampling points
+                    else:
+                        price_multipliers = [1.004, 1.006, 1.008, 1.01]  # Buying: 0.6% coverage, 4 sampling points
+
+                    while retry_count < max_retries and order_result is None:
+                        # Use AI price for first attempt, then use progressive multipliers
+                        if retry_count == 0:
+                            attempt_price = close_price
+                        else:
+                            # Refresh market price for retry attempts
+                            current_price_retry = prices.get(symbol, current_price)
+                            attempt_price = current_price_retry * price_multipliers[retry_count]
+                            attempt_price, _, _ = _enforce_price_bounds(
+                                symbol=symbol,
+                                account_name=account.name,
+                                operation="close",
+                                current_price=current_price_retry,
+                                requested_price=attempt_price,
+                            )
+                            logger.info(
+                                f"[RETRY {retry_count}/{max_retries}] CLOSE {symbol}: "
+                                f"Adjusting price to ${attempt_price:.2f} "
+                                f"(market=${current_price_retry:.2f}, multiplier={price_multipliers[retry_count]})"
+                            )
+
+                        # Attempt order placement
+                        attempt_result = client.place_order_with_tpsl(
+                            db=db,
+                            symbol=symbol,
+                            is_buy=(not is_long),
+                            size=close_size,
+                            price=attempt_price,
+                            leverage=1,
+                            time_in_force="Ioc",  # Always use Ioc for closing positions
+                            reduce_only=True,
+                            take_profit_price=None,
+                            stop_loss_price=None
+                        )
+
+                        # Check if order succeeded
+                        if attempt_result and attempt_result.get('status') == 'filled':
+                            order_result = attempt_result
+                            if retry_count > 0:
+                                logger.info(
+                                    f"✅ CLOSE {symbol} succeeded on retry {retry_count} "
+                                    f"with price ${attempt_price:.2f}"
+                                )
+                            break
+
+                        # Check if we should retry
+                        error_msg = attempt_result.get('error', '') if attempt_result else ''
+                        should_retry = (
+                            'could not immediately match' in error_msg.lower() or
+                            'no resting orders' in error_msg.lower()
+                        )
+
+                        if should_retry and retry_count < max_retries - 1:
+                            retry_count += 1
+                            logger.warning(
+                                f"⚠️  CLOSE {symbol} failed (attempt {retry_count}/{max_retries}): {error_msg}. "
+                                f"Will retry with more aggressive price..."
+                            )
+                        else:
+                            # Either non-retryable error or max retries reached
+                            order_result = attempt_result
+                            if retry_count > 0:
+                                logger.error(
+                                    f"❌ CLOSE {symbol} failed after {retry_count + 1} attempts. "
+                                    f"Last error: {error_msg}"
+                                )
+                            break
 
                 else:
                     continue
