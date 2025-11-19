@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { User, LogOut, UserCog } from 'lucide-react'
+import { User, LogOut, UserCog, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -32,8 +32,32 @@ interface HeaderProps {
 }
 
 export default function Header({ title = 'Hyper Alpha Arena', currentAccount, showAccountSelector = false }: HeaderProps) {
-  const { user, loading, authEnabled, logout } = useAuth()
+  const { user, loading, authEnabled, membership, logout } = useAuth()
   const [isExchangeModalOpen, setIsExchangeModalOpen] = useState(false)
+  const isVipMember = membership?.status === 'ACTIVE'
+
+  // Preload VIP icons so dropdown renders instantly
+  useEffect(() => {
+    ;['/static/vip_logo.png', '/static/vip_no.png'].forEach((src) => {
+      const img = new Image()
+      img.src = src
+    })
+  }, [])
+
+  // Helper function to format membership expiry date
+  const formatExpiryDate = (dateString?: string) => {
+    if (!dateString) return ''
+    try {
+      return new Date(dateString).toLocaleDateString()
+    } catch {
+      return ''
+    }
+  }
+
+  // Helper function to open pricing page
+  const openPricingPage = () => {
+    window.open('https://www.akooi.com/#pricing-section', '_blank')
+  }
 
   const handleSignUp = async () => {
     const signInUrl = await getSignInUrl()
@@ -75,12 +99,22 @@ export default function Header({ title = 'Hyper Alpha Arena', currentAccount, sh
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" className="relative h-9 w-9 rounded-full p-0">
-                      <Avatar className="h-9 w-9">
-                        <AvatarImage src={user.avatar} alt={user.displayName || user.name} />
-                        <AvatarFallback className="text-xs">
-                          {user.displayName?.[0] || user.name?.[0] || "U"}
-                        </AvatarFallback>
-                      </Avatar>
+                      <div className={`relative rounded-full ${isVipMember ? 'p-[3px] bg-gradient-to-br from-yellow-200 via-amber-500 to-orange-600 shadow-[0_0_18px_rgba(202,138,4,0.85)]' : ''}`}>
+                        {isVipMember && (
+                          <>
+                            <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.55),transparent_60%)] opacity-90 blur-[1px]" aria-hidden="true" />
+                            <span className="pointer-events-none absolute -inset-1 rounded-full bg-[radial-gradient(circle,rgba(234,179,8,0.55),transparent_70%)] blur-xl opacity-80" aria-hidden="true" />
+                          </>
+                        )}
+                        <div className={`relative rounded-full overflow-hidden ${isVipMember ? 'ring-2 ring-yellow-50 bg-black/70' : ''}`}>
+                          <Avatar className="h-9 w-9">
+                            <AvatarImage src={user.avatar} alt={user.displayName || user.name} />
+                            <AvatarFallback className="text-xs">
+                              {user.displayName?.[0] || user.name?.[0] || "U"}
+                            </AvatarFallback>
+                          </Avatar>
+                        </div>
+                      </div>
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent className="w-56" align="end" forceMount>
@@ -94,6 +128,28 @@ export default function Header({ title = 'Hyper Alpha Arena', currentAccount, sh
                         </p>
                       </div>
                     </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+
+                    {/* Membership Status */}
+                    {membership && membership.status === 'ACTIVE' ? (
+                      <DropdownMenuItem className="cursor-default">
+                        <img src="/static/vip_logo.png" alt="VIP" className="mr-2 h-4 w-4" />
+                        <div className="flex flex-col">
+                          <span className="text-sm font-medium text-yellow-600">VIP Member</span>
+                          <span className="text-xs text-muted-foreground">
+                            {membership.planKey === 'yearly' ? 'Yearly Plan' : 'Monthly Plan'}
+                            {membership.currentPeriodEnd && ` • Expires ${formatExpiryDate(membership.currentPeriodEnd)}`}
+                          </span>
+                        </div>
+                      </DropdownMenuItem>
+                    ) : (
+                      <DropdownMenuItem onClick={openPricingPage}>
+                        <img src="/static/vip_no.png" alt="Upgrade" className="mr-2 h-4 w-4" />
+                        <span>Upgrade to VIP</span>
+                        <ExternalLink className="ml-auto h-3 w-3" />
+                      </DropdownMenuItem>
+                    )}
+
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => window.open('https://account.akooi.com/account', '_blank')}>
                       <UserCog className="mr-2 h-4 w-4" />

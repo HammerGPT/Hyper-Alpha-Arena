@@ -726,3 +726,59 @@ export const deleteAIAccount = (id: number) => {
   console.warn("deleteAIAccount is deprecated. Use default mode or new trading account APIs.")
   return Promise.resolve()
 }
+
+// Membership interfaces
+export interface MembershipInfo {
+  status: string
+  planKey: string
+  planId?: string
+  subscriptionId?: string
+  environment: string
+  currentPeriodStart?: string
+  currentPeriodEnd?: string
+  nextBillingTime?: string
+  lastPaymentTime?: string
+  updatedAt?: string
+}
+
+export interface MembershipEvent {
+  id: number
+  eventType: string
+  status: string
+  createdAt: string
+  environment: string
+}
+
+export interface MembershipResponse {
+  membership: MembershipInfo | null
+  events?: MembershipEvent[]
+}
+
+// Get membership information from external membership service
+// This function calls the membership API and relies on browser cookies for authentication
+export async function getMembershipInfo(): Promise<MembershipResponse> {
+  try {
+    const response = await fetch('https://www.akooi.com/api/membership/me', {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        // User not authenticated or no membership
+        return { membership: null }
+      }
+      throw new Error(`Failed to fetch membership info: ${response.status}`)
+    }
+
+    const data = await response.json()
+    return data
+  } catch (error) {
+    console.error('Error fetching membership info:', error)
+    // Return null membership on error to gracefully degrade
+    return { membership: null }
+  }
+}

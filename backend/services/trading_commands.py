@@ -828,6 +828,7 @@ def place_ai_driven_hyperliquid_order(
                     max_retries = 4
                     retry_count = 0
                     order_result = None
+                    fallback_gtc_attempted = False
 
                     # Progressive price multipliers for each retry (conservative start + dense sampling)
                     # For long close (sell): move down to increase match probability
@@ -905,6 +906,38 @@ def place_ai_driven_hyperliquid_order(
                                     f"Last error: {error_msg}"
                                 )
                             break
+
+                    # If IOC retries failed, place a final reduce-only GTC order at the safe boundary
+                    if (not order_result or order_result.get('status') != 'filled') and not fallback_gtc_attempted:
+                        fallback_gtc_attempted = True
+                        boundary_multiplier = 0.99 if is_long else 1.01
+                        latest_price = prices.get(symbol, current_price)
+                        if not latest_price or latest_price <= 0:
+                            latest_price = current_price or close_price
+                        fallback_price = latest_price * boundary_multiplier
+                        fallback_price, _, _ = _enforce_price_bounds(
+                            symbol=symbol,
+                            account_name=account.name,
+                            operation="close",
+                            current_price=latest_price,
+                            requested_price=fallback_price,
+                        )
+                        logger.warning(
+                            f"⚠️  CLOSE {symbol} entering fallback mode: placing reduce-only GTC at ${fallback_price:.2f} "
+                            f"(latest=${latest_price:.2f}). Order will rest until filled."
+                        )
+                        order_result = client.place_order_with_tpsl(
+                            db=db,
+                            symbol=symbol,
+                            is_buy=(not is_long),
+                            size=close_size,
+                            price=fallback_price,
+                            leverage=1,
+                            time_in_force="Gtc",
+                            reduce_only=True,
+                            take_profit_price=None,
+                            stop_loss_price=None
+                        )
 
                 else:
                     continue

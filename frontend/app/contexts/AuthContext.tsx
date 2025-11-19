@@ -3,13 +3,17 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
 import Cookies from 'js-cookie'
 import { getUserInfo, loadAuthConfig, type User } from '@/lib/auth'
+import { getMembershipInfo, type MembershipInfo } from '@/lib/api'
 
 interface AuthContextType {
   user: User | null
   loading: boolean
   authEnabled: boolean
+  membership: MembershipInfo | null
+  membershipLoading: boolean
   setUser: (user: User | null) => void
   logout: () => void
+  refreshMembership: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -18,6 +22,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [authEnabled, setAuthEnabled] = useState(false)
+  const [membership, setMembership] = useState<MembershipInfo | null>(null)
+  const [membershipLoading, setMembershipLoading] = useState(false)
+
+  // Function to refresh membership data
+  const refreshMembership = async () => {
+    if (!authEnabled || !user) {
+      setMembership(null)
+      return
+    }
+
+    setMembershipLoading(true)
+    try {
+      const result = await getMembershipInfo()
+      setMembership(result.membership)
+    } catch (error) {
+      console.error('Failed to refresh membership:', error)
+      setMembership(null)
+    } finally {
+      setMembershipLoading(false)
+    }
+  }
 
   useEffect(() => {
     const initAuth = async () => {
@@ -68,6 +93,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     initAuth()
   }, [])
 
+  // Fetch membership info when user is authenticated
+  useEffect(() => {
+    if (!loading && user && authEnabled) {
+      refreshMembership()
+    }
+  }, [user, loading, authEnabled])
+
   const logout = () => {
     // Local logout only: clear Arena cookies and state
     // Casdoor session remains active, but next login will show account selection
@@ -75,13 +107,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     Cookies.remove('arena_token')
     Cookies.remove('arena_user')
     setUser(null)
+    setMembership(null)
 
     // Refresh page to show logged-out state
     window.location.href = '/'
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, authEnabled, setUser, logout }}>
+    <AuthContext.Provider value={{
+      user,
+      loading,
+      authEnabled,
+      membership,
+      membershipLoading,
+      setUser,
+      logout,
+      refreshMembership
+    }}>
       {children}
     </AuthContext.Provider>
   )
