@@ -21,9 +21,10 @@ interface PremiumFeaturesViewProps {
 }
 
 export default function PremiumFeaturesView({ onAccountUpdated }: PremiumFeaturesViewProps) {
-  const { membership, membershipLoading } = useAuth()
+  const { user, membership, membershipLoading } = useAuth()
 
   const [isLoading, setIsLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
   const [samplingDepth, setSamplingDepth] = useState(10)
   const [samplingInterval, setSamplingInterval] = useState(18)
   const [advancedIndicators, setAdvancedIndicators] = useState({
@@ -75,6 +76,13 @@ export default function PremiumFeaturesView({ onAccountUpdated }: PremiumFeature
 
   const handleSaveConfiguration = async (section: string) => {
     if (section === 'sampling-pool') {
+      // Check if user is logged in
+      if (!user) {
+        toast.error('Please log in to save configuration')
+        // Could add login redirect logic here
+        return
+      }
+
       // Check premium requirement
       if (samplingDepth > 10 && !isPremium) {
         toast.error('Premium subscription required for sampling depth > 10')
@@ -82,6 +90,7 @@ export default function PremiumFeaturesView({ onAccountUpdated }: PremiumFeature
         return
       }
 
+      setIsSaving(true)
       try {
         const response = await fetch(`/api/config/global-sampling`, {
           method: 'PUT',
@@ -106,6 +115,8 @@ export default function PremiumFeaturesView({ onAccountUpdated }: PremiumFeature
       } catch (error) {
         console.error('Failed to save sampling configuration:', error)
         toast.error(error instanceof Error ? error.message : 'Failed to save configuration')
+      } finally {
+        setIsSaving(false)
       }
     } else {
       // For not-yet-implemented features
@@ -215,10 +226,12 @@ export default function PremiumFeaturesView({ onAccountUpdated }: PremiumFeature
                           variant={samplingDepth === depth ? 'default' : 'outline'}
                           size="sm"
                           onClick={() => setSamplingDepth(depth)}
-                          disabled={depth > maxAllowedDepth}
                           className="flex-1 h-7 text-xs"
                         >
                           {depth}
+                          {depth > 10 && !isPremium && (
+                            <Lock className="w-3 h-3 ml-1" />
+                          )}
                         </Button>
                       ))}
                     </div>
@@ -233,15 +246,21 @@ export default function PremiumFeaturesView({ onAccountUpdated }: PremiumFeature
                       <div>• Sampling Interval: {samplingInterval} seconds</div>
                       <div>• Data Coverage: {((samplingDepth * samplingInterval) / 60).toFixed(1)} minutes of price history</div>
                       <div>• Storage: Minimal (rolling buffer)</div>
-                      <div>• Estimated Accuracy Boost: +{Math.round(Math.max(0, (samplingDepth - 10) / 5))}%</div>
+                      <div>• Estimated Accuracy Boost: +{(() => {
+                        const baseDepth = 10;
+                        if (samplingDepth <= baseDepth) return 0;
+                        const steps = (samplingDepth - baseDepth) / 10;
+                        return Math.round(Math.pow(2, steps) * 10 - 10);
+                      })()}%</div>
                     </div>
                   </div>
 
                   <Button
                     onClick={() => handleSaveConfiguration('sampling-pool')}
+                    disabled={isSaving}
                     className="w-full h-8 text-xs"
                   >
-                    Save Configuration
+                    {isSaving ? 'Saving...' : 'Save Configuration'}
                   </Button>
                 </CardContent>
               </Card>

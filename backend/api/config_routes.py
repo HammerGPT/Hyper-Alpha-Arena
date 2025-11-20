@@ -87,6 +87,12 @@ async def update_global_sampling_config(payload: dict, db: Session = Depends(get
                     detail="sampling_depth must be between 10 and 60"
                 )
 
+            # Check premium requirement for sampling depth > 10
+            if sampling_depth > 10:
+                # For now, we'll allow it but log a warning
+                # In a real implementation, you'd check user authentication and membership
+                logger.warning(f"Sampling depth > 10 requested: {sampling_depth}. Premium check should be implemented.")
+
         config = db.query(GlobalSamplingConfig).first()
         if not config:
             config = GlobalSamplingConfig(
