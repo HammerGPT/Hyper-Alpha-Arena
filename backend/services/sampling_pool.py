@@ -10,19 +10,40 @@ import logging
 logger = logging.getLogger(__name__)
 
 class SamplingPool:
-    def __init__(self, max_samples: int = 10):
+    def __init__(self, default_max_samples: int = 10):
         self.pools: Dict[str, deque] = {}
-        self.max_samples = max_samples
+        self.max_samples_per_symbol: Dict[str, int] = {}  # Per-symbol max depth
+        self.default_max_samples = default_max_samples
         self.last_sample_time: Dict[str, float] = {}
+
+    def set_max_samples(self, symbol: str, max_samples: int):
+        """Set maximum samples for a specific symbol"""
+        if max_samples < 1:
+            raise ValueError(f"max_samples must be >= 1, got {max_samples}")
+
+        self.max_samples_per_symbol[symbol] = max_samples
+
+        # If pool already exists, recreate it with new maxlen
+        if symbol in self.pools:
+            old_samples = list(self.pools[symbol])
+            self.pools[symbol] = deque(old_samples, maxlen=max_samples)
+            logger.info(f"Updated sampling depth for {symbol}: {max_samples} samples")
+
+    def get_max_samples(self, symbol: str) -> int:
+        """Get maximum samples configured for a symbol"""
+        return self.max_samples_per_symbol.get(symbol, self.default_max_samples)
 
     def add_sample(self, symbol: str, price: float, timestamp: Optional[float] = None):
         """Add price sample to symbol pool"""
         if timestamp is None:
             timestamp = time.time()
 
+        # Get max samples for this symbol
+        max_samples = self.get_max_samples(symbol)
+
         # Create pool if not exists
         if symbol not in self.pools:
-            self.pools[symbol] = deque(maxlen=self.max_samples)
+            self.pools[symbol] = deque(maxlen=max_samples)
 
         # Add sample
         sample = {

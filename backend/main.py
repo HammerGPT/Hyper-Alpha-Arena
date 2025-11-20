@@ -261,6 +261,28 @@ def on_startup():
     from services.system_logger import setup_system_logger
     setup_system_logger()
 
+    # Load and apply global sampling configuration (use watchlist if available)
+    try:
+        from database.models import GlobalSamplingConfig
+        from services.sampling_pool import sampling_pool
+        from services.trading_commands import AI_TRADING_SYMBOLS
+        from services.hyperliquid_symbol_service import get_selected_symbols as get_hyperliquid_selected_symbols
+
+        db = SessionLocal()
+        try:
+            symbols = get_hyperliquid_selected_symbols() or AI_TRADING_SYMBOLS
+            global_config = db.query(GlobalSamplingConfig).first()
+            if global_config and global_config.sampling_depth:
+                for symbol in symbols:
+                    sampling_pool.set_max_samples(symbol, global_config.sampling_depth)
+                print(f"✓ Sampling pool configured: depth={global_config.sampling_depth} for {len(symbols)} symbols")
+            else:
+                print(f"⚠ No global sampling config found, using default depth={sampling_pool.default_max_samples} for {len(symbols)} symbols")
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"✗ Failed to load global sampling config: {e}")
+
     # Initialize all services (scheduler, market data tasks, auto trading, etc.)
     print("About to initialize services...")
     from services.startup import initialize_services

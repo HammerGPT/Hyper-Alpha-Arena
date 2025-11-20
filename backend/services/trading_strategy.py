@@ -23,8 +23,8 @@ from services.sampling_pool import sampling_pool
 from services.trading_commands import (
     place_ai_driven_crypto_order,
     place_ai_driven_hyperliquid_order,
-    AI_TRADING_SYMBOLS,
 )
+from services.hyperliquid_symbol_service import get_selected_symbols as get_hyperliquid_selected_symbols
 
 logger = logging.getLogger(__name__)
 
@@ -291,7 +291,7 @@ class HyperliquidStrategyManager(StrategyManager):
                     )
                     self.strategies[strategy.account_id] = state
 
-                    # DEBUG: Print loaded strategy configuration
+                # DEBUG: Print loaded strategy configuration
                     print(
                         f"[HyperliquidStrategy DEBUG] Loaded strategy for account {strategy.account_id} ({account.name}): "
                         f"interval={strategy.trigger_interval}s ({strategy.trigger_interval/60:.1f}min), "

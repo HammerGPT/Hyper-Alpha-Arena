@@ -212,7 +212,24 @@ def _get_hyperliquid_positions(db: Session, account_id: Optional[int], environme
 
         except Exception as e:
             logger.error(f"Failed to get Hyperliquid positions for account {account.id}: {e}", exc_info=True)
-            # Continue with next account instead of failing completely
+            # Fallback: still expose the account so frontend doesn't think it's missing
+            snapshots.append({
+                "account_id": account.id,
+                "account_name": account.name,
+                "model": account.model,
+                "environment": environment,
+                "wallet_address": wallet.wallet_address if 'wallet' in locals() and wallet else None,
+                "total_unrealized_pnl": 0.0,
+                "available_cash": 0.0,
+                "used_margin": 0.0,
+                "positions_value": 0.0,
+                "positions": [],
+                "total_assets": float(account.initial_capital or 0),
+                "margin_usage_percent": 0.0,
+                "margin_mode": "cross",
+                "initial_capital": float(account.initial_capital or 0),
+                "total_return": 0.0,
+            })
             continue
 
     return {

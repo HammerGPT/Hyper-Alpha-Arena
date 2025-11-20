@@ -27,6 +27,7 @@ class User(Base):
     # Relationships
     accounts = relationship("Account", back_populates="user")
     auth_sessions = relationship("UserAuthSession", back_populates="user")
+    subscription = relationship("UserSubscription", back_populates="user", uselist=False)
 
 
 class Account(Base):
@@ -60,6 +61,9 @@ class Account(Base):
     hyperliquid_mainnet_private_key = Column(String(500), nullable=True)  # Encrypted storage
     max_leverage = Column(Integer, nullable=True, default=3)  # Maximum allowed leverage
     default_leverage = Column(Integer, nullable=True, default=1)  # Default leverage for orders
+
+    # Premium Features Configuration
+    sampling_depth = Column(Integer, nullable=False, default=10)  # Sampling pool depth (10 for free, 10-60 for premium)
 
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(
@@ -284,10 +288,29 @@ class GlobalSamplingConfig(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     sampling_interval = Column(Integer, nullable=False, default=18)  # Sampling interval (seconds)
+    sampling_depth = Column(Integer, nullable=False, default=10)  # Sampling pool depth (10-60)
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(
         TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
     )
+
+
+class UserSubscription(Base):
+    """User subscription for premium features"""
+    __tablename__ = "user_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+    subscription_type = Column(String(20), nullable=False, default="free")  # "free" | "premium"
+    expires_at = Column(TIMESTAMP, nullable=True)  # NULL for free tier or lifetime premium
+    max_sampling_depth = Column(Integer, nullable=False, default=10)  # Free: 10, Premium: up to 60
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at = Column(
+        TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
+    )
+
+    # Relationship
+    user = relationship("User", back_populates="subscription")
 
 
 class AIDecisionLog(Base):

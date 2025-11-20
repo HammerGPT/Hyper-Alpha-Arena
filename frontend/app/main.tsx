@@ -31,6 +31,7 @@ import PromptManager from '@/components/prompt/PromptManager'
 import TraderManagement from '@/components/trader/TraderManagement'
 import { HyperliquidPage } from '@/components/hyperliquid'
 import HyperliquidView from '@/components/hyperliquid/HyperliquidView'
+import PremiumFeaturesView from '@/components/premium/PremiumFeaturesView'
 // Remove CallbackPage import - handle inline
 import { AIDecision, getAccounts } from '@/lib/api'
 import { ArenaDataProvider } from '@/contexts/ArenaDataContext'
@@ -71,6 +72,7 @@ const PAGE_TITLES: Record<string, string> = {
   'prompt-management': 'Prompt Templates',
   'trader-management': 'AI Trader Management',
   'hyperliquid': 'Hyperliquid Trading',
+  'premium-features': 'Premium Features',
 }
 
 function App() {
@@ -581,6 +583,10 @@ function App() {
 
         {currentPage === 'hyperliquid' && (
           <HyperliquidPage accountId={account?.id || 1} />
+        )}
+
+        {currentPage === 'premium-features' && (
+          <PremiumFeaturesView onAccountUpdated={handleAccountUpdated} />
         )}
       </main>
     )

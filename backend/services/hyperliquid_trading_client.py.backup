@@ -1,0 +1,1626 @@
+"""
+Hyperliquid Trading Client - Real trading execution with environment isolation
+
+This module provides authenticated trading client for Hyperliquid perpetual contracts.
+Key features:
+- Testnet/Mainnet environment isolation
+- Strict environment validation on every API call
+- Account state and position management
+- Order placement with leverage support
+"""
+import logging
+import time
+import json
+import requests
+from typing import Dict, List, Optional, Any
+from decimal import Decimal
+from eth_account import Account as EthAccount
+from eth_account.messages import encode_defunct, _hash_eip191_message
+from eth_utils import keccak
+
+# Try different function names across eth_account versions
+encode_typed_data_func = None
+try:
+    # eth_account >= 0.6.0
+    from eth_account.messages import encode_typed_data
+    encode_typed_data_func = encode_typed_data
+except ImportError:
+    try:
+        # Some versions use encode_structured_data
+        from eth_account.messages import encode_structured_data
+        encode_typed_data_func = encode_structured_data
+    except ImportError:
+        encode_typed_data_func = None
+
+import ccxt
+from sqlalchemy.orm import Session
+
+from database.connection import SessionLocal
+from database.models import Account, HyperliquidExchangeAction
+from services.hyperliquid_cache import (
+    update_account_state_cache,
+    update_positions_cache,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class EnvironmentMismatchError(Exception):
+    """Raised when account environment doesn't match client environment"""
+    pass
+
+
+class HyperliquidTradingClient:
+    """
+    Hyperliquid trading client with environment isolation
+
+    Supports both testnet and mainnet with strict validation to prevent
+    accidental cross-environment operations.
+    """
+
+    def __init__(self, account_id: int, private_key: str, environment: str = "testnet", wallet_address: Optional[str] = None):
+        """
+        Initialize trading client
+
+        Args:
+            account_id: Database account ID (for validation)
+            private_key: Hyperliquid private key (0x... format)
+            environment: "testnet" or "mainnet"
+            wallet_address: Ethereum wallet address (derived from private key if not provided)
+
+        Raises:
+            ValueError: If environment is invalid
+        """
+        if environment not in ["testnet", "mainnet"]:
+            raise ValueError(f"Invalid environment: {environment}. Must be 'testnet' or 'mainnet'")
+
+        self.account_id = account_id
+        self.environment = environment
+
+        # Ensure private key has 0x prefix for consistency
+        if not private_key.startswith('0x'):
+            private_key = '0x' + private_key
+        self.private_key = private_key
+
+        import sys
+        print(f"[DEBUG __init__] account_id={account_id}, environment={environment}, wallet_address={wallet_address}", file=sys.stderr, flush=True)
+
+        # Derive wallet address from private key if not provided
+        if not wallet_address:
+            try:
+                from eth_account import Account as EthAccount
+                eth_account = EthAccount.from_key(private_key)
+                # Lowercase address as recommended by Hyperliquid docs
+                self.wallet_address = eth_account.address.lower()
+                logger.info(f"Derived wallet address from private key: {self.wallet_address}")
+            except Exception as e:
+                logger.error(f"Failed to derive wallet address from private key: {e}", exc_info=True)
+                self.wallet_address = None
+        else:
+            # Lowercase address as recommended by Hyperliquid docs
+            self.wallet_address = wallet_address.lower()
+            logger.info(f"Using provided wallet address: {self.wallet_address}")
+
+        if not self.wallet_address:
+            raise ValueError("Wallet address could not be derived from private key. Please check key format.")
+
+        logger.info(f"[FINAL] Using wallet address: {self.wallet_address}")
+
+        # Set API endpoint based on environment
+        if environment == "testnet":
+            self.api_url = "https://api.hyperliquid-testnet.xyz"
+        else:
+            self.api_url = "https://api.hyperliquid.xyz"
+
+        # Initialize CCXT exchange with authentication (for balance/position queries)
+        try:
+            self.exchange = ccxt.hyperliquid({
+                'sandbox': (environment == "testnet"),
+                'enableRateLimit': True,
+                'rateLimit': 100,  # 100ms between requests
+                'privateKey': private_key,  # Hyperliquid requires privateKey field
+                'walletAddress': self.wallet_address,
+            })
+
+            logger.info(
+                f"CCXT HyperliquidClient initialized: account_id={account_id} "
+                f"environment={environment.upper()} wallet={self.wallet_address}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize CCXT Hyperliquid exchange: {e}")
+            raise
+
+        # Initialize official Hyperliquid SDK (for order placement)
+        try:
+            from hyperliquid.exchange import Exchange
+            from eth_account import Account as EthAccount
+
+            # Create eth_account wallet for SDK
+            self.eth_wallet = EthAccount.from_key(private_key)
+
+            # Initialize SDK Exchange
+            self.sdk_exchange = Exchange(
+                wallet=self.eth_wallet,
+                base_url=self.api_url,
+                account_address=self.wallet_address
+            )
+
+            logger.info(
+                f"Official SDK Exchange initialized: account_id={account_id} "
+                f"environment={environment.upper()} wallet={self.wallet_address}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize Hyperliquid SDK: {e}")
+            raise
+
+    def _serialize_payload(self, payload: Optional[Any]) -> Optional[str]:
+        if payload is None:
+            return None
+        try:
+            return json.dumps(payload, default=str)
+        except Exception:
+            return str(payload)
+
+    def _record_exchange_action(
+        self,
+        action_type: str,
+        status: str,
+        symbol: Optional[str] = None,
+        side: Optional[str] = None,
+        leverage: Optional[int] = None,
+        size: Optional[float] = None,
+        price: Optional[float] = None,
+        request_payload: Optional[Any] = None,
+        response_payload: Optional[Any] = None,
+        error_message: Optional[str] = None,
+        request_weight: int = 1,
+    ) -> None:
+        session = SessionLocal()
+        try:
+            size_decimal = Decimal(str(size)) if size is not None else None
+            price_decimal = Decimal(str(price)) if price is not None else None
+            notional_decimal = (
+                size_decimal * price_decimal if size_decimal is not None and price_decimal is not None else None
+            )
+
+            entry = HyperliquidExchangeAction(
+                account_id=self.account_id,
+                environment=self.environment,
+                wallet_address=self.wallet_address,
+                action_type=action_type,
+                status=status,
+                symbol=symbol,
+                side=side,
+                leverage=leverage,
+                size=size_decimal,
+                price=price_decimal,
+                notional=notional_decimal,
+                request_weight=request_weight,
+                request_payload=self._serialize_payload(request_payload),
+                response_payload=self._serialize_payload(response_payload),
+                error_message=error_message[:2000] if error_message else None,
+            )
+            session.add(entry)
+            session.commit()
+        except Exception as log_err:
+            session.rollback()
+            logger.warning(f"Failed to record Hyperliquid exchange action ({action_type}): {log_err}")
+        finally:
+            session.close()
+
+    def _validate_environment(self, db: Session) -> bool:
+        """
+        Validate that account has a wallet configured for this environment
+
+        Multi-wallet architecture: Each account can have separate testnet and mainnet wallets.
+        This validates that the wallet for the current environment exists and is active.
+
+        Args:
+            db: Database session
+
+        Returns:
+            True if validation passes
+
+        Raises:
+            ValueError: If account not found or wallet not configured for this environment
+        """
+        from database.models import HyperliquidWallet
+
+        account = db.query(Account).filter(Account.id == self.account_id).first()
+        if not account:
+            raise ValueError(f"Account {self.account_id} not found")
+
+        # Check if wallet exists for this account and environment
+        wallet = db.query(HyperliquidWallet).filter(
+            HyperliquidWallet.account_id == self.account_id,
+            HyperliquidWallet.environment == self.environment
+        ).first()
+
+        if not wallet:
+            raise ValueError(
+                f"No {self.environment} wallet configured for account {account.name}. "
+                f"Please configure a wallet before trading."
+            )
+
+        return True
+
+    def get_account_state(self, db: Session) -> Dict[str, Any]:
+        """
+        Get current account state from Hyperliquid
+
+        Returns account equity, available balance, margin usage, etc.
+
+        Args:
+            db: Database session
+
+        Returns:
+            Dict with:
+                - environment: "testnet" or "mainnet"
+                - account_id: Database account ID
+                - total_equity: Total account value
+                - available_balance: Available for new positions
+                - used_margin: Margin currently used
+                - maintenance_margin: Required maintenance margin
+                - margin_usage_percent: Used margin / Total equity * 100
+                - withdrawal_available: Amount available for withdrawal
+
+        Raises:
+            EnvironmentMismatchError: If environment validation fails
+        """
+        self._validate_environment(db)
+
+        try:
+            logger.info(f"Fetching account state for account {self.account_id} on {self.environment}")
+
+            # Use CCXT's fetchBalance to get account info
+            balance = self.exchange.fetch_balance()
+
+            # CCXT balance structure: {'free': {...}, 'used': {...}, 'total': {...}, 'info': {...}}
+            # Extract USDC balance (Hyperliquid uses USDC)
+            total_equity = float(balance.get('total', {}).get('USDC', 0) or 0)
+            used_margin = float(balance.get('used', {}).get('USDC', 0) or 0)
+            available_balance = float(balance.get('free', {}).get('USDC', 0) or 0)
+
+            # Calculate margin usage percentage
+            margin_usage_percent = (used_margin / total_equity * 100) if total_equity > 0 else 0
+
+            result = {
+                'environment': self.environment,
+                'account_id': self.account_id,
+                'total_equity': total_equity,
+                'available_balance': available_balance,
+                'used_margin': used_margin,
+                'maintenance_margin': used_margin * 0.5,  # Estimate: maintenance = 50% of initial
+                'margin_usage_percent': margin_usage_percent,
+                'withdrawal_available': available_balance,
+                'wallet_address': self.wallet_address,
+                'timestamp': int(time.time() * 1000)
+            }
+
+            logger.debug(f"Account state: equity=${result['total_equity']:.2f}, available=${result['available_balance']:.2f}")
+            update_account_state_cache(self.account_id, result, self.environment)
+            self._record_exchange_action(
+                action_type="fetch_account_state",
+                status="success",
+                symbol=None,
+                request_payload={
+                    "account_id": self.account_id,
+                    "environment": self.environment,
+                },
+                response_payload=None,
+            )
+
+            return result
+
+        except Exception as e:
+            self._record_exchange_action(
+                action_type="fetch_account_state",
+                status="error",
+                symbol=None,
+                request_payload={
+                    "account_id": self.account_id,
+                    "environment": self.environment,
+                },
+                response_payload=None,
+                error_message=str(e),
+            )
+            logger.error(f"Failed to get account state: {e}", exc_info=True)
+            raise
+
+    def get_positions(self, db: Session) -> List[Dict[str, Any]]:
+        """
+        Get all open positions from Hyperliquid
+
+        Args:
+            db: Database session
+
+        Returns:
+            List of position dicts, each with:
+                - coin: Symbol name (e.g., "BTC")
+                - szi: Position size (signed: positive=long, negative=short)
+                - entry_px: Average entry price
+                - position_value: Current position value
+                - unrealized_pnl: Unrealized profit/loss
+                - margin_used: Margin used for this position
+                - liquidation_px: Liquidation price
+                - leverage: Current leverage
+
+        Raises:
+            EnvironmentMismatchError: If environment validation fails
+        """
+        self._validate_environment(db)
+
+        try:
+            logger.info(f"Fetching positions for account {self.account_id} on {self.environment}")
+
+            # Use CCXT's fetchPositions to get all positions
+            positions_raw = self.exchange.fetch_positions()
+
+            # Debug: Print all raw positions data to console
+            print(f"=== CCXT RAW POSITIONS DATA ===")
+            print(positions_raw)
+            print(f"=== END CCXT RAW DATA ===")
+            logger.info(f"CCXT RAW POSITIONS DATA: {positions_raw}")
+
+            # Transform CCXT positions to our format
+            positions = []
+            for pos in positions_raw:
+                info_position = (pos.get('info') or {}).get('position') or {}
+                raw_size = info_position.get('szi')
+                try:
+                    position_size = float(raw_size)
+                except (TypeError, ValueError):
+                    position_size = 0.0
+                side = pos.get('side', '').capitalize()
+
+                positions.append({
+                    'coin': info_position.get('coin'),
+                    'szi': position_size,  # Correct signed size
+                    'entry_px': float(info_position.get('entryPx', 0)),
+                    'position_value': float(info_position.get('positionValue', 0)),
+                    'unrealized_pnl': float(info_position.get('unrealizedPnl', 0)),
+                    'margin_used': float(info_position.get('marginUsed', 0)),
+                    'liquidation_px': float(info_position.get('liquidationPx') or 0),
+                    'leverage': float((info_position.get('leverage') or {}).get('value', 0)),
+                    'side': side,  # Correct direction from CCXT
+
+                    # Hyperliquid specific fields
+                    'return_on_equity': float(info_position.get('returnOnEquity', 0)),
+                    'max_leverage': float(info_position.get('maxLeverage', 0)),
+                    'cum_funding_all_time': float((info_position.get('cumFunding') or {}).get('allTime', 0)),
+                    'cum_funding_since_open': float((info_position.get('cumFunding') or {}).get('sinceOpen', 0)),
+                    'leverage_type': (info_position.get('leverage') or {}).get('type'),
+
+                    # CCXT calculated fields
+                    'notional': float(pos.get('notional', 0)),
+                    'percentage': float(pos.get('percentage', 0)),
+                    'contract_size': float(pos.get('contractSize', 1)),
+                    'margin_mode': pos.get('marginMode', '')
+                })
+
+            logger.debug(f"Found {len(positions)} open positions")
+            update_positions_cache(self.account_id, positions, self.environment)
+            self._record_exchange_action(
+                action_type="fetch_positions",
+                status="success",
+                symbol=None,
+                request_payload={
+                    "account_id": self.account_id,
+                    "environment": self.environment,
+                },
+                response_payload=None,
+            )
+
+            return positions
+
+        except Exception as e:
+            self._record_exchange_action(
+                action_type="fetch_positions",
+                status="error",
+                symbol=None,
+                request_payload={
+                    "account_id": self.account_id,
+                    "environment": self.environment,
+                },
+                response_payload=None,
+                error_message=str(e),
+            )
+            logger.error(f"Failed to get positions: {e}", exc_info=True)
+            raise
+
+    def place_order(
+        self,
+        db: Session,
+        symbol: str,
+        is_buy: bool,
+        size: float,
+        order_type: str = "market",
+        price: Optional[float] = None,
+        reduce_only: bool = False,
+        leverage: int = 1
+    ) -> Dict[str, Any]:
+        """
+        Place order on Hyperliquid
+
+        Args:
+            db: Database session
+            symbol: Asset symbol (e.g., "BTC")
+            is_buy: True for long, False for short
+            size: Order quantity (absolute value)
+            order_type: "market" or "limit"
+            price: Limit price (required for limit orders)
+            reduce_only: Only close existing positions
+            leverage: Position leverage (1-50)
+
+        Returns:
+            Dict with:
+                - status: "resting" | "filled" | "error"
+                - oid: Order ID (if resting)
+                - filled: Execution details (if filled)
+                - error: Error message (if error)
+
+        Raises:
+            EnvironmentMismatchError: If environment validation fails
+            ValueError: If parameters invalid
+        """
+        self._validate_environment(db)
+
+        # Validate parameters
+        if order_type not in ["market", "limit"]:
+            raise ValueError(f"Invalid order_type: {order_type}")
+
+        if order_type == "limit" and price is None:
+            raise ValueError("Limit orders require price parameter")
+
+        if leverage < 1 or leverage > 50:
+            raise ValueError(f"Invalid leverage: {leverage}. Must be 1-50")
+
+        if size <= 0:
+            raise ValueError(f"Invalid size: {size}. Must be positive")
+
+        # Log order attempt with environment
+        logger.warning(
+            f"PLACING ORDER on {self.environment.upper()}: "
+            f"account={self.account_id} {symbol} {'BUY' if is_buy else 'SELL'} "
+            f"size={size} leverage={leverage}x type={order_type} reduce_only={reduce_only}"
+        )
+
+        action_payload: Optional[Dict[str, Any]] = None
+
+        try:
+            # Set leverage before placing order (if different from current)
+            try:
+                self.exchange.set_leverage(leverage, f"{symbol}/USDC:USDC")
+                logger.debug(f"Set leverage to {leverage}x for {symbol}")
+                self._record_exchange_action(
+                    action_type="set_leverage",
+                    status="success",
+                    symbol=symbol,
+                    leverage=leverage,
+                    request_payload={"symbol": symbol, "leverage": leverage},
+                )
+            except Exception as lev_err:
+                logger.warning(f"Failed to set leverage (may already be set): {lev_err}")
+                self._record_exchange_action(
+                    action_type="set_leverage",
+                    status="error",
+                    symbol=symbol,
+                    leverage=leverage,
+                    request_payload={"symbol": symbol, "leverage": leverage},
+                    error_message=str(lev_err),
+                )
+
+            # Prepare CCXT order parameters
+            # Hyperliquid perpetual contract format: BASE/QUOTE:SETTLE
+            ccxt_symbol = f"{symbol}/USDC:USDC"  # Hyperliquid perpetual format
+            logger.debug(f"Using symbol format: {ccxt_symbol}")
+            ccxt_type = order_type  # "market" or "limit"
+            ccxt_side = "buy" if is_buy else "sell"
+            ccxt_amount = size
+
+            # Hyperliquid market orders require price parameter to calculate slippage protection
+            # CCXT will use price * (1 +/- 5% slippage) as the max acceptable execution price
+            # For limit orders, price is the exact limit price
+            # For market orders, price is the reference price for slippage calculation
+            if order_type == "market" and price is None:
+                # If no price provided for market order, fetch current market price
+                try:
+                    ticker = self.exchange.fetch_ticker(ccxt_symbol)
+                    price = ticker['last']
+                    logger.debug(f"Fetched current price for market order: {price}")
+                except Exception as e:
+                    raise ValueError(f"Market order requires price parameter or valid market price. Error: {e}")
+
+            ccxt_price = price
+
+            # Additional parameters for Hyperliquid
+            params = {
+                'reduceOnly': reduce_only
+            }
+
+            logger.debug(
+                f"CCXT order params: symbol={ccxt_symbol} type={ccxt_type} "
+                f"side={ccxt_side} amount={ccxt_amount} price={ccxt_price} params={params}"
+            )
+
+            action_payload = {
+                'symbol': ccxt_symbol,
+                'side': ccxt_side,
+                'amount': ccxt_amount,
+                'price': ccxt_price,
+                'order_type': ccxt_type,
+                'params': params
+            }
+
+            # Place order via CCXT
+            order = self.exchange.create_order(
+                symbol=ccxt_symbol,
+                type=ccxt_type,
+                side=ccxt_side,
+                amount=ccxt_amount,
+                price=ccxt_price,
+                params=params
+            )
+
+            # DEBUG: Print raw CCXT order response
+            logger.warning(f"[DEBUG] CCXT Raw Order Response: {order}")
+
+            # Parse CCXT order response
+            order_id = order.get('id')
+            order_status = order.get('status')  # "open", "closed", "canceled"
+            filled_amount = float(order.get('filled') or 0)
+            average_price = float(order.get('average') or 0) if order.get('average') else None
+
+            # Map CCXT status to our status
+            # First check for Hyperliquid-specific errors
+            hyperliquid_info = order.get('info', {})
+            hyperliquid_response = hyperliquid_info.get('response', {})
+            hyperliquid_data = hyperliquid_response.get('data', {})
+            hyperliquid_statuses = hyperliquid_data.get('statuses', [])
+
+            # Check for errors in Hyperliquid response
+            hyperliquid_error = None
+            if hyperliquid_statuses:
+                for status_item in hyperliquid_statuses:
+                    if 'error' in status_item:
+                        hyperliquid_error = status_item['error']
+                        break
+
+            if hyperliquid_error:
+                # Hyperliquid returned an error
+                status = 'error'
+                error_msg = hyperliquid_error
+            else:
+                # Check for successful execution
+                hyperliquid_filled = hyperliquid_info.get('filled')
+                logger.warning(f"[DEBUG] hyperliquid_filled: {hyperliquid_filled}")
+
+                if hyperliquid_filled and hyperliquid_filled.get('totalSz'):
+                    # Hyperliquid shows filled info, order was executed
+                    status = 'filled'
+                    error_msg = None
+                    # Update filled_amount and average_price from Hyperliquid data
+                    filled_amount = float(hyperliquid_filled.get('totalSz', 0))
+                    average_price = float(hyperliquid_filled.get('avgPx', 0))
+                elif order_status == 'closed' or (filled_amount > 0 and filled_amount >= ccxt_amount * 0.99):
+                    # CCXT shows closed or nearly fully filled
+                    status = 'filled'
+                    error_msg = None
+                elif order_status == 'open':
+                    # Order is on the book
+                    status = 'resting'
+                    error_msg = None
+                elif order_status == 'canceled':
+                    # Order was canceled
+                    status = 'canceled'
+                    error_msg = None
+                else:
+                    # Unknown status
+                    status = 'error'
+                    error_msg = f"Unknown order status: {order_status}"
+
+            result = {
+                'status': status,
+                'environment': self.environment,
+                'symbol': symbol,
+                'is_buy': is_buy,
+                'size': size,
+                'leverage': leverage,
+                'order_type': order_type,
+                'reduce_only': reduce_only,
+                'order_id': order_id,
+                'filled_amount': filled_amount,
+                'average_price': average_price,
+                'raw_order': order,  # Full CCXT response for debugging
+                'wallet_address': self.wallet_address,
+                'timestamp': int(time.time() * 1000)
+            }
+
+            # Add error message if present
+            if error_msg:
+                result['error'] = error_msg
+
+            logger.info(
+                f"Order result: status={status} order_id={order_id} "
+                f"filled={filled_amount}/{size} avg_price={average_price}"
+            )
+
+            self._record_exchange_action(
+                action_type="create_order",
+                status="success" if status != 'error' else 'error',
+                symbol=symbol,
+                side=ccxt_side,
+                leverage=leverage,
+                size=ccxt_amount,
+                price=ccxt_price,
+                request_payload=action_payload,
+                response_payload=order,
+                error_message=result.get('error'),
+            )
+
+            return result
+
+        except Exception as e:
+            self._record_exchange_action(
+                action_type="create_order",
+                status="error",
+                symbol=symbol,
+                side="buy" if is_buy else "sell",
+                leverage=leverage,
+                size=size,
+                price=price,
+                request_payload=locals().get('action_payload'),
+                response_payload=None,
+                error_message=str(e),
+            )
+            logger.error(f"Failed to place order: {e}", exc_info=True)
+            return {
+                'status': 'error',
+                'error': str(e),
+                'environment': self.environment,
+                'symbol': symbol
+            }
+
+    def set_leverage(self, db: Session, symbol: str, leverage: int) -> bool:
+        """
+        Set leverage for a specific asset
+
+        Args:
+            db: Database session
+            symbol: Asset symbol (e.g., "BTC")
+            leverage: Leverage to set (1-50)
+
+        Returns:
+            True if successful
+
+        Raises:
+            EnvironmentMismatchError: If environment validation fails
+            ValueError: If leverage invalid
+        """
+        self._validate_environment(db)
+
+        if leverage < 1 or leverage > 50:
+            raise ValueError(f"Invalid leverage: {leverage}. Must be 1-50")
+
+        try:
+            logger.info(f"Setting leverage for {symbol} to {leverage}x on {self.environment}")
+
+            # TODO: Implement actual Hyperliquid leverage setting
+            # For reference, Hyperliquid exchange endpoint:
+            # POST /exchange with action type "updateLeverage"
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to set leverage: {e}")
+            raise
+
+    def cancel_order(self, db: Session, order_id: int, symbol: str) -> bool:
+        """
+        Cancel an open order
+
+        Args:
+            db: Database session
+            order_id: Hyperliquid order ID (oid)
+            symbol: Asset symbol
+
+        Returns:
+            True if successful
+
+        Raises:
+            EnvironmentMismatchError: If environment validation fails
+        """
+        self._validate_environment(db)
+
+        try:
+            logger.info(f"Cancelling order {order_id} for {symbol} on {self.environment}")
+
+            # TODO: Implement actual order cancellation
+            # For reference, Hyperliquid exchange endpoint:
+            # POST /exchange with action type "cancel"
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to cancel order: {e}")
+            raise
+
+    def get_order_status(self, db: Session, order_id: int) -> Dict[str, Any]:
+        """
+        Query order status
+
+        Args:
+            db: Database session
+            order_id: Hyperliquid order ID (oid)
+
+        Returns:
+            Order status dict
+
+        Raises:
+            EnvironmentMismatchError: If environment validation fails
+        """
+        self._validate_environment(db)
+
+        try:
+            logger.debug(f"Querying order status for {order_id} on {self.environment}")
+
+            # TODO: Implement actual order status query
+
+            return {
+                'order_id': order_id,
+                'status': 'unknown',
+                'environment': self.environment
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get order status: {e}")
+            raise
+
+    def test_connection(self, db: Session) -> Dict[str, Any]:
+        """
+        Test API connection and authentication
+
+        Args:
+            db: Database session
+
+        Returns:
+            Connection test result
+        """
+        try:
+            self._validate_environment(db)
+            account_state = self.get_account_state(db)
+
+            return {
+                'success': True,
+                'connected': True,
+                'environment': self.environment,
+                'address': self.wallet_address,
+                'account_id': self.account_id,
+                'balance': account_state.get('available_balance'),
+                'api_url': self.api_url
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'connected': False,
+                'environment': self.environment,
+                'message': str(e),
+                'error': str(e)
+            }
+
+    def get_user_rate_limit(self, db: Session) -> Dict[str, Any]:
+        """
+        Query user's API request rate limit status
+
+        This endpoint queries Hyperliquid's userRateLimit to check the address-based
+        request quota. Users get a base quota of 10,000 requests, plus 1 additional
+        request per USDC of cumulative trading volume.
+
+        Args:
+            db: Database session
+
+        Returns:
+            Dict containing:
+                - cumVlm: Cumulative trading volume (USDC)
+                - nRequestsUsed: Number of requests already consumed
+                - nRequestsCap: Maximum requests allowed (10000 + cumVlm)
+                - nRequestsSurplus: Reserved quota surplus (usually 0)
+                - remaining: Calculated remaining requests (cap - used)
+                - usagePercent: Usage percentage (0-100+)
+                - isOverLimit: Boolean indicating if quota is exceeded
+
+        Raises:
+            EnvironmentMismatchError: If environment validation fails
+            Exception: If API request fails
+        """
+        self._validate_environment(db)
+
+        try:
+            import requests
+
+            # Select API endpoint based on environment
+            info_url = f"{self.api_url}/info"
+
+            # Construct payload for userRateLimit query
+            payload = {
+                "type": "userRateLimit",
+                "user": self.wallet_address
+            }
+
+            logger.info(f"Querying rate limit for {self.wallet_address} on {self.environment}")
+
+            # Call Hyperliquid Info API (disable proxy to avoid connection issues)
+            proxies = {
+                'http': None,
+                'https': None
+            }
+            response = requests.post(info_url, json=payload, timeout=10, proxies=proxies)
+            response.raise_for_status()
+
+            data = response.json()
+
+            # Parse response fields
+            cum_vlm = float(data.get('cumVlm', 0))
+            n_requests_used = int(data.get('nRequestsUsed', 0))
+            n_requests_cap = int(data.get('nRequestsCap', 10000))
+            n_requests_surplus = int(data.get('nRequestsSurplus', 0))
+
+            # Calculate additional metrics
+            remaining = n_requests_cap - n_requests_used
+            usage_percent = (n_requests_used / n_requests_cap * 100) if n_requests_cap > 0 else 0
+            is_over_limit = n_requests_used > n_requests_cap
+
+            result = {
+                'cumVlm': cum_vlm,
+                'nRequestsUsed': n_requests_used,
+                'nRequestsCap': n_requests_cap,
+                'nRequestsSurplus': n_requests_surplus,
+                'remaining': remaining,
+                'usagePercent': round(usage_percent, 2),
+                'isOverLimit': is_over_limit,
+                'environment': self.environment,
+                'walletAddress': self.wallet_address
+            }
+
+            logger.info(
+                f"Rate limit status: {n_requests_used}/{n_requests_cap} requests "
+                f"({usage_percent:.1f}%), Volume: ${cum_vlm:.2f}"
+            )
+
+            if is_over_limit:
+                shortage = n_requests_used - n_requests_cap
+                logger.warning(
+                    f"⚠️ Rate limit EXCEEDED by {shortage} requests! "
+                    f"Need to trade ${shortage} USDC to free up quota."
+                )
+
+            return result
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to query rate limit: {e}")
+            raise Exception(f"Rate limit query failed: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error processing rate limit data: {e}")
+            raise
+
+    def _sign_l1_action(
+        self,
+        action: Dict[str, Any],
+        nonce: int,
+        vault_address: Optional[str] = None
+    ) -> str:
+        """
+        Sign L1 action using EIP-712 (matches CCXT implementation)
+
+        Args:
+            action: Action dictionary (order, cancel, etc.)
+            nonce: Timestamp in milliseconds
+            vault_address: Optional vault address (without 0x prefix)
+
+        Returns:
+            Signature dict with r, s, v
+        """
+        try:
+            # Use ccxt-bundled helpers for byte-identical behaviour
+            from ccxt.static_dependencies import msgpack as ccxt_msgpack
+            from ccxt.base.exchange import Exchange
+
+            # ==================== CCXT-Compatible action_hash ====================
+            # Reference: ccxt/hyperliquid.py line 1330-1340
+            # 1. msgpack serialize action (same lib as ccxt)
+            data_binary = ccxt_msgpack.packb(action)
+
+            # 2. Convert to lowercase hex via ccxt helper
+            data_hex = Exchange.binary_to_base16(data_binary)
+
+            # 3. Append '00000' separator + nonce encoded with ccxt's int_to_base16
+            nonce_hex = Exchange.int_to_base16(nonce).lower()  # ✅ Convert to lowercase for consistency
+            data = data_hex + '00000' + nonce_hex
+
+            # 4. Append vault flag exactly like ccxt
+            if vault_address is None:
+                data += '00'
+            else:
+                data += '01'
+                vault_hex = vault_address[2:] if vault_address.startswith('0x') else vault_address
+                data += vault_hex
+
+            # 5. Convert back to binary using ccxt helper (handles odd-length strings)
+            data_bytes = Exchange.base16_to_binary(data)
+            action_hash = keccak(data_bytes)
+
+            # ==================== Phantom Agent (CCXT-Compatible) ====================
+            # Reference: ccxt/hyperliquid.py line 1323-1328
+            is_mainnet = (self.environment == "mainnet")
+            phantom_agent = {
+                "source": "a" if is_mainnet else "b",  # 'a' = mainnet, 'b' = testnet
+                "connectionId": action_hash  # Must be bytes32 from correct action_hash
+            }
+
+            import sys
+            print(f"[DEBUG ACTION_HASH] data_hex: {data_hex[:100]}...", file=sys.stderr, flush=True)
+            print(f"[DEBUG ACTION_HASH] nonce_hex: {nonce_hex}", file=sys.stderr, flush=True)
+            print(f"[DEBUG ACTION_HASH] final_data: {data[:200]}...", file=sys.stderr, flush=True)
+            print(f"[DEBUG ACTION_HASH] action_hash: {action_hash.hex()}", file=sys.stderr, flush=True)
+            print(f"[DEBUG PHANTOM] phantom_agent: source={phantom_agent['source']}, connectionId={action_hash.hex()}", file=sys.stderr, flush=True)
+
+            # Construct EIP-712 typed data
+            typed_data = {
+                "domain": {
+                    "chainId": 1337,
+                    "name": "Exchange",
+                    "verifyingContract": "0x0000000000000000000000000000000000000000",
+                    "version": "1"
+                },
+                "types": {
+                    "Agent": [
+                        {"name": "source", "type": "string"},
+                        {"name": "connectionId", "type": "bytes32"}
+                    ],
+                    "EIP712Domain": [
+                        {"name": "name", "type": "string"},
+                        {"name": "version", "type": "string"},
+                        {"name": "chainId", "type": "uint256"},
+                        {"name": "verifyingContract", "type": "address"}
+                    ]
+                },
+                "primaryType": "Agent",
+                "message": phantom_agent
+            }
+
+            # ==================== EIP-712 Signing (CCXT-Compatible) ====================
+            # Reference: ccxt/hyperliquid.py line 1370-1384
+            eth_account = EthAccount.from_key(self.private_key)
+
+            # Use encode_typed_data (standard method from eth_account)
+            if encode_typed_data_func is None:
+                raise ImportError(
+                    "encode_typed_data not available in eth_account. "
+                    "Please upgrade eth-account: pip install --upgrade eth-account"
+                )
+
+            encoded_data = encode_typed_data_func(full_message=typed_data)
+            signed_message = eth_account.sign_message(encoded_data)
+
+            # Extract r, s, v from signature
+            signature_bytes = signed_message.signature
+            r = int.from_bytes(signature_bytes[0:32], 'big')
+            s = int.from_bytes(signature_bytes[32:64], 'big')
+            v = signature_bytes[64]
+
+            signature_dict = {
+                "r": hex(r),
+                "s": hex(s),
+                "v": v
+            }
+
+            # ==================== Local Verification ====================
+            # Verify that Hyperliquid will recover the correct address
+            from eth_account.messages import _hash_eip191_message
+            try:
+                message_hash = _hash_eip191_message(encoded_data)
+                recovered_address = EthAccount.recover_message(encoded_data, signature=signature_bytes)
+
+                print(f"[DEBUG SIGN] Private key address: {eth_account.address}", file=sys.stderr, flush=True)
+                print(f"[DEBUG SIGN] Stored wallet address: {self.wallet_address}", file=sys.stderr, flush=True)
+                print(f"[DEBUG SIGN] Recovered address: {recovered_address}", file=sys.stderr, flush=True)
+                print(f"[DEBUG SIGN] ✅ Signature valid: {recovered_address.lower() == eth_account.address.lower()}", file=sys.stderr, flush=True)
+            except Exception as verify_err:
+                print(f"[DEBUG SIGN] ⚠️ Local verification failed: {verify_err}", file=sys.stderr, flush=True)
+
+            # Return signature dict
+            return signature_dict
+
+        except Exception as e:
+            logger.error(f"Failed to sign L1 action: {e}", exc_info=True)
+            raise
+
+    def _float_to_string(self, value: float) -> str:
+        """
+        Convert float to string for Hyperliquid API (removes trailing zeros and decimal point if not needed)
+
+        This matches the official SDK's float_to_string_for_hashing method.
+        Examples:
+            94000.0 -> "94000"
+            0.01890 -> "0.0189"
+            1.50000 -> "1.5"
+        """
+        # Format with enough precision to avoid scientific notation
+        s = f"{value:.20f}"
+        # Remove trailing zeros
+        s = s.rstrip('0')
+        # Remove trailing decimal point if no fractional part remains
+        s = s.rstrip('.')
+        return s
+
+    def _get_asset_index(self, symbol: str) -> int:
+        """
+        Get asset index for Hyperliquid
+
+        Common assets:
+        BTC=0, ETH=1, SOL=2, etc.
+        """
+        # This is a simplified mapping, should be fetched from /info endpoint in production
+        asset_map = {
+            "BTC": 0,
+            "ETH": 1,
+            "SOL": 2,
+            "DOGE": 3,
+            "XRP": 4,
+            "BNB": 5,
+        }
+        return asset_map.get(symbol, 0)
+
+    def place_order_with_tpsl(
+        self,
+        db: Session,
+        symbol: str,
+        is_buy: bool,
+        size: float,
+        price: float,
+        leverage: int = 1,
+        time_in_force: str = "Ioc",
+        reduce_only: bool = False,
+        take_profit_price: Optional[float] = None,
+        stop_loss_price: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """
+        Place order with take profit and stop loss using Hyperliquid official SDK
+
+        Args:
+            db: Database session
+            symbol: Asset symbol (e.g., "BTC")
+            is_buy: True for long, False for short
+            size: Order quantity
+            price: Order price
+            leverage: Position leverage (1-50)
+            time_in_force: Order time in force - "Ioc" (market-like), "Gtc" (limit), "Alo" (maker only)
+            reduce_only: Only close existing positions
+            take_profit_price: Optional take profit trigger price
+            stop_loss_price: Optional stop loss trigger price
+
+        Returns:
+            Dict with order results including TP/SL order IDs
+        """
+        self._validate_environment(db)
+
+        # Validate parameters
+        if leverage < 1 or leverage > 50:
+            raise ValueError(f"Invalid leverage: {leverage}. Must be 1-50")
+        if size <= 0:
+            raise ValueError(f"Invalid size: {size}. Must be positive")
+        if price <= 0:
+            raise ValueError(f"Invalid price: {price}. Must be positive")
+
+        # Validate time_in_force
+        valid_tif = ["Ioc", "Gtc", "Alo"]
+        if time_in_force not in valid_tif:
+            raise ValueError(f"Invalid time_in_force: {time_in_force}. Must be one of {valid_tif}")
+
+        logger.info(
+            f"[SDK] Placing order on {self.environment.upper()}: "
+            f"{symbol} {'BUY' if is_buy else 'SELL'} size={size} price={price} "
+            f"leverage={leverage}x TIF={time_in_force} TP={take_profit_price} SL={stop_loss_price}"
+        )
+
+        try:
+            # Set leverage before placing order
+            try:
+                self.exchange.set_leverage(leverage, f"{symbol}/USDC:USDC")
+                logger.debug(f"Set leverage to {leverage}x for {symbol}")
+                self._record_exchange_action(
+                    action_type="set_leverage",
+                    status="success",
+                    symbol=symbol,
+                    leverage=leverage,
+                    request_payload={"symbol": symbol, "leverage": leverage},
+                )
+            except Exception as lev_err:
+                logger.warning(f"Failed to set leverage (may already be set): {lev_err}")
+                self._record_exchange_action(
+                    action_type="set_leverage",
+                    status="error",
+                    symbol=symbol,
+                    leverage=leverage,
+                    request_payload={"symbol": symbol, "leverage": leverage},
+                    error_message=str(lev_err),
+                )
+
+            # Prepare order type with TIF
+            order_type = {"limit": {"tif": time_in_force}}
+
+            # Place main order using SDK
+            logger.info(f"[SDK] Placing main order: {symbol} {'BUY' if is_buy else 'SELL'} {size}@{price} TIF={time_in_force}")
+
+            main_result = self.sdk_exchange.order(
+                name=symbol,
+                is_buy=is_buy,
+                sz=size,
+                limit_px=price,
+                order_type=order_type,
+                reduce_only=reduce_only
+            )
+
+            logger.info(f"[SDK] Main order result: {main_result}")
+
+            # Parse main order result
+            order_status = main_result.get("status", "error")
+            order_id = None
+            filled_amount = 0
+            average_price = 0
+            error_msg = None
+
+            if order_status == "ok":
+                data = main_result.get("response", {}).get("data", {})
+                statuses = data.get("statuses", [])
+
+                if statuses:
+                    main_status = statuses[0]
+
+                    if "filled" in main_status:
+                        filled_info = main_status["filled"]
+                        order_id = str(filled_info.get("oid", ""))
+                        filled_amount = float(filled_info.get("totalSz", 0))
+                        average_price = float(filled_info.get("avgPx", 0))
+                        status = "filled"
+                    elif "resting" in main_status:
+                        resting_info = main_status["resting"]
+                        order_id = str(resting_info.get("oid", ""))
+                        status = "resting"
+                    elif "error" in main_status:
+                        error_msg = main_status["error"]
+                        status = "error"
+                    else:
+                        status = "error"
+                        error_msg = f"Unknown status in response: {main_status}"
+                else:
+                    status = "error"
+                    error_msg = "No statuses in response"
+            else:
+                status = "error"
+                error_msg = main_result.get("response", "Unknown error")
+
+            # Place TP/SL orders if main order succeeded and prices provided
+            tp_order_id = None
+            sl_order_id = None
+
+            if status in ["filled", "resting"] and (take_profit_price or stop_loss_price):
+                # Place TP order
+                if take_profit_price:
+                    try:
+                        logger.info(f"[SDK] Placing TP order: {symbol} {'SELL' if is_buy else 'BUY'} {size}@{take_profit_price}")
+
+                        tp_order_type = {"trigger": {
+                            "triggerPx": take_profit_price,
+                            "isMarket": False,
+                            "tpsl": "tp"
+                        }}
+
+                        tp_result = self.sdk_exchange.order(
+                            name=symbol,
+                            is_buy=not is_buy,  # Opposite direction
+                            sz=size,
+                            limit_px=take_profit_price,
+                            order_type=tp_order_type,
+                            reduce_only=True
+                        )
+
+                        logger.info(f"[SDK] TP order result: {tp_result}")
+
+                        if tp_result.get("status") == "ok":
+                            tp_statuses = tp_result.get("response", {}).get("data", {}).get("statuses", [])
+                            if tp_statuses:
+                                tp_status = tp_statuses[0]
+                                if "resting" in tp_status:
+                                    tp_order_id = str(tp_status["resting"].get("oid", ""))
+                                elif "filled" in tp_status:
+                                    tp_order_id = str(tp_status["filled"].get("oid", ""))
+                    except Exception as tp_err:
+                        logger.error(f"[SDK] Failed to place TP order: {tp_err}", exc_info=True)
+
+                # Place SL order
+                if stop_loss_price:
+                    try:
+                        logger.info(f"[SDK] Placing SL order: {symbol} {'SELL' if is_buy else 'BUY'} {size}@{stop_loss_price}")
+
+                        sl_order_type = {"trigger": {
+                            "triggerPx": stop_loss_price,
+                            "isMarket": False,
+                            "tpsl": "sl"
+                        }}
+
+                        sl_result = self.sdk_exchange.order(
+                            name=symbol,
+                            is_buy=not is_buy,  # Opposite direction
+                            sz=size,
+                            limit_px=stop_loss_price,
+                            order_type=sl_order_type,
+                            reduce_only=True
+                        )
+
+                        logger.info(f"[SDK] SL order result: {sl_result}")
+
+                        if sl_result.get("status") == "ok":
+                            sl_statuses = sl_result.get("response", {}).get("data", {}).get("statuses", [])
+                            if sl_statuses:
+                                sl_status = sl_statuses[0]
+                                if "resting" in sl_status:
+                                    sl_order_id = str(sl_status["resting"].get("oid", ""))
+                                elif "filled" in sl_status:
+                                    sl_order_id = str(sl_status["filled"].get("oid", ""))
+                    except Exception as sl_err:
+                        logger.error(f"[SDK] Failed to place SL order: {sl_err}", exc_info=True)
+
+            # Construct result
+            order_result = {
+                "status": status,
+                "environment": self.environment,
+                "symbol": symbol,
+                "is_buy": is_buy,
+                "size": size,
+                "leverage": leverage,
+                "order_id": order_id,
+                "filled_amount": filled_amount,
+                "average_price": average_price,
+                "wallet_address": self.wallet_address,
+                "timestamp": int(time.time() * 1000),
+                # TP/SL specific fields
+                "tp_order_id": tp_order_id,
+                "tp_trigger_price": take_profit_price,
+                "sl_order_id": sl_order_id,
+                "sl_trigger_price": stop_loss_price,
+            }
+
+            if error_msg:
+                order_result["error"] = error_msg
+
+            logger.info(
+                f"[SDK] Order result: status={status} order_id={order_id} "
+                f"filled={filled_amount}/{size} avg_price={average_price} "
+                f"TP={tp_order_id} SL={sl_order_id}"
+            )
+
+            self._record_exchange_action(
+                action_type="create_order_with_tpsl",
+                status="success" if status != "error" else "error",
+                symbol=symbol,
+                side="buy" if is_buy else "sell",
+                leverage=leverage,
+                size=size,
+                price=price,
+                request_payload={
+                    "symbol": symbol,
+                    "is_buy": is_buy,
+                    "size": size,
+                    "price": price,
+                    "leverage": leverage,
+                    "time_in_force": time_in_force,
+                    "take_profit_price": take_profit_price,
+                    "stop_loss_price": stop_loss_price
+                },
+                response_payload=main_result,
+                error_message=error_msg,
+            )
+
+            return order_result
+
+        except Exception as e:
+            logger.error(f"[SDK] Failed to place order: {e}", exc_info=True)
+            self._record_exchange_action(
+                action_type="create_order_with_tpsl",
+                status="error",
+                symbol=symbol,
+                side="buy" if is_buy else "sell",
+                leverage=leverage,
+                size=size,
+                price=price,
+                request_payload={
+                    "symbol": symbol,
+                    "is_buy": is_buy,
+                    "size": size,
+                    "price": price
+                },
+                response_payload=None,
+                error_message=str(e),
+            )
+            return {
+                "status": "error",
+                "error": str(e),
+                "environment": self.environment,
+                "symbol": symbol
+            }
+
+
+# Factory function for creating clients
+def create_hyperliquid_client(
+
+            # Format size to 5 decimal places (szDecimals for BTC)
+            # Hyperliquid requires exact precision: BTC perps = 5 decimals
+            size_str = f"{size:.5f}"
+
+            # Construct orders array
+            orders = []
+
+            # 1. Main order
+            main_order = {
+                "a": asset_index,
+                "b": is_buy,
+                "p": str(price),
+                "s": size_str,
+                "r": reduce_only,
+                "t": {"limit": {"tif": time_in_force}}  # Use specified time in force
+            }
+            orders.append(main_order)
+
+            # 2. Take profit order (if specified)
+            if take_profit_price:
+                tp_order = {
+                    "a": asset_index,
+                    "b": not is_buy,  # Opposite direction
+                    "p": str(take_profit_price),
+                    "s": size_str,
+                    "r": True,  # Always reduce-only
+                    "t": {
+                        "trigger": {
+                            "isMarket": False,  # Use limit order
+                            "triggerPx": str(take_profit_price),
+                            "tpsl": "tp"
+                        }
+                    }
+                }
+                orders.append(tp_order)
+
+            # 3. Stop loss order (if specified)
+            if stop_loss_price:
+                sl_order = {
+                    "a": asset_index,
+                    "b": not is_buy,  # Opposite direction
+                    "p": str(stop_loss_price),
+                    "s": size_str,
+                    "r": True,  # Always reduce-only
+                    "t": {
+                        "trigger": {
+                            "isMarket": False,  # Use limit order
+                            "triggerPx": str(stop_loss_price),
+                            "tpsl": "sl"
+                        }
+                    }
+                }
+                orders.append(sl_order)
+
+            # Construct action
+            action = {
+                "type": "order",
+                "orders": orders,
+                "grouping": "normalTpsl" if (take_profit_price or stop_loss_price) else "na"
+            }
+
+            # Generate nonce (current timestamp in milliseconds)
+            nonce = int(time.time() * 1000)
+
+            # Sign the action (no vault support for now)
+            signature = self._sign_l1_action(action, nonce, vault_address=None)
+
+            # ==================== Construct Request Payload ====================
+            # Reference: CCXT line 1707-1716
+            # NO 'user' field - Hyperliquid recovers address from signature
+            #
+            # ⚠️ CRITICAL: vaultAddress field MUST be included (even if None)!
+            # Without it, Hyperliquid uses wrong verification path and recovers random address
+            payload = {
+                "action": action,
+                "nonce": nonce,
+                "signature": signature,  # {r, s, v}
+                "vaultAddress": None  # MUST explicitly send null for correct signature verification
+            }
+
+            import sys
+            import json
+            print(f"[DEBUG PAYLOAD] Sending to Hyperliquid {self.environment}:", file=sys.stderr, flush=True)
+            print(f"  Expected wallet (for reference): {self.wallet_address}", file=sys.stderr, flush=True)
+            print(f"  Payload keys: {list(payload.keys())}", file=sys.stderr, flush=True)
+            print(f"  Full payload: {json.dumps(payload, indent=2, default=str)}", file=sys.stderr, flush=True)
+
+            # Send request to Hyperliquid
+            response = requests.post(
+                f"{self.api_url}/exchange",
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=30
+            )
+
+            print(f"[DEBUG] Response status: {response.status_code}", file=sys.stderr, flush=True)
+            print(f"[DEBUG] Response text: {response.text}", file=sys.stderr, flush=True)
+
+            response.raise_for_status()
+            result = response.json()
+
+            logger.info(f"[NATIVE API] Raw response: {result}")
+
+            # Parse response
+            if result.get("status") != "ok":
+                error_msg = result.get("response", "Unknown error")
+                logger.error(f"[NATIVE API] Order failed: {error_msg}")
+                self._record_exchange_action(
+                    action_type="create_order_with_tpsl",
+                    status="error",
+                    symbol=symbol,
+                    side="buy" if is_buy else "sell",
+                    leverage=leverage,
+                    size=size,
+                    price=price,
+                    request_payload=payload,
+                    response_payload=result,
+                    error_message=str(error_msg),
+                )
+                return {
+                    "status": "error",
+                    "error": str(error_msg),
+                    "environment": self.environment,
+                    "symbol": symbol
+                }
+
+            # Extract statuses
+            data = result.get("response", {}).get("data", {})
+            statuses = data.get("statuses", [])
+
+            if not statuses:
+                logger.error(f"[NATIVE API] No statuses in response")
+                return {
+                    "status": "error",
+                    "error": "No statuses in response",
+                    "environment": self.environment,
+                    "symbol": symbol
+                }
+
+            # Parse main order status
+            main_status = statuses[0]
+            order_id = None
+            filled_amount = 0
+            average_price = 0
+            status = "error"
+            error_msg = None
+
+            if "filled" in main_status:
+                filled_info = main_status["filled"]
+                order_id = str(filled_info.get("oid", ""))
+                filled_amount = float(filled_info.get("totalSz", 0))
+                average_price = float(filled_info.get("avgPx", 0))
+                status = "filled"
+            elif "resting" in main_status:
+                resting_info = main_status["resting"]
+                order_id = str(resting_info.get("oid", ""))
+                status = "resting"
+            elif "error" in main_status:
+                error_msg = main_status["error"]
+                status = "error"
+
+            # Parse TP/SL order IDs
+            tp_order_id = None
+            sl_order_id = None
+
+            if len(statuses) > 1 and take_profit_price:
+                tp_status = statuses[1]
+                if "resting" in tp_status:
+                    tp_order_id = str(tp_status["resting"].get("oid", ""))
+                elif "filled" in tp_status:
+                    tp_order_id = str(tp_status["filled"].get("oid", ""))
+
+            if len(statuses) > 2 and stop_loss_price:
+                sl_status = statuses[2]
+                if "resting" in sl_status:
+                    sl_order_id = str(sl_status["resting"].get("oid", ""))
+                elif "filled" in sl_status:
+                    sl_order_id = str(sl_status["filled"].get("oid", ""))
+
+            # Construct result
+            order_result = {
+                "status": status,
+                "environment": self.environment,
+                "symbol": symbol,
+                "is_buy": is_buy,
+                "size": size,
+                "leverage": leverage,
+                "order_id": order_id,
+                "filled_amount": filled_amount,
+                "average_price": average_price,
+                "wallet_address": self.wallet_address,
+                "timestamp": int(time.time() * 1000),
+                # TP/SL specific fields
+                "tp_order_id": tp_order_id,
+                "tp_trigger_price": take_profit_price,
+                "sl_order_id": sl_order_id,
+                "sl_trigger_price": stop_loss_price,
+            }
+
+            if error_msg:
+                order_result["error"] = error_msg
+
+            # Record exchange action
+            self._record_exchange_action(
+                action_type="create_order_with_tpsl",
+                status="success" if status != "error" else "error",
+                symbol=symbol,
+                side="buy" if is_buy else "sell",
+                leverage=leverage,
+                size=size,
+                price=price,
+                request_payload=payload,
+                response_payload=result,
+                error_message=error_msg,
+            )
+
+            logger.info(
+                f"[NATIVE API] Order result: status={status} order_id={order_id} "
+                f"TP={tp_order_id} SL={sl_order_id}"
+            )
+
+            return order_result
+
+        except Exception as e:
+            logger.error(f"[NATIVE API] Failed to place order: {e}", exc_info=True)
+            self._record_exchange_action(
+                action_type="create_order_with_tpsl",
+                status="error",
+                symbol=symbol,
+                side="buy" if is_buy else "sell",
+                leverage=leverage,
+                size=size,
+                price=price,
+                request_payload=None,
+                response_payload=None,
+                error_message=str(e),
+            )
+            return {
+                "status": "error",
+                "error": str(e),
+                "environment": self.environment,
+                "symbol": symbol
+            }
+
+
+# Factory function for creating clients
+def create_hyperliquid_client(
+    account_id: int,
+    private_key: str,
+    environment: str,
+    wallet_address: str = None
+) -> HyperliquidTradingClient:
+    """
+    Factory function to create Hyperliquid trading client
+
+    Args:
+        account_id: Database account ID
+        private_key: Hyperliquid private key
+        environment: "testnet" or "mainnet"
+        wallet_address: Optional wallet address (if not provided, derived from private key)
+
+    Returns:
+        Initialized HyperliquidTradingClient
+    """
+    return HyperliquidTradingClient(
+        account_id=account_id,
+        private_key=private_key,
+        wallet_address=wallet_address,
+        environment=environment
+    )
