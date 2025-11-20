@@ -269,15 +269,14 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
         </DialogHeader>
       )}
 
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded">
-          {error}
-        </div>
-      )}
-
         <div className="space-y-6">
           {/* Existing Accounts */}
-          <div className="space-y-4 flex-1 flex flex-col overflow-hidden">
+          <div className="space-y-4 flex-1 flex flex-col overflow-hidden"  style={{maxHeight: 'calc(100vh - 300px)'}}>
+            {error && (
+            <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded">
+              {error}
+            </div>
+          )}
             <div className="flex items-center justify-between">
               <Button
                 onClick={() => setShowAddForm(!showAddForm)}
@@ -292,7 +291,7 @@ export default function SettingsDialog({ open, onOpenChange, onAccountUpdated, e
             {loading && accounts.length === 0 ? (
               <div>Loading AI traders...</div>
             ) : (
-              <div className="space-y-3 overflow-y-auto" style={{maxHeight: 'calc(100vh - 300px)'}}>
+              <div className="space-y-3 overflow-y-auto">
                 {/* Add New Account Form */}
                 {showAddForm && (
                   <div className="space-y-4 border rounded-lg p-4 bg-muted/50">
