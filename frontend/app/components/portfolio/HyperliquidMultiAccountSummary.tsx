@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { TrendingUp, AlertTriangle } from 'lucide-react'
@@ -59,13 +59,69 @@ export default function HyperliquidMultiAccountSummary({
   const [accountBalances, setAccountBalances] = useState<AccountBalance[]>([])
   const [globalLastUpdate, setGlobalLastUpdate] = useState<string | null>(null)
 
-  // Filter accounts based on selectedAccount
-  const filteredAccounts = selectedAccount === 'all'
-    ? accounts
-    : accounts.filter(acc => acc.account_id === selectedAccount)
+  // Filter accounts based on selectedAccount - memoized to prevent infinite loops
+  const filteredAccounts = useMemo(() => {
+    return selectedAccount === 'all'
+      ? accounts
+      : accounts.filter(acc => acc.account_id === selectedAccount)
+  }, [accounts, selectedAccount])
+
+  // Load all account balances in parallel - memoized to prevent infinite loops
+  const loadAllBalances = useCallback(async () => {
+    const results = await Promise.allSettled(
+      filteredAccounts.map(async (acc) => {
+        try {
+          const balance = await getHyperliquidBalance(acc.account_id)
+          return {
+            accountId: acc.account_id,
+            accountName: acc.account_name,
+            balance,
+            error: null,
+            loading: false,
+          }
+        } catch (error: any) {
+          console.error(`Failed to load balance for account ${acc.account_id}:`, error)
+          return {
+            accountId: acc.account_id,
+            accountName: acc.account_name,
+            balance: null,
+            error: error.message || 'Failed to load',
+            loading: false,
+          }
+        }
+      })
+    )
+
+    const newBalances: AccountBalance[] = results.map((result, index) => {
+      if (result.status === 'fulfilled') {
+        return result.value
+      } else {
+        return {
+          accountId: filteredAccounts[index].account_id,
+          accountName: filteredAccounts[index].account_name,
+          balance: null,
+          error: 'Failed to load',
+          loading: false,
+        }
+      }
+    })
+
+    setAccountBalances(newBalances)
+
+    // Find the most recent update timestamp across all accounts
+    const latestUpdate = newBalances
+      .map((acc) => acc.balance?.lastUpdated)
+      .filter((ts): ts is string => ts !== undefined)
+      .sort()
+      .reverse()[0]
+
+    if (latestUpdate) {
+      setGlobalLastUpdate(new Date(latestUpdate).toLocaleString())
+    }
+  }, [filteredAccounts])
 
   useEffect(() => {
-    if (tradingMode === 'paper' || filteredAccounts.length === 0) {
+    if (filteredAccounts.length === 0) {
       setAccountBalances([])
       return
     }
@@ -84,64 +140,10 @@ export default function HyperliquidMultiAccountSummary({
       )
     }
 
-    // Load all account balances in parallel (silent refresh on subsequent loads)
-    const loadAllBalances = async () => {
-      const results = await Promise.allSettled(
-        filteredAccounts.map(async (acc) => {
-          try {
-            const balance = await getHyperliquidBalance(acc.account_id)
-            return {
-              accountId: acc.account_id,
-              accountName: acc.account_name,
-              balance,
-              error: null,
-              loading: false,
-            }
-          } catch (error: any) {
-            console.error(`Failed to load balance for account ${acc.account_id}:`, error)
-            return {
-              accountId: acc.account_id,
-              accountName: acc.account_name,
-              balance: null,
-              error: error.message || 'Failed to load',
-              loading: false,
-            }
-          }
-        })
-      )
-
-      const newBalances: AccountBalance[] = results.map((result, index) => {
-        if (result.status === 'fulfilled') {
-          return result.value
-        } else {
-          return {
-            accountId: filteredAccounts[index].account_id,
-            accountName: filteredAccounts[index].account_name,
-            balance: null,
-            error: 'Failed to load',
-            loading: false,
-          }
-        }
-      })
-
-      setAccountBalances(newBalances)
-
-      // Find the most recent update timestamp across all accounts
-      const latestUpdate = newBalances
-        .map((acc) => acc.balance?.lastUpdated)
-        .filter((ts): ts is string => ts !== undefined)
-        .sort()
-        .reverse()[0]
-
-      if (latestUpdate) {
-        setGlobalLastUpdate(new Date(latestUpdate).toLocaleString())
-      }
-    }
-
     loadAllBalances()
   }, [filteredAccounts, tradingMode, refreshKey])
 
-  if (tradingMode === 'paper') {
+  if (tradingMode !== 'testnet' && tradingMode !== 'mainnet') {
     return null
   }
 
