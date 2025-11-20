@@ -261,10 +261,19 @@ export default function WalletConfigPanel({
             <div className="space-y-1">
               <label className="text-xs text-muted-foreground">Wallet Address</label>
               <div className="flex items-center gap-2">
-                <code className="flex-1 px-2 py-1 bg-muted rounded text-xs">
+                <code className="flex-1 px-2 py-1 bg-muted rounded text-xs" style={{maxWidth: '100%', overflow: "hidden"}}>
                   {wallet.walletAddress}
                 </code>
-                <CheckCircle className="h-4 w-4 text-green-600 flex-shrink-0" />
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(wallet.walletAddress || '');
+                    toast.success('钱包地址已复制到剪贴板');
+                  }}
+                  className="cursor-pointer"
+                  title="复制钱包地址"
+                >
+                  <CheckCircle className="h-4 w-4 text-green-600 flex-shrink-0" />
+                </button>
               </div>
             </div>
 
