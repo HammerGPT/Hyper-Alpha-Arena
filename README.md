@@ -5,6 +5,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![GitHub stars](https://img.shields.io/github/stars/HammerGPT/Hyper-Alpha-Arena)](https://github.com/HammerGPT/Hyper-Alpha-Arena/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/HammerGPT/Hyper-Alpha-Arena)](https://github.com/HammerGPT/Hyper-Alpha-Arena/network)
+[![Community](https://img.shields.io/badge/Telegram-Community-blue?logo=telegram)](https://t.me/+RqxjT7Gttm9hOGEx)
 
 ## 🔥 Start Trading Now - Up to 30% Fee Discount
 
@@ -24,6 +25,22 @@ Ready to put your AI trading strategies to work? Get started with these top exch
 - [**Register Now →**](https://www.asterdex.com/zh-CN/referral/2b5924)
 
 ---
+
+## Community & Support
+
+Join our Telegram group for real-time discussions and faster triage ([join link](https://t.me/+RqxjT7Gttm9hOGEx)).
+- Report bugs (please include logs, screenshots, and steps if possible)
+- Share strategy insights or product feedback
+- Ping me about PRs/Issues so I can respond quickly
+
+Friendly reminder: Telegram is for rapid communication, but final tracking and fixes still go through GitHub Issues/Pull Requests. Never post API keys or other sensitive data in the chat.
+
+欢迎加入 Telegram 群（[点此加入](https://t.me/+RqxjT7Gttm9hOGEx)）：
+- 反馈 Bug（尽量附日志、截图、复现步骤）
+- 讨论策略或产品体验
+- PR / Issue 想要我关注可在群里提醒
+
+注意：Telegram 主要用于快速沟通，正式记录请继续使用 GitHub Issues / Pull Requests；谨记不要分享密钥等敏感信息。
 
 ## Overview
 
