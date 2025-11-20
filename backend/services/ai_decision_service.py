@@ -218,13 +218,14 @@ def _build_account_state(portfolio: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _build_sampling_data(samples: Optional[List], target_symbol: Optional[str]) -> str:
+def _build_sampling_data(samples: Optional[List], target_symbol: Optional[str], sampling_interval: Optional[int] = None) -> str:
     """Build sampling pool data section for Alpha Arena style prompts (single symbol)"""
     if not samples or not target_symbol:
         return "No sampling data available."
 
+    interval_text = f"{sampling_interval}-second intervals" if sampling_interval else "unknown intervals"
     lines = [
-        f"Multi-timeframe price data for {target_symbol} (18-second intervals, oldest to newest):",
+        f"Multi-timeframe price data for {target_symbol} ({interval_text}, oldest to newest):",
         f"Total samples: {len(samples)}",
         ""
     ]
@@ -260,12 +261,13 @@ def _build_sampling_data(samples: Optional[List], target_symbol: Optional[str]) 
     return "\n".join(lines)
 
 
-def _build_multi_symbol_sampling_data(symbols: List[str], sampling_pool) -> str:
+def _build_multi_symbol_sampling_data(symbols: List[str], sampling_pool, sampling_interval: Optional[int] = None) -> str:
     """Build sampling pool data for multiple symbols (Alpha Arena style)"""
     if not symbols:
         return "No symbols selected for sampling data."
 
     sections = []
+    interval_text = f"{sampling_interval}-second intervals" if sampling_interval else "unknown intervals"
 
     for symbol in symbols:
         samples = sampling_pool.get_samples(symbol)
@@ -274,7 +276,7 @@ def _build_multi_symbol_sampling_data(symbols: List[str], sampling_pool) -> str:
             continue
 
         lines = [
-            f"{symbol} (18-second intervals, oldest to newest):",
+            f"{symbol} ({interval_text}, oldest to newest):",
             f"Total samples: {len(samples)}",
             ""
         ]
@@ -377,6 +379,7 @@ def _build_prompt_context(
     *,
     symbol_metadata: Optional[Dict[str, Any]] = None,
     symbol_order: Optional[List[str]] = None,
+    sampling_interval: Optional[int] = None,
 ) -> Dict[str, Any]:
     base_portfolio = portfolio or {}
     base_positions = base_portfolio.get("positions") or {}
@@ -457,7 +460,7 @@ def _build_prompt_context(
     account_state = _build_account_state(portfolio)
     market_snapshot = _build_market_snapshot(prices, positions, ordered_symbols)
     session_context = _build_session_context(account)
-    sampling_data = _build_sampling_data(samples, target_symbol)
+    sampling_data = _build_sampling_data(samples, target_symbol, sampling_interval)
 
     # New Alpha Arena style variables
     runtime_minutes = _calculate_runtime_minutes(account)
@@ -761,7 +764,20 @@ def call_ai_for_decision(
     if symbols:
         # New multi-symbol approach
         from services.sampling_pool import sampling_pool
-        sampling_data = _build_multi_symbol_sampling_data(symbols, sampling_pool)
+        from database.connection import SessionLocal
+        from database.models import GlobalSamplingConfig
+
+        # Get actual sampling interval from config
+        sampling_interval = None
+        try:
+            with SessionLocal() as db:
+                config = db.query(GlobalSamplingConfig).first()
+                if config:
+                    sampling_interval = config.sampling_interval
+        except Exception as e:
+            logger.warning(f"Failed to get sampling interval: {e}")
+
+        sampling_data = _build_multi_symbol_sampling_data(symbols, sampling_pool, sampling_interval)
         context = _build_prompt_context(
             account,
             portfolio,
@@ -772,10 +788,23 @@ def call_ai_for_decision(
             hyperliquid_state,
             symbol_metadata=active_symbol_metadata,
             symbol_order=symbol_order,
+            sampling_interval=sampling_interval,
         )
         context["sampling_data"] = sampling_data
     else:
         # Legacy single-symbol approach (backward compatibility)
+        # Get actual sampling interval from config
+        sampling_interval = None
+        try:
+            from database.connection import SessionLocal
+            from database.models import GlobalSamplingConfig
+            with SessionLocal() as db:
+                config = db.query(GlobalSamplingConfig).first()
+                if config:
+                    sampling_interval = config.sampling_interval
+        except Exception as e:
+            logger.warning(f"Failed to get sampling interval: {e}")
+
         context = _build_prompt_context(
             account,
             portfolio,
@@ -786,6 +815,7 @@ def call_ai_for_decision(
             hyperliquid_state,
             symbol_metadata=active_symbol_metadata,
             symbol_order=symbol_order,
+            sampling_interval=sampling_interval,
         )
 
     try:

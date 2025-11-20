@@ -324,7 +324,17 @@ def preview_prompt(
                 logger.warning(f"Failed to get price for {sym}: {err}")
                 prices[sym] = 0.0
 
-        sampling_data = _build_multi_symbol_sampling_data(active_symbols, sampling_pool)
+        # Get actual sampling interval from config
+        sampling_interval = None
+        try:
+            from database.models import GlobalSamplingConfig
+            config = db.query(GlobalSamplingConfig).first()
+            if config:
+                sampling_interval = config.sampling_interval
+        except Exception as e:
+            logger.warning(f"Failed to get sampling interval: {e}")
+
+        sampling_data = _build_multi_symbol_sampling_data(active_symbols, sampling_pool, sampling_interval)
         context = _build_prompt_context(
             account,
             portfolio,
@@ -335,6 +345,7 @@ def preview_prompt(
             hyperliquid_state,
             symbol_metadata=symbol_metadata_map,
             symbol_order=active_symbols,
+            sampling_interval=sampling_interval,
         )
         context["sampling_data"] = sampling_data
 
