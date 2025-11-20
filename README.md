@@ -26,22 +26,6 @@ Ready to put your AI trading strategies to work? Get started with these top exch
 
 ---
 
-## Community & Support
-
-Join our Telegram group for real-time discussions and faster triage ([join link](https://t.me/+RqxjT7Gttm9hOGEx)).
-- Report bugs (please include logs, screenshots, and steps if possible)
-- Share strategy insights or product feedback
-- Ping me about PRs/Issues so I can respond quickly
-
-Friendly reminder: Telegram is for rapid communication, but final tracking and fixes still go through GitHub Issues/Pull Requests. Never post API keys or other sensitive data in the chat.
-
-欢迎加入 Telegram 群（[点此加入](https://t.me/+RqxjT7Gttm9hOGEx)）：
-- 反馈 Bug（尽量附日志、截图、复现步骤）
-- 讨论策略或产品体验
-- PR / Issue 想要我关注可在群里提醒
-
-注意：Telegram 主要用于快速沟通，正式记录请继续使用 GitHub Issues / Pull Requests；谨记不要分享密钥等敏感信息。
-
 ## Overview
 
 Hyper Alpha Arena is a production-ready AI trading platform where Large Language Models (LLMs) autonomously execute cryptocurrency trading strategies. Inspired by [nof1 Alpha Arena](https://nof1.ai), this platform enables AI models like GPT-5, Claude, and Deepseek to make intelligent trading decisions based on real-time market data and execute trades automatically.
@@ -293,6 +277,21 @@ Please star and fork this repository to stay updated with development progress.
 - Latest updates on Hyper Alpha Arena development
 - AI trading insights and strategy discussions
 - Technical support and Q&A
+
+
+Join our ([Telegram group](https://t.me/+RqxjT7Gttm9hOGEx)) for real-time discussions and faster triage .
+- Report bugs (please include logs, screenshots, and steps if possible)
+- Share strategy insights or product feedback
+- Ping me about PRs/Issues so I can respond quickly
+
+Friendly reminder: Telegram is for rapid communication, but final tracking and fixes still go through GitHub Issues/Pull Requests. Never post API keys or other sensitive data in the chat.
+
+欢迎加入（[Telegram 群](https://t.me/+RqxjT7Gttm9hOGEx)）：
+- 反馈 Bug（尽量附日志、截图、复现步骤）
+- 讨论策略或产品体验
+- PR / Issue 想要我关注可在群里提醒
+
+注意：Telegram 主要用于快速沟通，正式记录请继续使用 GitHub Issues / Pull Requests；谨记不要分享密钥等敏感信息。
 
 ## License
 
