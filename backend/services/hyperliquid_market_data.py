@@ -112,6 +112,7 @@ class HyperliquidClient:
                 '15m': '15m',
                 '30m': '30m',
                 '1h': '1h',
+                '4h': '4h',
                 '1d': '1d',
             }
             timeframe = timeframe_map.get(period, '1d')
