@@ -194,6 +194,22 @@ def on_startup():
             db.rollback()
             print(f"[startup] Failed to ensure AI decision log snapshot columns: {migration_err}")
 
+        # Ensure global_sampling_configs has sampling_depth column (for existing installs)
+        try:
+            result = db.execute(text("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'global_sampling_configs'
+            """))
+            columns = {row[0] for row in result}
+
+            if "sampling_depth" not in columns:
+                db.execute(text("ALTER TABLE global_sampling_configs ADD COLUMN sampling_depth INTEGER NOT NULL DEFAULT 10"))
+                print("[startup] Added sampling_depth column to global_sampling_configs")
+            db.commit()
+        except Exception as migration_err:
+            db.rollback()
+            print(f"[startup] Failed to ensure global_sampling_configs.sampling_depth: {migration_err}")
+
         if db.query(TradingConfig).count() == 0:
             for cfg in DEFAULT_TRADING_CONFIGS.values():
                 db.add(
