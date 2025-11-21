@@ -62,9 +62,6 @@ class Account(Base):
     max_leverage = Column(Integer, nullable=True, default=3)  # Maximum allowed leverage
     default_leverage = Column(Integer, nullable=True, default=1)  # Default leverage for orders
 
-    # Premium Features Configuration
-    sampling_depth = Column(Integer, nullable=False, default=10)  # Sampling pool depth (10 for free, 10-60 for premium)
-
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(
         TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
