@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useAuth } from '@/contexts/AuthContext'
+import PremiumRequiredModal from '@/components/ui/PremiumRequiredModal'
 
 interface PremiumFeaturesViewProps {
   onAccountUpdated?: () => void
@@ -26,6 +27,7 @@ export default function PremiumFeaturesView({ onAccountUpdated }: PremiumFeature
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [samplingDepth, setSamplingDepth] = useState(10)
+  const [showPremiumModal, setShowPremiumModal] = useState(false)
   const [samplingInterval, setSamplingInterval] = useState(18)
   const [advancedIndicators, setAdvancedIndicators] = useState({
     momentum: false,
@@ -83,10 +85,9 @@ export default function PremiumFeaturesView({ onAccountUpdated }: PremiumFeature
         return
       }
 
-      // Check premium requirement
+      // Check premium requirement - show modal instead of direct redirect
       if (samplingDepth > 10 && !isPremium) {
-        toast.error('Premium subscription required for sampling depth > 10')
-        handleUpgradeClick()
+        setShowPremiumModal(true)
         return
       }
 
@@ -353,6 +354,18 @@ export default function PremiumFeaturesView({ onAccountUpdated }: PremiumFeature
           </section>
         </div>
       </div>
+
+      {/* Premium Required Modal */}
+      <PremiumRequiredModal
+        isOpen={showPremiumModal}
+        onClose={() => setShowPremiumModal(false)}
+        onSubscribe={() => {
+          setShowPremiumModal(false)
+          handleUpgradeClick()
+        }}
+        featureName={`Sampling Pool Depth (${samplingDepth} points)`}
+        description="Increase sampling depth to provide AI with more historical data for better trend analysis."
+      />
     </div>
   )
 }
