@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card'
 import { Button } from '../ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
@@ -32,6 +32,20 @@ export default function KlinesView({ onAccountUpdated }: KlinesViewProps) {
   const [marketData, setMarketData] = useState<MarketData[]>([])
   const [currentTask, setCurrentTask] = useState<BackfillTask | null>(null)
   const [loading, setLoading] = useState(false)
+  const [isPageVisible, setIsPageVisible] = useState(true)
+
+  const marketDataIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const taskCheckIntervalRef = useRef<NodeJS.Timeout | null>(null)
+
+  // 页面可见性监听
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      setIsPageVisible(!document.hidden)
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [])
 
   // 获取 watchlist
   useEffect(() => {
@@ -40,18 +54,44 @@ export default function KlinesView({ onAccountUpdated }: KlinesViewProps) {
 
   // 获取市场数据
   useEffect(() => {
-    if (watchlistSymbols.length > 0) {
+    if (watchlistSymbols.length > 0 && isPageVisible) {
       fetchMarketData()
-      const interval = setInterval(fetchMarketData, 30000)
-      return () => clearInterval(interval)
+      marketDataIntervalRef.current = setInterval(fetchMarketData, 60000) // 改为60秒
     }
-  }, [watchlistSymbols])
+
+    return () => {
+      if (marketDataIntervalRef.current) {
+        clearInterval(marketDataIntervalRef.current)
+        marketDataIntervalRef.current = null
+      }
+    }
+  }, [watchlistSymbols, isPageVisible])
 
   // 轮询当前任务状态
   useEffect(() => {
-    checkCurrentTask()
-    const interval = setInterval(checkCurrentTask, 2000) // 每2秒检查一次
-    return () => clearInterval(interval)
+    if (isPageVisible) {
+      checkCurrentTask()
+      taskCheckIntervalRef.current = setInterval(checkCurrentTask, 10000) // 改为10秒检查一次
+    }
+
+    return () => {
+      if (taskCheckIntervalRef.current) {
+        clearInterval(taskCheckIntervalRef.current)
+        taskCheckIntervalRef.current = null
+      }
+    }
+  }, [isPageVisible])
+
+  // 组件卸载时清理所有定时器
+  useEffect(() => {
+    return () => {
+      if (marketDataIntervalRef.current) {
+        clearInterval(marketDataIntervalRef.current)
+      }
+      if (taskCheckIntervalRef.current) {
+        clearInterval(taskCheckIntervalRef.current)
+      }
+    }
   }, [])
 
   const fetchWatchlist = async () => {
