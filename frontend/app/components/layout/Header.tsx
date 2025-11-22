@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { User, LogOut, UserCog, ExternalLink } from 'lucide-react'
+import { User, LogOut, UserCog, ExternalLink, ChevronDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -13,6 +13,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import TradingModeSwitcher from '@/components/trading/TradingModeSwitcher'
 import ExchangeModal from '@/components/exchange/ExchangeModal'
 import { useAuth } from '@/contexts/AuthContext'
+import { useCurrentExchangeInfo } from '@/contexts/ExchangeContext'
+import { EXCHANGE_STATUS_COLORS } from '@/lib/types/exchange'
 import { getSignInUrl } from '@/lib/auth'
 
 interface Account {
@@ -33,6 +35,7 @@ interface HeaderProps {
 
 export default function Header({ title = 'Hyper Alpha Arena', currentAccount, showAccountSelector = false }: HeaderProps) {
   const { user, loading, authEnabled, membership, logout } = useAuth()
+  const currentExchangeInfo = useCurrentExchangeInfo()
   const [isExchangeModalOpen, setIsExchangeModalOpen] = useState(false)
   const isVipMember = membership?.status === 'ACTIVE'
 
@@ -80,9 +83,11 @@ export default function Header({ title = 'Hyper Alpha Arena', currentAccount, sh
             onClick={() => setIsExchangeModalOpen(true)}
             className="px-3 py-2 text-sm font-medium"
           >
-            <img src="/static/exchange.png" alt="Exchange" className="mr-2 h-4 w-4" />
-            Exchanges
-            <span className="ml-1">🔥</span>
+            <span className="mr-2">🔥</span>
+            Exchanges:
+            <span className="ml-1 mr-1">{EXCHANGE_STATUS_COLORS[currentExchangeInfo.id]}</span>
+            {currentExchangeInfo.displayName}
+            <ChevronDown className="ml-2 h-3 w-3" />
           </Button>
           <span className="text-xs text-muted-foreground ml-2">Up to 30% fee discount</span>
         </div>

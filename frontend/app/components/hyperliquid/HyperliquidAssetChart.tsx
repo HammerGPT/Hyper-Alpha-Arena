@@ -30,6 +30,7 @@ import { Card } from '@/components/ui/card'
 import { getModelChartLogo, getModelColor } from '../portfolio/logoAssets'
 import FlipNumber from '../portfolio/FlipNumber'
 import type { HyperliquidEnvironment } from '@/lib/types/hyperliquid'
+import { formatDateTime } from '@/lib/dateTime'
 
 interface HyperliquidAssetData {
   timestamp: number
@@ -285,8 +286,10 @@ export default function HyperliquidAssetChart({
               interval={Math.ceil(chartData.length / 6)}
               tickFormatter={(value) => {
                 if (!value) return ''
-                const [datePart, timePart] = value.split(' ')
-                return `${datePart}\n${timePart}`
+                // Convert UTC datetime_str to local time
+                // datetime_str format: "2025-11-22 05:51:00" (UTC, no timezone suffix)
+                const isoString = value.replace(' ', 'T') + 'Z'  // Convert to ISO with UTC marker
+                return formatDateTime(isoString, { style: 'short' })
               }}
             />
             <YAxis
@@ -301,6 +304,12 @@ export default function HyperliquidAssetChart({
                 border: '1px solid #e0e0e0',
                 borderRadius: '8px',
                 boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+              }}
+              labelFormatter={(label) => {
+                if (!label) return ''
+                // Convert UTC datetime_str to local time
+                const isoString = label.replace(' ', 'T') + 'Z'
+                return formatDateTime(isoString, { style: 'medium' })
               }}
               formatter={(value: number, name: string) => [
                 `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,

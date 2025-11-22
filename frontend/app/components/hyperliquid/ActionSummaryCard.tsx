@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { RefreshCw } from 'lucide-react';
 import { getHyperliquidActionSummary } from '@/lib/hyperliquidApi';
 import type { HyperliquidActionSummary } from '@/lib/types/hyperliquid';
+import { formatTime } from '@/lib/dateTime';
 
 interface ActionSummaryCardProps {
   accountId?: number | null;
@@ -62,7 +63,7 @@ export default function ActionSummaryCard({
           <p className="text-xs text-gray-500">
             Last {windowMinutes / 60}h •{' '}
             {summary?.generatedAt
-              ? new Date(summary.generatedAt).toLocaleTimeString()
+              ? formatTime(summary.generatedAt)
               : '—'}
           </p>
         </div>
@@ -93,7 +94,7 @@ export default function ActionSummaryCard({
               <p className="font-medium">{entry.actionType}</p>
               {entry.lastOccurrence && (
                 <p className="text-xs text-gray-500">
-                  Last at {new Date(entry.lastOccurrence).toLocaleTimeString()}
+                  Last at {formatTime(entry.lastOccurrence)}
                 </p>
               )}
             </div>

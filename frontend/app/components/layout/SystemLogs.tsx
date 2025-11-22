@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { AlertCircle, Info, AlertTriangle, RefreshCw, Trash2, TrendingUp, Brain, Bug, Database } from 'lucide-react'
 import { toast } from 'react-hot-toast'
+import { formatDateTime } from '@/lib/dateTime'
 
 interface LogEntry {
   timestamp: string
@@ -194,20 +195,8 @@ useEffect(() => {
     }
   }
 
-  const formatTimestamp = (timestamp: string) => {
-    try {
-      const date = new Date(timestamp)
-      return date.toLocaleString('en-US', {
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
-      })
-    } catch {
-      return timestamp
-    }
-  }
+  // Use formatDateTime from @/lib/dateTime with 'short' style
+  const formatTimestamp = (timestamp: string) => formatDateTime(timestamp, { style: 'short' })
 
   return (
     <div className="container mx-auto p-4 space-y-4">

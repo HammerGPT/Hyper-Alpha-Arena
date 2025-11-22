@@ -218,6 +218,7 @@ class CryptoKline(Base):
     __tablename__ = "crypto_klines"
 
     id = Column(Integer, primary_key=True, index=True)
+    exchange = Column(String(20), nullable=False, default="hyperliquid", index=True)
     symbol = Column(String(20), nullable=False, index=True)
     market = Column(String(10), nullable=False, default="CRYPTO")
     period = Column(String(10), nullable=False)  # 1m, 5m, 15m, 30m, 1h, 1d
@@ -233,7 +234,7 @@ class CryptoKline(Base):
     percent = Column(DECIMAL(10, 4), nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
 
-    __table_args__ = (UniqueConstraint('symbol', 'market', 'period', 'timestamp'),)
+    __table_args__ = (UniqueConstraint('exchange', 'symbol', 'market', 'period', 'timestamp'),)
 
 
 class CryptoPriceTick(Base):
@@ -489,6 +490,74 @@ class HyperliquidExchangeAction(Base):
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
 
     account = relationship("Account")
+
+
+class PerpFunding(Base):
+    """Store perpetual contract funding rate data from multiple exchanges"""
+    __tablename__ = "perp_funding"
+
+    id = Column(Integer, primary_key=True, index=True)
+    exchange = Column(String(20), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    timestamp = Column(Integer, nullable=False, index=True)
+    funding_rate = Column(DECIMAL(18, 8), nullable=False)
+    mark_price = Column(DECIMAL(18, 6), nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+
+    __table_args__ = (UniqueConstraint('exchange', 'symbol', 'timestamp'),)
+
+
+class PriceSample(Base):
+    """Store price sampling data for persistent sampling pools"""
+    __tablename__ = "price_samples"
+
+    id = Column(Integer, primary_key=True, index=True)
+    exchange = Column(String(20), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    price = Column(DECIMAL(18, 8), nullable=False)
+    sample_time = Column(TIMESTAMP, nullable=False, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+
+    # Relationships
+    account = relationship("Account")
+
+
+class UserExchangeConfig(Base):
+    """Store user exchange selection preferences"""
+    __tablename__ = "user_exchange_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+    selected_exchange = Column(String(20), nullable=False, default="hyperliquid")
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at = Column(
+        TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
+    )
+
+    # Relationships
+    user = relationship("User")
+
+
+class KlineCollectionTask(Base):
+    """Store K-line data collection task status"""
+    __tablename__ = "kline_collection_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    exchange = Column(String(20), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    start_time = Column(TIMESTAMP, nullable=False)
+    end_time = Column(TIMESTAMP, nullable=False)
+    period = Column(String(10), nullable=False, default="1m")
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    progress = Column(Integer, nullable=False, default=0)
+    total_records = Column(Integer, default=0)
+    collected_records = Column(Integer, default=0)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at = Column(
+        TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
+    )
 
 
 # CRYPTO market trading configuration constants

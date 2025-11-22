@@ -7,6 +7,7 @@ import { getModelLogo } from './logoAssets'
 import type { HyperliquidEnvironment } from '@/lib/types/hyperliquid'
 import type { HyperliquidBalance } from '@/lib/types/hyperliquid'
 import { useTradingMode } from '@/contexts/TradingModeContext'
+import { formatDateTime } from '@/lib/dateTime'
 
 interface AccountBalance {
   accountId: number
@@ -116,7 +117,7 @@ export default function HyperliquidMultiAccountSummary({
       .reverse()[0]
 
     if (latestUpdate) {
-      setGlobalLastUpdate(new Date(latestUpdate).toLocaleString())
+      setGlobalLastUpdate(formatDateTime(latestUpdate))
     }
   }, [filteredAccounts])
 

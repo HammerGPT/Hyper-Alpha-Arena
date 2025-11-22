@@ -537,16 +537,32 @@ def _build_prompt_context(
                 position_value = float(pos.get('position_value', 0))
                 roe = float(pos.get('return_on_equity', 0))
                 funding_total = float(pos.get('cum_funding_all_time', 0))
+                liquidation_px = float(pos.get('liquidation_px', 0))
+                leverage_type = pos.get('leverage_type', 'cross') or 'cross'
+
+                # Get current market price for this symbol
+                current_price = prices.get(symbol, entry_px)
 
                 # Format values
                 pnl_str = f"+${unrealized_pnl:,.2f}" if unrealized_pnl >= 0 else f"-${abs(unrealized_pnl):,.2f}"
                 roe_str = f"+{roe:.2f}%" if roe >= 0 else f"{roe:.2f}%"
                 funding_str = f"+${funding_total:.4f}" if funding_total >= 0 else f"-${abs(funding_total):.4f}"
+                leverage_type_str = leverage_type.capitalize()
+
+                # Calculate distance to liquidation
+                if liquidation_px > 0 and current_price > 0:
+                    liq_distance_pct = abs(current_price - liquidation_px) / current_price * 100
+                    liq_warning = " ⚠️" if liq_distance_pct < 10 else ""
+                else:
+                    liq_distance_pct = 0
+                    liq_warning = ""
 
                 pos_lines.append(
-                    f"- {symbol}: {direction} {abs_size:.3f} units @ ${entry_px:,.2f} avg\n"
-                    f"  Current value: ${position_value:,.2f} | Unrealized P&L: {pnl_str} ({roe_str} ROE)\n"
-                    f"  Leverage: {leverage:.0f}x (max {max_leverage:.0f}x) | Margin used: ${margin_used:,.2f} | Funding accrual: {funding_str} total"
+                    f"- {symbol}: {direction} {abs_size:.4f} units @ ${entry_px:,.2f} avg\n"
+                    f"  Mark price: ${current_price:,.2f} | Position value: ${position_value:,.2f}\n"
+                    f"  Unrealized P&L: {pnl_str} ({roe_str} ROE)\n"
+                    f"  Leverage: {leverage:.0f}x {leverage_type_str} (max {max_leverage:.0f}x) | Margin: ${margin_used:,.2f}\n"
+                    f"  Liquidation: ${liquidation_px:,.2f} ({liq_distance_pct:.1f}% away){liq_warning} | Funding: {funding_str}"
                 )
             positions_detail = "\n".join(pos_lines)
         else:

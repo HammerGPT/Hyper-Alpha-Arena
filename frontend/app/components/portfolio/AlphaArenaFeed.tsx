@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import { getModelLogo } from './logoAssets'
 import FlipNumber from './FlipNumber'
 import HighlightWrapper from './HighlightWrapper'
+import { formatDateTime } from '@/lib/dateTime'
 
 interface AlphaArenaFeedProps {
   refreshKey?: number
@@ -33,17 +34,8 @@ const MODEL_CHAT_LIMIT = 60
 
 type CacheKey = string
 
-function formatDate(value?: string | null) {
-  if (!value) return 'N/A'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString(undefined, {
-    month: 'numeric',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
+// Use formatDateTime from @/lib/dateTime with 'short' style for compact display
+const formatDate = (value?: string | null) => formatDateTime(value, { style: 'short' })
 
 function formatPercent(value?: number | null) {
   if (value === undefined || value === null) return '—'

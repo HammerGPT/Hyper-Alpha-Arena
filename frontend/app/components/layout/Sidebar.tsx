@@ -1,4 +1,25 @@
-import { Settings, BarChart3, FileText, NotebookPen, Coins } from 'lucide-react'
+import { BarChart3, FileText, NotebookPen, Coins } from 'lucide-react'
+
+// AI Trader icon component (custom SVG)
+const AITraderIcon = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 1024 1024" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+    <path d="M946 528.156a18 18 0 0 1-18-18V102a18 18 0 0 1 36 0v408.156a18 18 0 0 1-18 18zM70 527.064a18.004 18.004 0 0 1-18-18V102a18 18 0 0 1 36 0v407.06a18.004 18.004 0 0 1-18 18.004z" fill="#6E6E96"/>
+    <path d="M27.016 680.908c0 30.928 25.072 56 56 56H930c30.928 0 56-25.072 56-56v-115.844c0-30.928-25.072-56-56-56H83.016c-30.928 0-56 25.072-56 56v115.844z" fill="#54BCE8"/>
+    <path d="M930 754.916H83.016c-40.804 0-74-33.196-74-74v-115.852c0-40.804 33.196-74 74-74H930c40.804 0 74 33.192 74 74v115.852c0 40.804-33.196 74-74 74zM83.016 527.064c-20.952 0-38 17.048-38 38v115.852c0 20.948 17.048 38 38 38H930c20.952 0 38-17.052 38-38v-115.852c0-20.952-17.048-38-38-38H83.016z" fill="#6E6E96"/>
+    <path d="M881.236 835.864c0 68.1-55.716 123.816-123.812 123.816H258.612c-68.1 0-123.816-55.716-123.816-123.816v-425.76c0-68.1 55.716-123.816 123.816-123.816h498.804c68.1 0 123.82 55.716 123.82 123.816v425.76z" fill="#7FDDFF"/>
+    <path d="M345.284 575.208m-114.972 0a114.972 114.972 0 1 0 229.944 0 114.972 114.972 0 1 0-229.944 0Z" fill="#E6E8F3"/>
+    <path d="M672.08 575.208m-114.972 0a114.972 114.972 0 1 0 229.944 0 114.972 114.972 0 1 0-229.944 0Z" fill="#E6E8F3"/>
+    <path d="M320 555.208h48.792V604H320zM647.688 555.208h48.792V604h-48.792zM374.76 782h274.484v36H374.76z" fill="#6E6E96"/>
+  </svg>
+)
+
+// K-Lines icon component (custom SVG)
+const KLinesIcon = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 1026 1024" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+    <path d="M59.733333 910.222222V51.2h-56.888889v910.222222h1024V910.222222z"/>
+    <path d="M258.844444 620.088889h56.888889v-85.333333h56.888889v-227.555556h-56.888889v-56.888889h-56.888889v56.888889h-56.888888v227.555556h56.888888zM514.844444 790.755556h56.888889v-256h56.888889v-341.333334h-56.888889v-113.777778h-56.888889v113.777778h-56.888888v341.333334h56.888888zM770.844444 705.422222h56.888889v-142.222222h56.888889v-199.111111h-56.888889v-142.222222h-56.888889v142.222222h-56.888888v199.111111h56.888888z"/>
+  </svg>
+)
 
 // Premium icon component (custom SVG)
 const PremiumIcon = ({ className }: { className?: string }) => (
@@ -31,11 +52,12 @@ export default function Sidebar({ currentPage = 'comprehensive', onPageChange, o
 
   const desktopNav = [
     { label: 'Dashboard', page: 'comprehensive', icon: BarChart3 },
-    { label: 'System Logs', page: 'system-logs', icon: FileText },
-    { label: 'Manual Trading', page: 'hyperliquid', icon: Coins },
+    { label: 'AI Trader', page: 'trader-management', icon: AITraderIcon },
     { label: 'Prompts', page: 'prompt-management', icon: NotebookPen },
-    { label: 'Settings', page: 'trader-management', icon: Settings },
+    { label: 'Manual Trading', page: 'hyperliquid', icon: Coins },
+    { label: 'K-Lines', page: 'klines', icon: KLinesIcon },
     { label: 'Premium', page: 'premium-features', icon: PremiumIcon },
+    { label: 'System Logs', page: 'system-logs', icon: FileText },
   ] as const
 
   return (
@@ -87,6 +109,18 @@ export default function Sidebar({ currentPage = 'comprehensive', onPageChange, o
           </button>
           <button
             className={`flex flex-col items-center justify-center w-12 h-12 rounded-lg transition-colors ${
+              currentPage === 'trader-management'
+                ? 'bg-secondary/80 text-secondary-foreground'
+                : 'hover:bg-muted text-muted-foreground'
+            }`}
+            onClick={() => onPageChange?.('trader-management')}
+            title="AI Trader"
+          >
+            <AITraderIcon className="w-5 h-5" />
+            <span className="text-xs mt-1">AI Trader</span>
+          </button>
+          <button
+            className={`flex flex-col items-center justify-center w-12 h-12 rounded-lg transition-colors ${
               currentPage === 'hyperliquid'
                 ? 'bg-secondary/80 text-secondary-foreground'
                 : 'hover:bg-muted text-muted-foreground'
@@ -99,27 +133,15 @@ export default function Sidebar({ currentPage = 'comprehensive', onPageChange, o
           </button>
           <button
             className={`flex flex-col items-center justify-center w-12 h-12 rounded-lg transition-colors ${
-              currentPage === 'prompt-management'
+              currentPage === 'klines'
                 ? 'bg-secondary/80 text-secondary-foreground'
                 : 'hover:bg-muted text-muted-foreground'
             }`}
-            onClick={() => onPageChange?.('prompt-management')}
-            title="Prompts"
+            onClick={() => onPageChange?.('klines')}
+            title="K-Lines"
           >
-            <NotebookPen className="w-5 h-5" />
-            <span className="text-xs mt-1">Prompts</span>
-          </button>
-          <button
-            className={`flex flex-col items-center justify-center w-12 h-12 rounded-lg transition-colors ${
-              currentPage === 'trader-management'
-                ? 'bg-secondary/80 text-secondary-foreground'
-                : 'hover:bg-muted text-muted-foreground'
-            }`}
-            onClick={() => onPageChange?.('trader-management')}
-            title="Settings"
-          >
-            <Settings className="w-5 h-5" />
-            <span className="text-xs mt-1">Settings</span>
+            <KLinesIcon className="w-5 h-5" />
+            <span className="text-xs mt-1">K-Lines</span>
           </button>
           <button
             className={`flex flex-col items-center justify-center w-12 h-12 rounded-lg transition-colors ${
@@ -132,14 +154,6 @@ export default function Sidebar({ currentPage = 'comprehensive', onPageChange, o
           >
             <PremiumIcon className="w-5 h-5" />
             <span className="text-xs mt-1">Premium</span>
-          </button>
-          <button
-            className="flex flex-col items-center justify-center w-12 h-12 rounded-lg transition-colors hover:bg-muted text-muted-foreground"
-            onClick={() => window.open(communityLink, '_blank', 'noopener,noreferrer')}
-            title="Community"
-          >
-            <CommunityIcon className="w-5 h-5" />
-            <span className="text-xs mt-1">Community</span>
           </button>
         </nav>
       </aside>

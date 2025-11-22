@@ -1,54 +1,54 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, ExternalLink } from 'lucide-react'
+import { X, ExternalLink, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useExchange } from '@/contexts/ExchangeContext'
+import { ExchangeId } from '@/lib/types/exchange'
 
 interface ExchangeModalProps {
   isOpen: boolean
   onClose: () => void
 }
 
-const exchanges = [
-  {
-    id: 'hyperliquid',
-    name: 'Hyperliquid',
-    logo: '/static/hyperliquid_logo.png',
-    status: 'active',
-    description: 'Decentralized perpetual futures exchange',
-    features: ['No KYC Required', 'Low Fees', 'High Performance'],
-    buttonText: 'Open Futures',
-    buttonVariant: 'default' as const,
-    url: 'https://app.hyperliquid.xyz/trade'
-  },
-  {
-    id: 'binance',
-    name: 'Binance',
-    logo: '/static/binance_logo.png',
-    status: 'coming-soon',
-    description: 'World\'s largest cryptocurrency exchange',
-    features: ['30% Fee Discount', 'High Liquidity', 'Advanced Tools'],
-    buttonText: 'Register First',
-    buttonVariant: 'outline' as const,
-    url: 'https://accounts.maxweb.red/register?ref=HYPERVIP'
-  },
-  {
-    id: 'aster',
-    name: 'Aster DEX',
-    logo: '/static/aster_logo.png',
-    status: 'coming-soon',
-    description: 'Binance-compatible decentralized exchange',
-    features: ['Lower Fees', 'Multi-chain Support', 'API Wallet Security'],
-    buttonText: 'Register First',
-    buttonVariant: 'outline' as const,
-    url: 'https://www.asterdex.com/zh-CN/referral/2b5924'
-  }
-]
-
 export default function ExchangeModal({ isOpen, onClose }: ExchangeModalProps) {
+  const { exchanges, currentExchange, selectExchange, isLoading } = useExchange()
+  const [selectedExchange, setSelectedExchange] = useState<ExchangeId>(currentExchange)
+  const [hasChanges, setHasChanges] = useState(false)
+
+  // Reset state when modal opens
+  React.useEffect(() => {
+    if (isOpen) {
+      setSelectedExchange(currentExchange)
+      setHasChanges(false)
+    }
+  }, [isOpen, currentExchange])
+
   if (!isOpen) return null
 
   const handleExchangeClick = (url: string) => {
     window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  const handleRadioChange = (exchangeId: ExchangeId) => {
+    const exchange = exchanges.find(ex => ex.id === exchangeId)
+    if (exchange?.selectable) {
+      setSelectedExchange(exchangeId)
+      setHasChanges(exchangeId !== currentExchange)
+    }
+  }
+
+  const handleSave = async () => {
+    if (hasChanges && selectedExchange !== currentExchange) {
+      await selectExchange(selectedExchange)
+      setHasChanges(false)
+      onClose()
+    }
+  }
+
+  const handleCancel = () => {
+    setSelectedExchange(currentExchange)
+    setHasChanges(false)
+    onClose()
   }
 
   return createPortal(
@@ -67,7 +67,7 @@ export default function ExchangeModal({ isOpen, onClose }: ExchangeModalProps) {
           <Button
             variant="ghost"
             size="sm"
-            onClick={onClose}
+            onClick={handleCancel}
             className="h-8 w-8 p-0"
           >
             <X className="h-4 w-4" />
@@ -80,19 +80,37 @@ export default function ExchangeModal({ isOpen, onClose }: ExchangeModalProps) {
             {exchanges.map((exchange) => (
               <div
                 key={exchange.id}
-                className={`relative border rounded-lg p-8 transition-all hover:shadow-md ${
-                  exchange.status === 'active'
-                    ? 'border-green-200 bg-green-50/50 dark:border-green-800 dark:bg-green-950/20'
-                    : 'border-gray-200 bg-gray-50/50 dark:border-gray-800 dark:bg-gray-950/20'
+                className={`relative border-2 rounded-lg p-8 transition-all duration-200 ${
+                  selectedExchange === exchange.id
+                    ? 'border-green-500 bg-green-50/50 dark:border-green-600 dark:bg-green-950/30 shadow-lg'
+                    : exchange.selectable
+                    ? 'border-gray-200 bg-gray-50/50 dark:border-gray-700 dark:bg-gray-950/20 cursor-pointer hover:border-green-300 hover:shadow-md'
+                    : 'border-gray-200 bg-gray-50/50 dark:border-gray-800 dark:bg-gray-950/20 opacity-60'
                 }`}
+                onClick={() => exchange.selectable && handleRadioChange(exchange.id)}
               >
+                {/* Radio Button - Moved to center top */}
+                <div className="flex justify-center mb-4">
+                  <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-200 ${
+                    selectedExchange === exchange.id
+                      ? 'border-green-500 bg-green-500 shadow-md'
+                      : exchange.selectable
+                      ? 'border-gray-400 hover:border-green-400 hover:shadow-sm'
+                      : 'border-gray-300'
+                  }`}>
+                    {selectedExchange === exchange.id && (
+                      <Check className="w-4 h-4 text-white font-bold" />
+                    )}
+                  </div>
+                </div>
+
                 {/* Status Badge */}
-                {exchange.status === 'active' && (
+                {selectedExchange === exchange.id && exchange.id === currentExchange && (
                   <div className="absolute -top-2 -right-2 bg-green-500 text-white text-xs px-2 py-1 rounded-full font-medium">
                     Active
                   </div>
                 )}
-                {exchange.status === 'coming-soon' && (
+                {exchange.comingSoon && (
                   <div className="absolute -top-2 -right-2 bg-orange-500 text-white text-xs px-2 py-1 rounded-full font-medium">
                     Coming Soon
                   </div>
@@ -126,7 +144,10 @@ export default function ExchangeModal({ isOpen, onClose }: ExchangeModalProps) {
                   <Button
                     variant={exchange.buttonVariant}
                     className="w-full mt-4 px-6 py-3 text-sm"
-                    onClick={() => handleExchangeClick(exchange.url)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleExchangeClick(exchange.referralLink)
+                    }}
                   >
                     {exchange.buttonText}
                     <ExternalLink className="ml-2 h-4 w-4" />
@@ -135,6 +156,37 @@ export default function ExchangeModal({ isOpen, onClose }: ExchangeModalProps) {
               </div>
             ))}
           </div>
+
+          {/* Bottom Action Bar */}
+          {hasChanges && (
+            <div className="mt-6 p-4 bg-yellow-50 dark:bg-yellow-950/20 rounded-lg border border-yellow-200 dark:border-yellow-800">
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <p className="text-sm text-yellow-700 dark:text-yellow-300 font-medium">
+                    Exchange Selection Changed
+                  </p>
+                  <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">
+                    Data collection and trading will switch to {exchanges.find(ex => ex.id === selectedExchange)?.displayName}
+                  </p>
+                </div>
+                <div className="flex gap-3 ml-4">
+                  <Button
+                    variant="outline"
+                    onClick={handleCancel}
+                    disabled={isLoading}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleSave}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? 'Saving...' : 'Save Changes'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Footer Note */}
           <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">

@@ -11,6 +11,7 @@ import {
   validatePrivateKey,
 } from '@/lib/hyperliquidApi';
 import type { HyperliquidEnvironment, SetupRequest } from '@/lib/types/hyperliquid';
+import { formatDateTime } from '@/lib/dateTime';
 
 interface ConfigPanelProps {
   accountId: number;
@@ -297,7 +298,7 @@ export default function ConfigPanel({ accountId, onConfigUpdated }: ConfigPanelP
 
         {lastUpdated && (
           <p className="text-xs text-gray-500">
-            Last Updated: {new Date(lastUpdated).toLocaleString()}
+            Last Updated: {formatDateTime(lastUpdated)}
           </p>
         )}
       </div>

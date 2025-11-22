@@ -89,6 +89,11 @@ def initialize_services():
         asyncio.create_task(hyperliquid_snapshot_service.start())
         logger.info("Hyperliquid snapshot service started (30-second interval)")
 
+        # Start K-line realtime collection service
+        from services.kline_realtime_collector import realtime_collector
+        asyncio.create_task(realtime_collector.start())
+        logger.info("K-line realtime collection service started (1-minute interval)")
+
         logger.info("All services initialized successfully")
 
     except Exception as e:
@@ -101,10 +106,17 @@ def shutdown_services():
     try:
         from services.scheduler import stop_scheduler
         from services.hyperliquid_snapshot_service import hyperliquid_snapshot_service
+        from services.kline_realtime_collector import realtime_collector
+        import asyncio
+
         stop_strategy_manager()
         stop_market_stream()
         unsubscribe_price_updates(handle_price_update)
         hyperliquid_snapshot_service.stop()
+
+        # Stop K-line realtime collector
+        asyncio.create_task(realtime_collector.stop())
+
         stop_scheduler()
         logger.info("All services have been shut down")
 

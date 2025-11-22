@@ -10,6 +10,7 @@ import {
   updateHyperliquidWatchlist,
 } from '@/lib/api'
 import type { HyperliquidSymbolMeta } from '@/lib/api'
+import { formatDateTime } from '@/lib/dateTime'
 
 interface StrategyConfig {
   price_threshold: number
@@ -31,18 +32,10 @@ interface StrategyPanelProps {
   accountsLoading?: boolean
 }
 
+// Use formatDateTime from @/lib/dateTime
 function formatTimestamp(value?: string | null): string {
   if (!value) return 'No executions yet'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString([], {
-    hour12: false,
-    month: 'numeric',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
+  return formatDateTime(value, { style: 'short' })
 }
 
 export default function StrategyPanel({

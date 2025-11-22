@@ -33,6 +33,16 @@ export interface HyperliquidPosition {
   marginUsed: number;
   liquidationPx: number; // liquidation price
   leverage: number;
+  // Extended fields from Hyperliquid API
+  side?: string; // 'Long' or 'Short'
+  returnOnEquity?: number; // ROE percentage
+  maxLeverage?: number; // maximum allowed leverage
+  leverageType?: string; // 'cross' or 'isolated'
+  cumFundingAllTime?: number; // total cumulative funding
+  cumFundingSinceOpen?: number; // funding since position opened
+  notional?: number; // notional value
+  percentage?: number; // portfolio percentage
+  marginMode?: string; // margin mode
 }
 
 export interface HyperliquidPositionsResponse {

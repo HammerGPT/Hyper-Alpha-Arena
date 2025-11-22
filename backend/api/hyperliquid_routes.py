@@ -1120,6 +1120,8 @@ async def set_trading_mode(
         raise HTTPException(status_code=500, detail=f"Failed to set trading mode: {str(e)}")
 
 
+
+
 @router.get("/wallets/all")
 async def get_all_wallets(db: Session = Depends(get_db)):
     """

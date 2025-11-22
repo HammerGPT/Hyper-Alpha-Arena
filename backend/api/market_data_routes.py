@@ -144,12 +144,12 @@ async def get_crypto_kline(
         Response containing K-line data
     """
     try:
-        # Parameter validation - xueqiu supported time periods
-        valid_periods = ['1m', '5m', '15m', '30m', '1h', '1d']
+        # Parameter validation - Hyperliquid supported time periods
+        valid_periods = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '1d', '3d', '1w', '1M']
         if period not in valid_periods:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported time period, xueqiu supported periods: {', '.join(valid_periods)}"
+                detail=f"Unsupported time period, supported periods: {', '.join(valid_periods)}"
             )
             
         if count <= 0 or count > 500:
@@ -161,9 +161,16 @@ async def get_crypto_kline(
         # Convert data format
         kline_items = []
         for item in kline_data:
+            # Handle datetime - may be string or datetime object
+            dt_value = item.get('datetime')
+            if dt_value is not None:
+                dt_str = dt_value.isoformat() if hasattr(dt_value, 'isoformat') else str(dt_value)
+            else:
+                dt_str = None
+
             kline_items.append(KlineItem(
                 timestamp=item.get('timestamp'),
-                datetime=item.get('datetime').isoformat() if item.get('datetime') else None,
+                datetime=dt_str,
                 open=item.get('open'),
                 high=item.get('high'),
                 low=item.get('low'),

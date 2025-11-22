@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { RefreshCw, TrendingUp, AlertTriangle } from 'lucide-react';
 import { getHyperliquidBalance, calculateMarginUsageColor } from '@/lib/hyperliquidApi';
 import type { HyperliquidBalance } from '@/lib/types/hyperliquid';
+import { formatDateTime } from '@/lib/dateTime';
 
 interface BalanceCardProps {
   accountId: number;
@@ -115,7 +116,7 @@ export default function BalanceCard({
   const marginStatus = getMarginStatus(balance.marginUsagePercent);
   const StatusIcon = marginStatus.icon;
   const lastUpdatedLabel = balance.lastUpdated
-    ? new Date(balance.lastUpdated).toLocaleString()
+    ? formatDateTime(balance.lastUpdated)
     : null;
 
   return (

@@ -17,7 +17,6 @@ window.addEventListener('unhandledrejection', (event) => {
 let __WS_SINGLETON__: WebSocket | null = null;
 
 const resolveWsUrl = () => {
-  if (typeof window === 'undefined') return 'ws://localhost:5611/ws'
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${protocol}//${window.location.host}/ws`
 }
@@ -32,11 +31,13 @@ import TraderManagement from '@/components/trader/TraderManagement'
 import { HyperliquidPage } from '@/components/hyperliquid'
 import HyperliquidView from '@/components/hyperliquid/HyperliquidView'
 import PremiumFeaturesView from '@/components/premium/PremiumFeaturesView'
+import KlinesView from '@/components/klines/KlinesView'
 // Remove CallbackPage import - handle inline
 import { AIDecision, getAccounts } from '@/lib/api'
 import { ArenaDataProvider } from '@/contexts/ArenaDataContext'
 import { TradingModeProvider, useTradingMode } from '@/contexts/TradingModeContext'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
+import { ExchangeProvider } from '@/contexts/ExchangeContext'
 
 interface User {
   id: number
@@ -72,6 +73,7 @@ const PAGE_TITLES: Record<string, string> = {
   'prompt-management': 'Prompt Templates',
   'trader-management': 'AI Trader Management',
   'hyperliquid': 'Hyperliquid Trading',
+  'klines': 'K-Line Charts',
   'premium-features': 'Premium Features',
 }
 
@@ -585,6 +587,10 @@ function App() {
           <HyperliquidPage accountId={account?.id || 1} />
         )}
 
+        {currentPage === 'klines' && (
+          <KlinesView onAccountUpdated={handleAccountUpdated} />
+        )}
+
         {currentPage === 'premium-features' && (
           <PremiumFeaturesView onAccountUpdated={handleAccountUpdated} />
         )}
@@ -616,12 +622,14 @@ function App() {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <AuthProvider>
-      <TradingModeProvider>
-        <ArenaDataProvider>
-          <Toaster position="top-right" />
-          <App />
-        </ArenaDataProvider>
-      </TradingModeProvider>
+      <ExchangeProvider>
+        <TradingModeProvider>
+          <ArenaDataProvider>
+            <Toaster position="top-right" />
+            <App />
+          </ArenaDataProvider>
+        </TradingModeProvider>
+      </ExchangeProvider>
     </AuthProvider>
   </React.StrictMode>,
 )

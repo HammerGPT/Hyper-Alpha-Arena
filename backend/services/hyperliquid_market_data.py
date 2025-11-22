@@ -97,29 +97,36 @@ class HyperliquidClient:
             # Silently return False for invalid symbols during validation
             return False
 
-    def get_kline_data(self, symbol: str, period: str = '1d', count: int = 100) -> List[Dict[str, Any]]:
+    def get_kline_data(self, symbol: str, period: str = '1d', count: int = 100, persist: bool = True) -> List[Dict[str, Any]]:
         """Get kline/candlestick data for a symbol"""
         try:
             if not self.exchange:
                 self._initialize_exchange()
-            
+
             formatted_symbol = self._format_symbol(symbol)
-            
-            # Map period to CCXT timeframe
+
+            # Map period to CCXT timeframe (Hyperliquid supported)
             timeframe_map = {
                 '1m': '1m',
-                '5m': '5m', 
+                '3m': '3m',
+                '5m': '5m',
                 '15m': '15m',
                 '30m': '30m',
                 '1h': '1h',
+                '2h': '2h',
                 '4h': '4h',
+                '8h': '8h',
+                '12h': '12h',
                 '1d': '1d',
+                '3d': '3d',
+                '1w': '1w',
+                '1M': '1M',
             }
             timeframe = timeframe_map.get(period, '1d')
-            
+
             # Fetch OHLCV data
             ohlcv = self.exchange.fetch_ohlcv(formatted_symbol, timeframe, limit=count)
-            
+
             # Convert to our format
             klines = []
             for candle in ohlcv:
@@ -129,30 +136,60 @@ class HyperliquidClient:
                 low_price = candle[3]
                 close_price = candle[4]
                 volume = candle[5]
-                
+
                 # Calculate change
                 change = close_price - open_price if open_price else 0
                 percent = (change / open_price * 100) if open_price else 0
-                
+
                 klines.append({
                     'timestamp': int(timestamp_ms / 1000),  # Convert to seconds
-                    'datetime_str': datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat(),
+                    'datetime': datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat(),
                     'open': float(open_price) if open_price else None,
                     'high': float(high_price) if high_price else None,
                     'low': float(low_price) if low_price else None,
                     'close': float(close_price) if close_price else None,
                     'volume': float(volume) if volume else None,
                     'amount': float(volume * close_price) if volume and close_price else None,
-                    'change': float(change),
+                    'chg': float(change),
                     'percent': float(percent),
                 })
-            
+
+            # Auto-persist data to database (边用边存)
+            if persist and klines:
+                try:
+                    self._persist_kline_data(symbol, period, klines)
+                except Exception as persist_error:
+                    logger.warning(f"Failed to persist kline data for {symbol}: {persist_error}")
+
             logger.info(f"Got {len(klines)} klines for {formatted_symbol}")
             return klines
-            
+
         except Exception as e:
             logger.error(f"Error fetching klines for {symbol}: {e}")
             return []
+
+    def _persist_kline_data(self, symbol: str, period: str, klines: List[Dict[str, Any]]):
+        """Persist kline data to database"""
+        try:
+            from database.connection import SessionLocal
+            from repositories.kline_repo import KlineRepository
+
+            db = SessionLocal()
+            try:
+                kline_repo = KlineRepository(db)
+                result = kline_repo.save_kline_data(
+                    symbol=symbol,
+                    market="CRYPTO",
+                    period=period,
+                    kline_data=klines,
+                    exchange="hyperliquid"
+                )
+                logger.debug(f"Persisted {result['total']} kline records for {symbol} {period}")
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"Error persisting kline data: {e}")
+            raise
 
     def get_market_status(self, symbol: str) -> Dict[str, Any]:
         """Get market status for a symbol"""
@@ -248,9 +285,9 @@ def get_last_price_from_hyperliquid(symbol: str) -> Optional[float]:
     return hyperliquid_client.get_last_price(symbol)
 
 
-def get_kline_data_from_hyperliquid(symbol: str, period: str = '1d', count: int = 100) -> List[Dict[str, Any]]:
+def get_kline_data_from_hyperliquid(symbol: str, period: str = '1d', count: int = 100, persist: bool = True) -> List[Dict[str, Any]]:
     """Get kline data from Hyperliquid"""
-    return hyperliquid_client.get_kline_data(symbol, period, count)
+    return hyperliquid_client.get_kline_data(symbol, period, count, persist)
 
 
 def get_market_status_from_hyperliquid(symbol: str) -> Dict[str, Any]:

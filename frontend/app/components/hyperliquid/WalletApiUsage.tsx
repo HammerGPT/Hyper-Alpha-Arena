@@ -4,6 +4,7 @@ import { RefreshCw, AlertTriangle, Info } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getWalletRateLimit } from '@/lib/hyperliquidApi';
 import type { HyperliquidEnvironment } from '@/lib/types/hyperliquid';
+import { formatDateTime } from '@/lib/dateTime';
 
 interface WalletApiUsageProps {
   accountId: number;
@@ -187,7 +188,7 @@ export default function WalletApiUsage({ accountId, environment }: WalletApiUsag
           {/* Last Update Time */}
           {lastUpdateTime && (
             <p className="text-xs text-gray-500 text-center">
-              Last updated: {lastUpdateTime.toLocaleString()}
+              Last updated: {formatDateTime(lastUpdateTime)}
             </p>
           )}
         </div>

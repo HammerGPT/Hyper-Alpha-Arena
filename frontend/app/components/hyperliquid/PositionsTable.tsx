@@ -22,6 +22,7 @@ import {
 } from '@/lib/hyperliquidApi';
 import type { PositionDisplay } from '@/lib/types/hyperliquid';
 import { cn } from '@/lib/utils';
+import { formatTime } from '@/lib/dateTime';
 
 interface PositionsTableProps {
   accountId: number;
@@ -163,7 +164,7 @@ export default function PositionsTable({
           </div>
           {lastUpdated && (
             <div className="text-xs text-gray-400 text-right">
-              Last update: {new Date(lastUpdated).toLocaleTimeString()}
+              Last update: {formatTime(lastUpdated)}
             </div>
           )}
 
@@ -196,7 +197,8 @@ export default function PositionsTable({
                 <TableHead>Type</TableHead>
                 <TableHead className="text-right">Size</TableHead>
                 <TableHead className="text-right">Entry</TableHead>
-                <TableHead className="text-right">Current</TableHead>
+                <TableHead className="text-right">Mark</TableHead>
+                <TableHead className="text-right">Value</TableHead>
                 <TableHead className="text-right">Unrealized P&L</TableHead>
                 <TableHead className="text-right">Liq. Price</TableHead>
                 <TableHead className="text-center">Leverage</TableHead>
@@ -213,6 +215,8 @@ export default function PositionsTable({
                 const positionValue = position.positionValue ?? 0;
                 const liquidationPx = position.liquidationPx ?? 0;
                 const sizeAbs = position.sizeAbs ?? 0;
+                // Calculate current mark price from position value and size
+                const markPrice = sizeAbs > 0 ? positionValue / sizeAbs : entryPx;
 
                 return (
                   <TableRow key={positionId}>
@@ -234,10 +238,13 @@ export default function PositionsTable({
                       {sizeAbs.toFixed(4)}
                     </TableCell>
                     <TableCell className="text-right">
-                      ${entryPx.toFixed(2)}
+                      ${entryPx.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </TableCell>
                     <TableCell className="text-right">
-                      ${positionValue.toFixed(2)}
+                      ${markPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      ${positionValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </TableCell>
                     <TableCell className={`text-right ${pnl.color}`}>
                       <div>
@@ -248,7 +255,7 @@ export default function PositionsTable({
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
-                      ${liquidationPx.toFixed(2)}
+                      ${liquidationPx.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </TableCell>
                     <TableCell className="text-center">
                       <Badge variant="outline">

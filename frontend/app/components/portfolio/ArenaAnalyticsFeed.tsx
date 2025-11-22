@@ -8,6 +8,7 @@ import {
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { getModelLogo } from './logoAssets'
+import { formatDateTime } from '@/lib/dateTime'
 
 interface ArenaAnalyticsFeedProps {
   refreshKey?: number
@@ -57,17 +58,8 @@ function formatDecimal(value?: number | null, fractionDigits = 2) {
   return value.toFixed(fractionDigits)
 }
 
-function formatDate(value?: string | null) {
-  if (!value) return 'N/A'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString(undefined, {
-    month: 'numeric',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
+// Use formatDateTime from @/lib/dateTime with 'short' style for compact display
+const formatDate = (value?: string | null) => formatDateTime(value, { style: 'short' })
 
 function getTrendColor(value?: number | null) {
   if (value === undefined || value === null) return 'text-foreground'
