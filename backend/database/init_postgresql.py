@@ -125,6 +125,61 @@ def create_postgres_user_and_databases():
         return False
 
 
+def apply_required_migrations():
+    """Apply required migrations for new installations"""
+    try:
+        from database.connection import engine
+        from sqlalchemy import inspect
+        import importlib.util
+        import os
+
+        # Check if migrations are needed
+        inspector = inspect(engine)
+
+        # Check if crypto_klines table exists and has exchange column
+        if 'crypto_klines' in inspector.get_table_names():
+            columns = inspector.get_columns('crypto_klines')
+            column_names = [col['name'] for col in columns]
+
+            if 'exchange' not in column_names:
+                logger.info("Applying required migrations for new installation...")
+
+                # List of critical migrations for new installations
+                migrations_dir = os.path.join(os.path.dirname(__file__), 'migrations')
+                required_migrations = [
+                    'create_perp_funding_table.py',
+                    'create_price_samples_table.py',
+                    'add_kline_collection_system.py',
+                    'add_user_exchange_config.py',
+                    'add_exchange_to_crypto_klines.py'
+                ]
+
+                for migration_file in required_migrations:
+                    migration_path = os.path.join(migrations_dir, migration_file)
+                    if os.path.exists(migration_path):
+                        logger.info(f"Applying migration: {migration_file}")
+
+                        # Load and execute migration
+                        spec = importlib.util.spec_from_file_location("migration", migration_path)
+                        migration_module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(migration_module)
+                        migration_module.upgrade()
+
+                        logger.info(f"✓ Migration {migration_file} completed")
+                    else:
+                        logger.warning(f"Migration file not found: {migration_file}")
+
+                logger.info("✓ All required migrations applied successfully")
+            else:
+                logger.info("✓ Database schema is up to date")
+
+        return True
+
+    except Exception as e:
+        logger.error(f"❌ Failed to apply migrations: {e}")
+        return False
+
+
 def create_tables():
     """Create all tables in the databases"""
     try:
@@ -138,6 +193,10 @@ def create_tables():
         logger.info("Creating main database tables...")
         Base.metadata.create_all(bind=engine)
         logger.info("✓ Main database tables created successfully")
+
+        # Apply required migrations for new installations
+        if not apply_required_migrations():
+            return False
 
         # Create snapshot database tables
         logger.info("Creating snapshot database tables...")
