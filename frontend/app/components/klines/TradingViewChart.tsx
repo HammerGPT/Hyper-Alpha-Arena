@@ -140,6 +140,8 @@ export default function TradingViewChart({ symbol, period, data = [], onLoadMore
           borderColor: 'rgba(156, 163, 175, 0.2)',
           timeVisible: true,
           secondsVisible: false,
+          barSpacing: 9,
+          rightBarStaysOnScroll: false,
         },
         pane: {
           separatorColor: 'rgba(156, 163, 175, 0.3)',
@@ -220,7 +222,7 @@ export default function TradingViewChart({ symbol, period, data = [], onLoadMore
       const volumeData = chartData.map(item => ({
         time: item.time,
         value: item.volume || 0,
-        color: item.close >= item.open ? '#22c55e40' : '#ef444440',
+        color: item.close >= item.open ? '#22c55e' : '#ef4444',
       }))
 
       // 移动平均线数据
@@ -235,9 +237,7 @@ export default function TradingViewChart({ symbol, period, data = [], onLoadMore
       if (ma10SeriesRef.current) ma10SeriesRef.current.setData(ma10Data)
       if (ma20SeriesRef.current) ma20SeriesRef.current.setData(ma20Data)
 
-      if (chartRef.current) {
-        chartRef.current.timeScale().fitContent()
-      }
+      // 移除fitContent，让用户自由控制缩放和滚动
     }
   }, [chartData, chartType])
 

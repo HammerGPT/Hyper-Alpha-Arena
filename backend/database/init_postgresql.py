@@ -137,41 +137,58 @@ def apply_required_migrations():
         inspector = inspect(engine)
 
         # Check if crypto_klines table exists and has exchange column
+        migrations_needed = False
+
         if 'crypto_klines' in inspector.get_table_names():
             columns = inspector.get_columns('crypto_klines')
             column_names = [col['name'] for col in columns]
 
             if 'exchange' not in column_names:
-                logger.info("Applying required migrations for new installation...")
+                logger.info("Detected missing 'exchange' column in crypto_klines table")
+                migrations_needed = True
+            else:
+                logger.info("✓ crypto_klines table has required 'exchange' column")
+        else:
+            logger.info("crypto_klines table not found, migrations will be needed after table creation")
+            migrations_needed = True
 
-                # List of critical migrations for new installations
-                migrations_dir = os.path.join(os.path.dirname(__file__), 'migrations')
-                required_migrations = [
-                    'create_perp_funding_table.py',
-                    'create_price_samples_table.py',
-                    'add_kline_collection_system.py',
-                    'add_user_exchange_config.py',
-                    'add_exchange_to_crypto_klines.py'
-                ]
+        # Apply migrations if needed
+        if migrations_needed:
+            logger.info("Applying required database migrations...")
 
-                for migration_file in required_migrations:
-                    migration_path = os.path.join(migrations_dir, migration_file)
-                    if os.path.exists(migration_path):
-                        logger.info(f"Applying migration: {migration_file}")
+            # List of critical migrations
+            migrations_dir = os.path.join(os.path.dirname(__file__), 'migrations')
+            required_migrations = [
+                'create_perp_funding_table.py',
+                'create_price_samples_table.py',
+                'add_kline_collection_system.py',
+                'add_user_exchange_config.py',
+                'add_exchange_to_crypto_klines.py'
+            ]
 
+            for migration_file in required_migrations:
+                migration_path = os.path.join(migrations_dir, migration_file)
+                if os.path.exists(migration_path):
+                    logger.info(f"Applying migration: {migration_file}")
+
+                    try:
                         # Load and execute migration
                         spec = importlib.util.spec_from_file_location("migration", migration_path)
                         migration_module = importlib.util.module_from_spec(spec)
                         spec.loader.exec_module(migration_module)
                         migration_module.upgrade()
 
-                        logger.info(f"✓ Migration {migration_file} completed")
-                    else:
-                        logger.warning(f"Migration file not found: {migration_file}")
+                        logger.info(f"✓ Migration {migration_file} completed successfully")
+                    except Exception as e:
+                        logger.error(f"❌ Migration {migration_file} failed: {e}")
+                        # Continue with other migrations instead of failing completely
+                        continue
+                else:
+                    logger.warning(f"Migration file not found: {migration_file}")
 
-                logger.info("✓ All required migrations applied successfully")
-            else:
-                logger.info("✓ Database schema is up to date")
+            logger.info("✓ Database migration process completed")
+        else:
+            logger.info("✓ Database schema is up to date")
 
         return True
 
