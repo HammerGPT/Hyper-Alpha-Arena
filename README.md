@@ -14,7 +14,7 @@ Ready to put your AI trading strategies to work? Get started with these top exch
 ### 🚀 **Hyperliquid** - Decentralized Perpetual Exchange
 - **No KYC Required** | **Low Fees** | **High Performance**
 - Direct integration with Hyper Alpha Arena
-- [**Open Futures Trading →**](https://app.hyperliquid.xyz/trade)
+- [**Open Futures Trading →**](https://app.hyperliquid.xyz/join/HYPERSVIP)
 
 ### 💰 **Binance** - World's Largest Exchange
 - **30% Fee Discount** | **High Liquidity** | **Advanced Tools**
