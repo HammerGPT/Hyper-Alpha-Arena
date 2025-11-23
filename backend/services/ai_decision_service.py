@@ -19,6 +19,10 @@ from services.news_feed import fetch_latest_news
 from repositories.strategy_repo import set_last_trigger
 from services.system_logger import system_logger
 from repositories import prompt_repo
+from services.sampling_pool import SamplingPool
+from services.market_data import get_kline_data
+import pandas as pd
+from stockstats import StockDataFrame
 
 
 logger = logging.getLogger(__name__)
@@ -261,7 +265,7 @@ def _build_sampling_data(samples: Optional[List], target_symbol: Optional[str], 
     return "\n".join(lines)
 
 
-def _build_multi_symbol_sampling_data(symbols: List[str], sampling_pool, sampling_interval: Optional[int] = None) -> str:
+def _build_multi_symbol_sampling_data(symbols: List[str], sampling_pool : SamplingPool, sampling_interval: Optional[int] = None) -> str:
     """Build sampling pool data for multiple symbols (Alpha Arena style)"""
     if not symbols:
         return "No symbols selected for sampling data."
@@ -308,6 +312,203 @@ def _build_multi_symbol_sampling_data(symbols: List[str], sampling_pool, samplin
                 lines.append(f"Range: ${first_price:.6f} → ${last_price:.6f}")
 
         sections.append("\n".join(lines))
+
+        # Fetch kline data for multiple timeframes
+        kline_data_1m = get_kline_data(symbol, "CRYPTO", "1m", 60)  # 1h
+        kline_data_15m = get_kline_data(symbol, "CRYPTO", "15m", 48) # 12 h
+        kline_data_1h = get_kline_data(symbol, "CRYPTO", "1h", 48) # 2 day
+        kline_data_4h = get_kline_data(symbol, "CRYPTO", "4h", 42) # 1week
+        kline_data_1d = get_kline_data(symbol, "CRYPTO", "1d", 31) # 1month
+
+        # Build unified kline structure with multiple timeframes
+        kline_struct = {
+            "fields": ["timestamp", "open", "high", "low", "close", "volume", "change", "percent", "datetime_str"],
+            "timeframes": {}
+        }
+
+        # Add 1-minute data (last 5 samples)
+        if kline_data_1m:
+            kline_1m_data = []
+            for sample in kline_data_1m[-5:]:
+                kline_1m_data.append([
+                    sample.get('timestamp', 'N/A'),
+                    sample.get('open'),
+                    sample.get('high'),
+                    sample.get('low'),
+                    sample.get('close'),
+                    sample.get('volume'),
+                    sample.get('change'),
+                    sample.get('percent'),
+                    sample.get('datetime_str', 'N/A')
+                ])
+            kline_struct["timeframes"]["1m"] = kline_1m_data
+        else:
+            kline_struct["timeframes"]["1m"] = "No data available"
+
+        if kline_data_15m:
+            kline_15m_data = []
+            for sample in kline_data_15m[-5:]:
+                kline_15m_data.append([
+                    sample.get('timestamp', 'N/A'),
+                    sample.get('open'),
+                    sample.get('high'),
+                    sample.get('low'),
+                    sample.get('close'),
+                    sample.get('volume'),
+                    sample.get('change'),
+                    sample.get('percent'),
+                    sample.get('datetime_str', 'N/A')
+                ])
+            kline_struct["timeframes"]["15m"] = kline_15m_data
+        else:
+            kline_struct["timeframes"]["15m"] = "No data available"
+
+        # Add 1-hour data (last 5 samples)
+        if kline_data_1h:
+            kline_1h_data = []
+            for sample in kline_data_1h[-5:]:
+                kline_1h_data.append([
+                    sample.get('timestamp', 'N/A'),
+                    sample.get('open'),
+                    sample.get('high'),
+                    sample.get('low'),
+                    sample.get('close'),
+                    sample.get('volume'),
+                    sample.get('change'),
+                    sample.get('percent'),
+                    sample.get('datetime_str', 'N/A')
+                ])
+            kline_struct["timeframes"]["1h"] = kline_1h_data
+        else:
+            kline_struct["timeframes"]["1h"] = "No data available"
+
+        # Add 4-hour data (last 5 samples)
+        if kline_data_4h:
+            kline_4h_data = []
+            for sample in kline_data_4h[-5:]:
+                kline_4h_data.append([
+                    sample.get('timestamp', 'N/A'),
+                    sample.get('open'),
+                    sample.get('high'),
+                    sample.get('low'),
+                    sample.get('close'),
+                    sample.get('volume'),
+                    sample.get('change'),
+                    sample.get('percent'),
+                    sample.get('datetime_str', 'N/A')
+                ])
+            kline_struct["timeframes"]["4h"] = kline_4h_data
+        else:
+            kline_struct["timeframes"]["4h"] = "No data available"
+
+        if kline_data_1d:
+            kline_1d_data = []
+            for sample in kline_data_1d[-5:]:
+                kline_1d_data.append([
+                    sample.get('timestamp', 'N/A'),
+                    sample.get('open'),
+                    sample.get('high'),
+                    sample.get('low'),
+                    sample.get('close'),
+                    sample.get('volume'),
+                    sample.get('change'),
+                    sample.get('percent'),
+                    sample.get('datetime_str', 'N/A')
+                ])
+            kline_struct["timeframes"]["1d"] = kline_1d_data
+        else:
+            kline_struct["timeframes"]["1d"] = "No data available"
+
+
+        # Build kline section with unified structure
+        kline_lines = [
+            f"{symbol} Multi-Timeframe Kline Data:",
+            "Kline data has been packaged into a unified structure called kline_struct.",
+            "",
+            "Structure:",
+            "- fields: Common fields for all timeframes [timestamp, open, high, low, close, volume, change, percent, datetime_str]",
+            "- timeframes: Contains data for different intervals",
+            "  - 1m: Last 5 samples of 1-minute interval data",
+            "  - 15m: Last 5 samples of 15-minute interval data",
+            "  - 1h: Last 5 samples of 1-hour interval data",
+            "  - 4h: Last 5 samples of 4-hour interval data",
+            "  - 1d: Last 5 samples of 1-day interval data",
+            "",
+            "Field Meanings:",
+            "- timestamp: Unix timestamp",
+            "- open: Opening price",
+            "- high: Highest price",
+            "- low: Lowest price",
+            "- close: Closing price",
+            "- volume: Trading volume",
+            "- change: Price change",
+            "- percent: Price change percentage",
+            "- datetime_str: Human-readable datetime",
+            "",
+            "Please analyze based on kline_struct (multi-timeframe analysis).",
+            f"kline_struct: {json.dumps(kline_struct, ensure_ascii=False)}"
+        ]
+
+        sections.append("\n".join(kline_lines))
+
+        # Continue with technical indicators if 4h data is available
+        if not kline_data_4h:
+            sections.append(f"{symbol}: No 4-hour kline data available for technical indicator calculation")
+            continue
+
+        # Build multi-timeframe indicators structure
+        indicators_struct = {
+            "fields": ["EMA20", "EMA50", "MACD", "RSI7", "RSI14", "ATR3", "ATR14", "Volume"],
+            "timeframes": {}
+        }
+
+        # Calculate indicators for each timeframe
+        for tf_name, tf_data in [("1m", kline_data_1m), ("15m", kline_data_15m), ("1h", kline_data_1h), ("4h", kline_data_4h), ("1d", kline_data_1d),]:
+            indicators_data, events = _calculate_indicators(tf_data, num_samples=5)
+            if indicators_data is not None:
+                indicators_struct["timeframes"][tf_name] = {
+                    "data": indicators_data,
+                    "events": events
+                }
+            else:
+                indicators_struct["timeframes"][tf_name] = "No data available"
+
+        # Build indicators section
+        lines_indicators = [
+            f"{symbol} Multi-Timeframe Technical Indicators:",
+            "Technical indicators have been calculated for multiple timeframes.",
+            "",
+            "Structure:",
+            "- fields: Common indicator fields [EMA20, EMA50, MACD, RSI7, RSI14, ATR3, ATR14, Volume]",
+            "- timeframes: Contains indicator data for different intervals",
+            "  - 1m: Last 5 samples of 1-minute indicators + detected events",
+            "  - 15m: Last 5 samples of 15-minute indicators + detected events",
+            "  - 1h: Last 5 samples of 1-hour indicators + detected events",
+            "  - 4h: Last 5 samples of 4-hour indicators + detected events",
+            "  - 1day: Last 5 samples of 1-day indicators + detected events",
+            "",
+            "Field Meanings:",
+            "- EMA20: 20-period exponential moving average",
+            "- EMA50: 50-period exponential moving average",
+            "- MACD: Moving average convergence divergence",
+            "- RSI7: 7-period relative strength index",
+            "- RSI14: 14-period relative strength index",
+            "- ATR3: 3-period average true range",
+            "- ATR14: 14-period average true range",
+            "- Volume: Trading volume",
+            "",
+            "Key Technical Events Detected (per timeframe):",
+            "- Golden/Death Cross: EMA crossovers",
+            "- MACD Signals: Zero line crossovers",
+            "- RSI Extremes: Overbought (>70) or Oversold (<30)",
+            "- Volume Anomalies: Unusual volume spikes",
+            "- Breakouts: Price breaking key support/resistance levels",
+            "",
+            "Please analyze based on indicators_struct (multi-timeframe analysis for trend confirmation).",
+            f"indicators_struct: {json.dumps(indicators_struct, ensure_ascii=False)}"
+        ]
+
+        sections.append("\n".join(lines_indicators))
 
     return "\n\n".join(sections)
 
@@ -1409,3 +1610,115 @@ def get_active_ai_accounts(db: Session) -> List[Account]:
         return []
         
     return valid_accounts
+
+# Helper function to calculate indicators for a timeframe
+def _calculate_indicators(kline_data:  List[Dict[str, Any]], num_samples: int = 5):
+        if not kline_data:
+            return None, []
+        
+        data = []
+        for sample in kline_data:
+            data.append({
+                'date': sample.get('timestamp', ''),
+                'open': sample.get('open'),
+                'high': sample.get('high'),
+                'low': sample.get('low'),
+                'close': sample.get('close'),
+                'volume': sample.get('volume')
+            })
+        
+        df = pd.DataFrame(data)
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.sort_values('date')
+        
+        stock_df = StockDataFrame.retype(df)
+        
+        # Trigger indicator calculations
+        stock_df['close_20_ema'] = stock_df['close_20_ema']
+        stock_df['close_50_ema'] = stock_df['close_50_ema']
+        stock_df['macd'] = stock_df['macd']
+        stock_df['rsi_7'] = stock_df['rsi_7']
+        stock_df['rsi_14'] = stock_df['rsi_14']
+        stock_df['atr_3'] = stock_df['atr_3']
+        stock_df['atr_14'] = stock_df['atr_14']
+        
+        recent_df = stock_df.tail(num_samples)
+        
+        indicators_data = []
+        for i in range(len(recent_df)):
+            idx = len(recent_df) - i - 1
+            row = recent_df.iloc[idx]
+            indicators_data.append([
+                row.get('close_20_ema'),
+                row.get('close_50_ema'),
+                row.get('macd'),
+                row.get('rsi_7'),
+                row.get('rsi_14'),
+                row.get('atr_3'),
+                row.get('atr_14'),
+                row.get('volume'),
+            ])
+        
+        events = _build_market_event(stock_df)
+        
+        return indicators_data, events
+
+def _build_market_event(stock_df: pd.DataFrame) -> [str]:
+    events = []  
+    # Check if we have enough data for event detection (at least 2 periods)
+    if len(stock_df) >= 2:
+        current = stock_df.iloc[-1]
+        previous = stock_df.iloc[-2]
+        
+        # 1. Golden Cross / Death Cross (EMA20 vs EMA50)
+        ema20_curr = current.get('close_20_ema')
+        ema50_curr = current.get('close_50_ema')
+        ema20_prev = previous.get('close_20_ema')
+        ema50_prev = previous.get('close_50_ema')
+        
+        if ema20_prev < ema50_prev and ema20_curr > ema50_curr:
+            events.append("Golden Cross: EMA20 crossed above EMA50 (bullish)")
+        elif ema20_prev > ema50_prev and ema20_curr < ema50_curr:
+            events.append("Death Cross: EMA20 crossed below EMA50 (bearish)")
+        
+        # 2. MACD Signal (MACD crossing zero line)
+        macd_curr = current.get('macd')
+        macd_prev = previous.get('macd')
+        
+        if macd_prev < 0 and macd_curr > 0:
+            events.append("MACD Golden Cross: MACD crossed above zero (bullish)")
+        elif macd_prev > 0 and macd_curr < 0:
+            events.append("MACD Death Cross: MACD crossed below zero (bearish)")
+        
+        # 3. RSI Overbought/Oversold
+        rsi7_curr = current.get('rsi_7')
+        rsi14_curr = current.get('rsi_14')
+        
+        if rsi7_curr > 70 or rsi14_curr > 70:
+            events.append(f"RSI Overbought: RSI7={rsi7_curr:.1f}, RSI14={rsi14_curr:.1f} (>70, potential reversal)")
+        elif rsi7_curr < 30 or rsi14_curr < 30:
+            events.append(f"RSI Oversold: RSI7={rsi7_curr:.1f}, RSI14={rsi14_curr:.1f} (<30, potential reversal)")
+        
+        # 4. Volume Spike (volume > 2x average of last 10 periods)
+        if len(stock_df) >= 10:
+            vol_curr = current.get('volume')
+            vol_avg = stock_df['volume'].iloc[-10:].mean()
+            
+            if vol_curr > 2 * vol_avg:
+                events.append(f"Volume Spike: Current volume {vol_curr:.0f} is {vol_curr/vol_avg:.1f}x average (abnormal activity)")
+        
+        # 5. Price Breakout (checking against recent highs/lows)
+        if len(stock_df) >= 20:
+            close_curr = current.get('close')
+            high_20 = stock_df['high'].iloc[-20:-1].max()
+            low_20 = stock_df['low'].iloc[-20:-1].min()
+            
+            if close_curr > high_20:
+                events.append(f"Breakout: Price {close_curr:.2f} broke above 20-period high {high_20:.2f} (bullish)")
+            elif close_curr < low_20:
+                events.append(f"Breakdown: Price {close_curr:.2f} broke below 20-period low {low_20:.2f} (bearish)")
+    
+    if not events:
+        events.append("No significant technical events detected")
+
+    return events
