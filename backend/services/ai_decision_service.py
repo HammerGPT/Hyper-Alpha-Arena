@@ -1635,7 +1635,7 @@ def save_ai_decision(
         from api.ws import broadcast_model_chat_update
 
         try:
-            asyncio.create_task(broadcast_model_chat_update({
+            broadcast_data = {
                 "id": decision_log.id,
                 "account_id": account.id,
                 "account_name": account.name,
@@ -1653,7 +1653,16 @@ def save_ai_decision(
                 "reasoning_snapshot": decision_log.reasoning_snapshot,
                 "decision_snapshot": decision_log.decision_snapshot,
                 "wallet_address": decision_log.wallet_address,
-            }))
+            }
+            
+            # Check if there's a running event loop
+            try:
+                loop = asyncio.get_running_loop()
+                # Event loop is running, create task
+                loop.create_task(broadcast_model_chat_update(broadcast_data))
+            except RuntimeError:
+                # No running event loop, run synchronously
+                asyncio.run(broadcast_model_chat_update(broadcast_data))
         except Exception as broadcast_err:
             # Don't fail the save operation if broadcast fails
             logger.warning(f"Failed to broadcast AI decision update: {broadcast_err}")

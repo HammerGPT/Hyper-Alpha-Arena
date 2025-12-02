@@ -537,6 +537,48 @@ def place_ai_driven_hyperliquid_order(
 
                 if operation == "hold":
                     logger.info(f"AI decided to HOLD for {account.name}")
+                    
+                    # Check if AI provided TP/SL updates for existing position
+                    new_tp = decision.get("take_profit_price")
+                    new_sl = decision.get("stop_loss_price")
+                    
+                    # Find if there's an existing position for this symbol
+                    position = next((p for p in positions if p.get('coin') == symbol), None)
+                    
+                    if position and (new_tp is not None or new_sl is not None):
+                        # Position exists and AI provided TP/SL values - check if update needed
+                        position_size = abs(position.get('szi', 0))
+                        is_long = position.get('szi', 0) > 0
+                        
+                        if position_size > 0:
+                            logger.info(
+                                f"[TPSL CHECK] {symbol} position exists (size={position_size}, long={is_long}). "
+                                f"AI provided TP={new_tp}, SL={new_sl}"
+                            )
+                            
+                            try:
+                                # Call update_tpsl to compare and update if needed
+                                tpsl_result = client.update_tpsl(
+                                    db=db,
+                                    symbol=symbol,
+                                    new_tp_price=new_tp,
+                                    new_sl_price=new_sl,
+                                    position_size=position_size,
+                                    is_long=is_long,
+                                )
+                                
+                                if tpsl_result.get('tp_updated') or tpsl_result.get('sl_updated'):
+                                    logger.info(
+                                        f"[TPSL UPDATED] {symbol}: "
+                                        f"TP {tpsl_result.get('old_tp')}→{tpsl_result.get('new_tp')}, "
+                                        f"SL {tpsl_result.get('old_sl')}→{tpsl_result.get('new_sl')}"
+                                    )
+                                else:
+                                    logger.debug(f"[TPSL] {symbol}: No update needed, values unchanged")
+                                    
+                            except Exception as tpsl_err:
+                                logger.error(f"[TPSL ERROR] Failed to update TP/SL for {symbol}: {tpsl_err}")
+                    
                     save_ai_decision(db, account, decision, portfolio, executed=True, **decision_kwargs)
                     continue
 
@@ -628,6 +670,28 @@ def place_ai_driven_hyperliquid_order(
                         stop_loss_price=stop_loss_price
                     )
 
+                    # Fallback: If IOC failed due to no liquidity, retry with GTC
+                    if order_result and order_result.get('status') == 'error':
+                        error_msg = order_result.get('error', '')
+                        if 'could not immediately match' in error_msg.lower() or 'no resting orders' in error_msg.lower():
+                            logger.warning(
+                                f"⚠️  IOC order failed for BUY {symbol} (no liquidity), retrying with GTC limit order..."
+                            )
+                            order_result = client.place_order_with_tpsl(
+                                db=db,
+                                symbol=symbol,
+                                is_buy=True,
+                                size=quantity,
+                                price=price_to_use,
+                                leverage=leverage,
+                                time_in_force="Gtc",  # Changed from Ioc to Gtc
+                                reduce_only=False,
+                                take_profit_price=take_profit_price,
+                                stop_loss_price=stop_loss_price
+                            )
+                            if order_result and order_result.get('status') in ['filled', 'resting']:
+                                logger.info(f"✅ GTC fallback order succeeded for BUY {symbol}")
+
                 elif operation == "sell":
                     # Calculate margin first, then position value with leverage
                     margin = available_balance * target_portion
@@ -689,6 +753,28 @@ def place_ai_driven_hyperliquid_order(
                         take_profit_price=take_profit_price,
                         stop_loss_price=stop_loss_price
                     )
+
+                    # Fallback: If IOC failed due to no liquidity, retry with GTC
+                    if order_result and order_result.get('status') == 'error':
+                        error_msg = order_result.get('error', '')
+                        if 'could not immediately match' in error_msg.lower() or 'no resting orders' in error_msg.lower():
+                            logger.warning(
+                                f"⚠️  IOC order failed for SELL {symbol} (no liquidity), retrying with GTC limit order..."
+                            )
+                            order_result = client.place_order_with_tpsl(
+                                db=db,
+                                symbol=symbol,
+                                is_buy=False,
+                                size=quantity,
+                                price=price_to_use,
+                                leverage=leverage,
+                                time_in_force="Gtc",  # Changed from Ioc to Gtc
+                                reduce_only=False,
+                                take_profit_price=take_profit_price,
+                                stop_loss_price=stop_loss_price
+                            )
+                            if order_result and order_result.get('status') in ['filled', 'resting']:
+                                logger.info(f"✅ GTC fallback order succeeded for SELL {symbol}")
 
                 elif operation == "close":
                     position_to_close = None

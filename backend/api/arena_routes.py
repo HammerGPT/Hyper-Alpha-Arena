@@ -105,10 +105,10 @@ def _get_hyperliquid_positions(db: Session, account_id: Optional[int], environme
         encrypted_key = wallet.private_key_encrypted
 
         try:
-            cached_state = get_cached_account_state(account.id)
+            cached_state = get_cached_account_state(account.id, environment)
             account_state = cached_state["data"] if cached_state else None
 
-            cached_positions = get_cached_positions(account.id)
+            cached_positions = get_cached_positions(account.id, environment)
             positions_data = cached_positions["data"] if cached_positions else None
 
             wallet_address = None
