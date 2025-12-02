@@ -31,6 +31,7 @@ from services.hyperliquid_symbol_service import (
     get_available_symbol_map as get_hyperliquid_symbol_map,
     get_symbol_display as get_hyperliquid_symbol_display,
 )
+from services.hyperliquid_environment import get_leverage_settings
 
 
 logger = logging.getLogger(__name__)
@@ -587,13 +588,22 @@ def place_ai_driven_hyperliquid_order(
                     save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
                     continue
 
-                max_leverage = getattr(account, "max_leverage", 3)
+                # Get leverage settings from wallet (new architecture) or account (fallback)
+                try:
+                    leverage_settings = get_leverage_settings(db, account.id, environment)
+                    max_leverage = leverage_settings["max_leverage"]
+                    default_leverage_setting = leverage_settings["default_leverage"]
+                except Exception as lev_err:
+                    logger.warning(f"Failed to get leverage settings: {lev_err}, using defaults")
+                    max_leverage = getattr(account, "max_leverage", 3) or 3
+                    default_leverage_setting = getattr(account, "default_leverage", 1) or 1
+
                 if leverage < 1 or leverage > max_leverage:
                     logger.warning(
                         f"Invalid leverage {leverage}x from AI (max: {max_leverage}x), "
-                        f"using default {getattr(account, 'default_leverage', 1)}x"
+                        f"using default {default_leverage_setting}x"
                     )
-                    leverage = getattr(account, "default_leverage", 1)
+                    leverage = default_leverage_setting
 
                 if target_portion <= 0 or target_portion > 1:
                     logger.warning(f"Invalid target_portion {target_portion} from AI for {account.name}")
