@@ -413,9 +413,25 @@ def on_startup():
 
     # Initialize all services (scheduler, market data tasks, auto trading, etc.)
     print("About to initialize services...")
-    from services.startup import initialize_services
+    from services.startup import initialize_services, initialize_hyperliquid_websocket
+    import asyncio
+    
     initialize_services()
     print("Services initialization completed")
+    
+    # Initialize Hyperliquid WebSocket in async context
+    # This must be done after services are initialized
+    print("Initializing Hyperliquid WebSocket...")
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.create_task(initialize_hyperliquid_websocket())
+        else:
+            loop.run_until_complete(initialize_hyperliquid_websocket())
+    except RuntimeError:
+        # No event loop, create one
+        asyncio.run(initialize_hyperliquid_websocket())
+    print("Hyperliquid WebSocket initialization scheduled")
 
 
 @app.on_event("shutdown")

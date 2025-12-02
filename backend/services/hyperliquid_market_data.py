@@ -1,10 +1,19 @@
 """
-Hyperliquid market data service using CCXT and native API
+Hyperliquid market data service using CCXT, native API, and WebSocket
+
+This module provides market data for Hyperliquid with multiple data sources:
+1. WebSocket (preferred) - Real-time streaming, no API quota consumption
+2. HTTP API (fallback) - Used when WebSocket not available
+3. CCXT (fallback) - For symbols not in native API
+
+IMPORTANT: WebSocket connections do NOT count toward address-based rate limits.
+Using WebSocket for price data dramatically reduces API quota consumption.
 """
 import ccxt
 import logging
 import requests
 import threading
+import asyncio
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 import time
@@ -13,7 +22,16 @@ logger = logging.getLogger(__name__)
 
 
 class PriceCache:
-    """Thread-safe price cache with TTL for Hyperliquid prices"""
+    """
+    Thread-safe price cache for Hyperliquid prices.
+    
+    This cache now prioritizes WebSocket data over HTTP polling:
+    1. First checks WebSocket manager for real-time prices (no API cost)
+    2. Falls back to HTTP API only if WebSocket not available
+    
+    This dramatically reduces API quota consumption from ~30 req/min to ~0 req/min
+    for price data.
+    """
     
     def __init__(self, ttl_seconds: float = 2.0):
         self._cache: Dict[str, float] = {}
@@ -21,6 +39,8 @@ class PriceCache:
         self._ttl = ttl_seconds
         self._lock = threading.Lock()
         self._environment = "mainnet"
+        self._use_websocket = True  # Prefer WebSocket by default
+        self._http_fallback_count = 0  # Track HTTP fallbacks for monitoring
     
     def set_environment(self, environment: str):
         """Set the environment for API calls"""
@@ -31,9 +51,27 @@ class PriceCache:
                 self._last_update = 0
     
     def get_price(self, symbol: str) -> Optional[float]:
-        """Get price for a symbol, refreshing cache if needed"""
+        """
+        Get price for a symbol.
+        
+        Priority:
+        1. WebSocket cache (real-time, no API cost)
+        2. Local cache (if still valid)
+        3. HTTP API refresh (fallback, costs API quota)
+        """
         symbol_upper = symbol.upper().replace("/USDC", "").replace(":USDC", "").replace("/USD", "")
         
+        # Try WebSocket first (no API cost)
+        if self._use_websocket:
+            ws_price = self._get_websocket_price(symbol_upper)
+            if ws_price is not None:
+                # Update local cache with WebSocket data
+                with self._lock:
+                    self._cache[symbol_upper] = ws_price
+                    self._last_update = time.time()
+                return ws_price
+        
+        # Check local cache
         with self._lock:
             current_time = time.time()
             
@@ -41,26 +79,96 @@ class PriceCache:
             if current_time - self._last_update < self._ttl and symbol_upper in self._cache:
                 return self._cache.get(symbol_upper)
         
-        # Cache expired or symbol not found, refresh
+        # Cache expired or symbol not found, refresh via HTTP (fallback)
         self._refresh_cache()
         
         with self._lock:
             return self._cache.get(symbol_upper)
     
+    def _get_websocket_price(self, symbol: str) -> Optional[float]:
+        """Get price from WebSocket manager if available"""
+        try:
+            from services.hyperliquid_websocket import get_websocket_manager
+            
+            manager = get_websocket_manager(self._environment)
+            if manager.is_connected:
+                price = manager.get_mid_price(symbol)
+                if price is not None:
+                    logger.debug(f"Got price for {symbol} from WebSocket: {price}")
+                    return price
+            else:
+                logger.debug(f"WebSocket not connected for {self._environment}, falling back to HTTP")
+        except ImportError:
+            logger.warning("WebSocket manager not available, using HTTP fallback")
+        except Exception as e:
+            logger.warning(f"Error getting WebSocket price: {e}")
+        
+        return None
+    
     def get_all_prices(self) -> Dict[str, float]:
-        """Get all cached prices, refreshing if needed"""
+        """
+        Get all cached prices.
+        
+        Priority:
+        1. WebSocket cache (real-time, no API cost)
+        2. Local cache (if still valid)
+        3. HTTP API refresh (fallback)
+        """
+        # Try WebSocket first
+        if self._use_websocket:
+            ws_prices = self._get_all_websocket_prices()
+            if ws_prices:
+                # Update local cache with WebSocket data
+                with self._lock:
+                    self._cache.update(ws_prices)
+                    self._last_update = time.time()
+                return ws_prices
+        
+        # Check local cache
         with self._lock:
             current_time = time.time()
             if current_time - self._last_update < self._ttl:
                 return self._cache.copy()
         
+        # Refresh via HTTP (fallback)
         self._refresh_cache()
         
         with self._lock:
             return self._cache.copy()
     
+    def _get_all_websocket_prices(self) -> Dict[str, float]:
+        """Get all prices from WebSocket manager if available"""
+        try:
+            from services.hyperliquid_websocket import get_websocket_manager
+            
+            manager = get_websocket_manager(self._environment)
+            if manager.is_connected:
+                prices = manager.all_mids
+                if prices:
+                    logger.debug(f"Got {len(prices)} prices from WebSocket")
+                    return prices
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.warning(f"Error getting WebSocket prices: {e}")
+        
+        return {}
+    
     def _refresh_cache(self):
-        """Refresh the price cache from Hyperliquid API"""
+        """
+        Refresh the price cache from Hyperliquid HTTP API.
+        
+        NOTE: This is a FALLBACK method. Prefer WebSocket for real-time data.
+        Each HTTP call consumes API quota (weight 2 for allMids).
+        """
+        self._http_fallback_count += 1
+        
+        if self._http_fallback_count % 10 == 0:
+            logger.warning(
+                f"HTTP fallback used {self._http_fallback_count} times. "
+                f"Consider ensuring WebSocket is connected to reduce API quota usage."
+            )
+        
         try:
             # Use environment-specific API endpoint
             if self._environment == "testnet":
@@ -86,10 +194,32 @@ class PriceCache:
                             continue
                 
                 self._last_update = time.time()
-                logger.debug(f"Price cache refreshed with {len(self._cache)} symbols")
+                logger.debug(f"Price cache refreshed via HTTP with {len(self._cache)} symbols")
                 
         except Exception as e:
-            logger.error(f"Failed to refresh price cache: {e}")
+            logger.error(f"Failed to refresh price cache via HTTP: {e}")
+    
+    def disable_websocket(self):
+        """Disable WebSocket and use only HTTP (for testing/debugging)"""
+        self._use_websocket = False
+        logger.info("WebSocket disabled for price cache, using HTTP only")
+    
+    def enable_websocket(self):
+        """Enable WebSocket for price data (default)"""
+        self._use_websocket = True
+        logger.info("WebSocket enabled for price cache")
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get cache statistics for monitoring"""
+        with self._lock:
+            return {
+                "environment": self._environment,
+                "cached_symbols": len(self._cache),
+                "last_update": self._last_update,
+                "cache_age_seconds": time.time() - self._last_update if self._last_update > 0 else None,
+                "use_websocket": self._use_websocket,
+                "http_fallback_count": self._http_fallback_count,
+            }
 
 
 # Global price cache instances per environment
@@ -103,6 +233,37 @@ def get_price_cache(environment: str = "mainnet") -> PriceCache:
         cache.set_environment(environment)
         _price_caches[environment] = cache
     return _price_caches[environment]
+
+
+async def ensure_websocket_connected(environment: str = "mainnet") -> bool:
+    """
+    Ensure WebSocket is connected and subscribed to allMids.
+    
+    Call this at application startup to enable real-time price streaming.
+    
+    Args:
+        environment: "mainnet" or "testnet"
+        
+    Returns:
+        True if WebSocket connected and subscribed successfully
+    """
+    try:
+        from services.hyperliquid_websocket import start_websocket_manager
+        
+        manager = await start_websocket_manager(environment)
+        
+        if manager.is_connected:
+            # Subscribe to all mid prices
+            await manager.subscribe_all_mids()
+            logger.info(f"WebSocket connected and subscribed to allMids for {environment}")
+            return True
+        else:
+            logger.warning(f"Failed to connect WebSocket for {environment}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error ensuring WebSocket connection: {e}")
+        return False
 
 class HyperliquidClient:
     def __init__(self, environment: str = "mainnet"):

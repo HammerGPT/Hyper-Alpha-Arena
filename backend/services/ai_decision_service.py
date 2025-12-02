@@ -11,7 +11,12 @@ from typing import Any, Dict, Optional, List
 from datetime import datetime
 
 import requests
+import urllib3
 from sqlalchemy.orm import Session
+
+# Suppress InsecureRequestWarning for custom AI endpoints that may not have valid SSL certs
+# This is intentional for self-hosted or development AI endpoints
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from database.models import Position, Account, AIDecisionLog
 from services.asset_calculator import calc_positions_value
