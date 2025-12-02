@@ -12,9 +12,9 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import TradingModeSwitcher from '@/components/trading/TradingModeSwitcher'
 import ExchangeModal from '@/components/exchange/ExchangeModal'
+import ExchangeIcon from '@/components/exchange/ExchangeIcon'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCurrentExchangeInfo } from '@/contexts/ExchangeContext'
-import { EXCHANGE_STATUS_COLORS } from '@/lib/types/exchange'
 import { getSignInUrl } from '@/lib/auth'
 
 interface Account {
@@ -85,7 +85,9 @@ export default function Header({ title = 'Hyper Alpha Arena', currentAccount, sh
           >
             <span className="mr-2">🔥</span>
             Exchanges:
-            <span className="ml-1 mr-1">{EXCHANGE_STATUS_COLORS[currentExchangeInfo.id]}</span>
+            <span className="ml-1 mr-1">
+              <ExchangeIcon exchangeId={currentExchangeInfo.id} size={16} />
+            </span>
             {currentExchangeInfo.displayName}
             <ChevronDown className="ml-2 h-3 w-3" />
           </Button>

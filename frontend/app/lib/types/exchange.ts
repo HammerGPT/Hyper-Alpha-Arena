@@ -42,6 +42,8 @@ export const EXCHANGE_DISPLAY_NAMES: Record<ExchangeId, string> = {
   aster: 'Aster DEX'
 };
 
+// Deprecated: Use ExchangeIcon component instead
+// Kept for backward compatibility
 export const EXCHANGE_STATUS_COLORS: Record<ExchangeId, string> = {
   hyperliquid: '🟢',
   binance: '🟡',

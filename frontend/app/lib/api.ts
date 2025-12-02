@@ -537,12 +537,13 @@ export interface ArenaModelChatResponse {
   entries: ArenaModelChatEntry[]
 }
 
-export async function getArenaModelChat(params?: { limit?: number; account_id?: number; trading_mode?: string; wallet_address?: string }): Promise<ArenaModelChatResponse> {
+export async function getArenaModelChat(params?: { limit?: number; account_id?: number; trading_mode?: string; wallet_address?: string; before_time?: string }): Promise<ArenaModelChatResponse> {
   const search = new URLSearchParams()
   if (params?.limit) search.append('limit', params.limit.toString())
   if (params?.account_id) search.append('account_id', params.account_id.toString())
   if (params?.trading_mode) search.append('trading_mode', params.trading_mode)
   if (params?.wallet_address) search.append('wallet_address', params.wallet_address)
+  if (params?.before_time) search.append('before_time', params.before_time)
   const query = search.toString()
   const response = await apiRequest(`/arena/model-chat${query ? `?${query}` : ''}`)
   return response.json()

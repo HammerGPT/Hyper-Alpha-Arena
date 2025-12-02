@@ -104,11 +104,15 @@ export async function getHyperliquidAccountState(
  */
 export async function getHyperliquidPositions(
   accountId: number,
-  environment?: 'testnet' | 'mainnet'
+  environment?: 'testnet' | 'mainnet',
+  force_refresh?: boolean
 ): Promise<HyperliquidPositionsResponse> {
   const params = new URLSearchParams();
   if (environment) {
     params.append('environment', environment);
+  }
+  if (force_refresh) {
+    params.append('force_refresh', 'true');
   }
   const query = params.toString() ? `?${params.toString()}` : '';
   const response = await apiRequest(

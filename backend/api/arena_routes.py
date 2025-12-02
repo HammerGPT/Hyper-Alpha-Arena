@@ -556,6 +556,7 @@ def get_model_chat(
     account_id: Optional[int] = None,
     trading_mode: Optional[str] = Query(None, regex="^(paper|testnet|mainnet)$"),
     wallet_address: Optional[str] = Query(None),
+    before_time: Optional[str] = Query(None, description="ISO format timestamp for cursor-based pagination"),
     db: Session = Depends(get_db),
 ):
     """Return recent AI decision logs as chat-style summaries, filtered by trading mode."""
@@ -570,6 +571,14 @@ def get_model_chat(
 
     if wallet_address:
         query = query.filter(AIDecisionLog.wallet_address == wallet_address)
+
+    # Cursor-based pagination: only get records before the specified time
+    if before_time:
+        try:
+            before_dt = datetime.fromisoformat(before_time.replace('Z', '+00:00'))
+            query = query.filter(AIDecisionLog.decision_time < before_dt)
+        except (ValueError, AttributeError) as e:
+            logger.warning(f"Invalid before_time parameter: {before_time}, error: {e}")
 
     # Filter by trading mode based on hyperliquid_environment field
     if trading_mode:

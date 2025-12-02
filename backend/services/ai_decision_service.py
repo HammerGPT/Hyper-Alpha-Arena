@@ -347,7 +347,7 @@ OUTPUT_FORMAT_JSON = (
     '      "leverage": <integer 1-20>,\n'
     '      "max_price": <number, required for "buy" operations>,\n'
     '      "min_price": <number, required for "sell"/"close" operations>,\n'
-    '      "time_in_force": <string, optional, "Ioc" (default, market-like) | "Gtc" (limit order) | "Alo" (maker only)>,\n'
+    '      "time_in_force": "Ioc",\n'
     '      "take_profit_price": <number, optional, take profit trigger price>,\n'
     '      "stop_loss_price": <number, optional, stop loss trigger price>,\n'
     '      "reason": "<string explaining primary signals>",\n'
@@ -372,7 +372,7 @@ OUTPUT_FORMAT_COMPLETE = """Respond with ONLY a JSON object using this schema (a
       "leverage": <integer 1-__MAX_LEVERAGE__>,
       "max_price": <number, required for "buy" operations>,
       "min_price": <number, required for "sell"/"close" operations>,
-      "time_in_force": <string, optional, "Ioc" (default) | "Gtc" | "Alo">,
+      "time_in_force": "Ioc",
       "take_profit_price": <number, optional>,
       "stop_loss_price": <number, optional>,
       "reason": "<string explaining primary signals>",
@@ -748,8 +748,13 @@ def _build_prompt_context(
                     # Get recent closed trades (last 5)
                     recent_trades = client.get_recent_closed_trades(db_session, limit=5)
 
+                    # Get open orders
+                    open_orders = client.get_open_orders(db_session)
+
+                    # Build recent trades section
+                    trades_section = ""
                     if recent_trades:
-                        trade_lines = []
+                        trade_lines = ["Recent closed trades (last 5 positions):"]
                         for trade in recent_trades:
                             symbol = trade.get('symbol', 'UNKNOWN')
                             side = trade.get('side', 'Unknown')
@@ -762,9 +767,42 @@ def _build_prompt_context(
                             trade_lines.append(
                                 f"- {symbol} {side}: Closed at {close_time} @ ${close_price:,.2f} | P&L: {pnl_str} | {direction}"
                             )
-                        recent_trades_summary = "\n".join(trade_lines)
+                        trades_section = "\n".join(trade_lines)
                     else:
-                        recent_trades_summary = "No recent closed trades found"
+                        trades_section = "Recent closed trades: No recent closed trades found"
+
+                    # Build open orders section
+                    orders_section = ""
+                    if open_orders:
+                        # Limit to 10 most recent orders to avoid prompt bloat
+                        display_orders = open_orders[:10]
+                        order_lines = [f"\nOpen orders ({len(open_orders)} pending):"]
+                        for order in display_orders:
+                            symbol = order.get('symbol', 'UNKNOWN')
+                            direction = order.get('direction', 'Unknown')
+                            order_type = order.get('order_type', 'Limit')
+                            order_id = order.get('order_id', 'N/A')
+                            price = order.get('price', 0)
+                            size = order.get('size', 0)
+                            order_value = order.get('order_value', 0)
+                            reduce_only = "Yes" if order.get('reduce_only', False) else "No"
+                            trigger_condition = order.get('trigger_condition')
+                            order_time = order.get('order_time', 'N/A')
+
+                            # Build trigger info
+                            trigger_info = f"Trigger: {trigger_condition}" if trigger_condition else "Trigger: None"
+
+                            order_lines.append(
+                                f"- {symbol} {direction}: {order_type} Order #{order_id} @ ${price:,.2f} | "
+                                f"Size: {size:.5f} | Value: ${order_value:,.2f} | Reduce Only: {reduce_only} | "
+                                f"{trigger_info} | Placed: {order_time}"
+                            )
+                        orders_section = "\n".join(order_lines)
+                    else:
+                        orders_section = "\nOpen orders: No open orders"
+
+                    # Combine both sections (Open Orders first, then Recent Trades)
+                    recent_trades_summary = orders_section + "\n\n" + trades_section
                 else:
                     recent_trades_summary = "Wallet not configured for this environment"
         except Exception as e:

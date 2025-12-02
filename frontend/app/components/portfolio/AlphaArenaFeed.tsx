@@ -17,6 +17,7 @@ import { getModelLogo } from './logoAssets'
 import FlipNumber from './FlipNumber'
 import HighlightWrapper from './HighlightWrapper'
 import { formatDateTime } from '@/lib/dateTime'
+import { Loader2 } from 'lucide-react'
 
 interface AlphaArenaFeedProps {
   refreshKey?: number
@@ -80,6 +81,10 @@ export default function AlphaArenaFeed({
   const [modelChat, setModelChat] = useState<ArenaModelChatEntry[]>([])
   const [positions, setPositions] = useState<ArenaPositionsAccount[]>([])
   const [accountsMeta, setAccountsMeta] = useState<ArenaAccountMeta[]>([])
+
+  // Lazy loading states for ModelChat
+  const [hasMoreModelChat, setHasMoreModelChat] = useState(true)
+  const [isLoadingMoreModelChat, setIsLoadingMoreModelChat] = useState(false)
 
   // Track seen items for highlight animation
   const seenTradeIds = useRef<Set<number>>(new Set())
@@ -287,7 +292,27 @@ export default function AlphaArenaFeed({
     }
   }, [activeAccount, cacheKey, updateData, tradingMode, walletAddress])
 
-  const loadModelChatData = useCallback(async () => {
+  // Helper function to merge and deduplicate model chat entries
+  const mergeModelChatData = useCallback((existing: ArenaModelChatEntry[], newData: ArenaModelChatEntry[]) => {
+    // Create a Map for fast lookup by id
+    const idMap = new Map(existing.map(item => [item.id, item]))
+
+    // Add new data, skip duplicates
+    newData.forEach(item => {
+      if (!idMap.has(item.id)) {
+        idMap.set(item.id, item)
+      }
+    })
+
+    // Convert back to array and sort by decision_time descending
+    return Array.from(idMap.values()).sort((a, b) => {
+      const timeA = a.decision_time ? new Date(a.decision_time).getTime() : 0
+      const timeB = b.decision_time ? new Date(b.decision_time).getTime() : 0
+      return timeB - timeA
+    })
+  }, [])
+
+  const loadModelChatData = useCallback(async (isBackgroundRefresh: boolean = false) => {
     try {
       setLoadingModelChat(true)
       const accountId = activeAccount === 'all' ? undefined : activeAccount
@@ -298,8 +323,21 @@ export default function AlphaArenaFeed({
         wallet_address: walletAddress,
       })
       const newModelChat = chatRes.entries || []
-      setModelChat(newModelChat)
-      updateData(cacheKey, { modelChat: newModelChat })
+
+      // If this is a background refresh and user has loaded more history, merge instead of replace
+      if (isBackgroundRefresh && modelChat.length > MODEL_CHAT_LIMIT) {
+        // Merge new data with existing data, preserving user's loaded history
+        const merged = mergeModelChatData(modelChat, newModelChat)
+        setModelChat(merged)
+        updateData(cacheKey, { modelChat: merged })
+        // Keep hasMoreModelChat state unchanged during background refresh
+      } else {
+        // Initial load or manual refresh: replace all data
+        setModelChat(newModelChat)
+        updateData(cacheKey, { modelChat: newModelChat })
+        // Reset lazy loading state when loading fresh data
+        setHasMoreModelChat(newModelChat.length === MODEL_CHAT_LIMIT)
+      }
 
       // Extract metadata from modelchat
       if (chatRes.entries && chatRes.entries.length > 0) {
@@ -322,7 +360,50 @@ export default function AlphaArenaFeed({
       setLoadingModelChat(false)
       return null
     }
-  }, [activeAccount, cacheKey, updateData, tradingMode, walletAddress])
+  }, [activeAccount, cacheKey, updateData, tradingMode, walletAddress, modelChat, mergeModelChatData])
+
+  // Load more model chat entries (lazy loading)
+  const loadMoreModelChat = useCallback(async () => {
+    if (isLoadingMoreModelChat || !hasMoreModelChat || modelChat.length === 0) return
+
+    try {
+      setIsLoadingMoreModelChat(true)
+
+      // Get the oldest decision_time from current list
+      const oldestEntry = modelChat[modelChat.length - 1]
+      const beforeTime = oldestEntry?.decision_time
+
+      if (!beforeTime) {
+        setHasMoreModelChat(false)
+        setIsLoadingMoreModelChat(false)
+        return
+      }
+
+      const accountId = activeAccount === 'all' ? undefined : activeAccount
+      const chatRes = await getArenaModelChat({
+        limit: MODEL_CHAT_LIMIT,
+        account_id: accountId,
+        trading_mode: tradingMode,
+        wallet_address: walletAddress,
+        before_time: beforeTime,
+      })
+
+      const newEntries = chatRes.entries || []
+
+      // Merge and deduplicate
+      const merged = mergeModelChatData(modelChat, newEntries)
+      setModelChat(merged)
+      updateData(cacheKey, { modelChat: merged })
+
+      // If we got fewer entries than requested, there's no more data
+      setHasMoreModelChat(newEntries.length === MODEL_CHAT_LIMIT)
+
+      setIsLoadingMoreModelChat(false)
+    } catch (err) {
+      console.error('[AlphaArenaFeed] Failed to load more model chat:', err)
+      setIsLoadingMoreModelChat(false)
+    }
+  }, [activeAccount, cacheKey, updateData, tradingMode, walletAddress, modelChat, hasMoreModelChat, isLoadingMoreModelChat, mergeModelChatData])
 
   const loadPositionsData = useCallback(async () => {
     try {
@@ -373,7 +454,7 @@ export default function AlphaArenaFeed({
       if (cached?.modelChat && cached.modelChat.length > 0) {
         setModelChat(cached.modelChat)
       } else {
-        loadModelChatData()
+        loadModelChatData(false) // false = initial load, not background refresh
       }
     }
 
@@ -392,9 +473,10 @@ export default function AlphaArenaFeed({
 
     const pollAllData = async () => {
       // Load all three APIs in background, independent of active tab
+      // For ModelChat, use background refresh mode to preserve loaded history
       await Promise.allSettled([
         loadTradesData(),
-        loadModelChatData(),
+        loadModelChatData(true), // true = background refresh, preserve loaded history
         loadPositionsData()
       ])
     }
@@ -414,10 +496,10 @@ export default function AlphaArenaFeed({
       prevManualRefreshKey.current = manualRefreshKey
       prevRefreshKey.current = refreshKey
 
-      // Force refresh all data
+      // Force refresh all data (manual refresh = full reload, not background refresh)
       Promise.allSettled([
         loadTradesData(),
-        loadModelChatData(),
+        loadModelChatData(false), // false = full reload, reset to initial 60 entries
         loadPositionsData()
       ])
     }
@@ -429,10 +511,13 @@ export default function AlphaArenaFeed({
     if (prevActiveAccount.current !== activeAccount) {
       prevActiveAccount.current = activeAccount
 
-      // Reload all data with new account filter
+      // Reset lazy loading state when account changes
+      setHasMoreModelChat(true)
+
+      // Reload all data with new account filter (full reload, not background refresh)
       Promise.allSettled([
         loadTradesData(),
-        loadModelChatData(),
+        loadModelChatData(false), // false = full reload when switching accounts
         loadPositionsData()
       ])
     }
@@ -626,7 +711,8 @@ export default function AlphaArenaFeed({
                 ) : modelChat.length === 0 ? (
                   <div className="text-xs text-muted-foreground">No recent AI commentary.</div>
                 ) : (
-                  modelChat.map((entry) => {
+                  <>
+                  {modelChat.map((entry) => {
                     const isExpanded = expandedChat === entry.id
                     const modelLogo = getModelLogo(entry.account_name || entry.model)
                     const isNew = !seenDecisionIds.current.has(entry.id)
@@ -774,7 +860,36 @@ export default function AlphaArenaFeed({
                         </button>
                       </HighlightWrapper>
                     )
-                  })
+                  })}
+
+                  {/* Load More Button */}
+                  {hasMoreModelChat && (
+                    <div className="flex justify-center pt-4">
+                      <Button
+                        onClick={loadMoreModelChat}
+                        disabled={isLoadingMoreModelChat}
+                        variant="outline"
+                        size="sm"
+                        className="text-xs"
+                      >
+                        {isLoadingMoreModelChat ? (
+                          <>
+                            <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                            Loading...
+                          </>
+                        ) : (
+                          'Load More History'
+                        )}
+                      </Button>
+                    </div>
+                  )}
+
+                  {!hasMoreModelChat && modelChat.length > 0 && (
+                    <div className="flex justify-center pt-4 text-xs text-muted-foreground">
+                      All history loaded
+                    </div>
+                  )}
+                  </>
                 )}
               </TabsContent>
 

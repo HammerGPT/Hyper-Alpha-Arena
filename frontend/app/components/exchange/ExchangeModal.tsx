@@ -4,6 +4,7 @@ import { X, ExternalLink, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useExchange } from '@/contexts/ExchangeContext'
 import { ExchangeId } from '@/lib/types/exchange'
+import ExchangeIcon from './ExchangeIcon'
 
 interface ExchangeModalProps {
   isOpen: boolean
@@ -118,11 +119,9 @@ export default function ExchangeModal({ isOpen, onClose }: ExchangeModalProps) {
 
                 {/* Logo */}
                 <div className="flex justify-center mb-4">
-                  <img
-                    src={exchange.logo}
-                    alt={`${exchange.name} logo`}
-                    className="w-16 h-16 rounded-full object-cover border-2 border-gray-200 dark:border-gray-700 aspect-square"
-                  />
+                  <div className="w-16 h-16 flex items-center justify-center">
+                    <ExchangeIcon exchangeId={exchange.id} size={64} />
+                  </div>
                 </div>
 
                 {/* Content */}

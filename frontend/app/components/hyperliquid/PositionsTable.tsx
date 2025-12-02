@@ -60,10 +60,10 @@ export default function PositionsTable({
     }
   }, [accountId, environment, autoRefresh, refreshInterval, refreshTrigger]);
 
-  const loadPositions = async () => {
+  const loadPositions = async (forceRefresh?: boolean) => {
     try {
       setLoading(true);
-      const data = await getHyperliquidPositions(accountId, environment);
+      const data = await getHyperliquidPositions(accountId, environment, forceRefresh);
       // Transform positions to display format
       const displayPositions: PositionDisplay[] = data.positions.map((pos) => {
         const side = getPositionSide(pos.szi);
@@ -170,7 +170,7 @@ export default function PositionsTable({
 
           {showRefreshButton && (
             <Button
-              onClick={loadPositions}
+              onClick={() => loadPositions(true)}
               disabled={loading}
               variant="outline"
               size="sm"
