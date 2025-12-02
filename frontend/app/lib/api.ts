@@ -729,6 +729,12 @@ export interface HyperliquidSymbolMeta {
   symbol: string
   name?: string
   type?: string
+  volatility?: number
+  change24h?: number
+  volume24h?: number
+  scalpingScore?: number
+  isTopScalping?: boolean
+  isTopVolatile?: boolean  // backward compatibility
 }
 
 export interface HyperliquidAvailableSymbolsResponse {
@@ -743,7 +749,8 @@ export interface HyperliquidWatchlistResponse {
 }
 
 export async function getHyperliquidAvailableSymbols(): Promise<HyperliquidAvailableSymbolsResponse> {
-  const response = await apiRequest('/hyperliquid/symbols/available')
+  // Explicitly request market data for scalping score calculation
+  const response = await apiRequest('/hyperliquid/symbols/available?include_market_data=true')
   return response.json()
 }
 

@@ -98,22 +98,68 @@ def _serialize_symbols(symbols: List[Dict[str, str]]) -> str:
     return json.dumps(sanitized)
 
 
-def _validate_symbol_tradability(symbol: str) -> bool:
+def _validate_symbol_tradability(symbol: str, all_mids: dict = None) -> bool:
     """
     Test if a symbol can actually fetch price data (i.e., is tradable).
 
-    Uses silent validation method that doesn't log errors for invalid symbols.
+    Uses Hyperliquid native API 'allMids' for validation instead of CCXT.
+    This ensures ALL tradable symbols are recognized, not just those mapped by CCXT.
+    
+    Args:
+        symbol: Symbol to validate (e.g., "BTC", "PEPE")
+        all_mids: Optional pre-fetched allMids data to avoid multiple API calls
+    
+    Returns:
+        True if symbol has a valid mid price, False otherwise
     """
     try:
-        from services.hyperliquid_market_data import hyperliquid_client
-        return hyperliquid_client.check_symbol_tradability(symbol)
-    except Exception:
+        symbol_upper = symbol.upper()
+        
+        # If allMids data provided, use it directly
+        if all_mids is not None:
+            return symbol_upper in all_mids and all_mids[symbol_upper] is not None
+        
+        # Otherwise fetch allMids from API
+        import requests
+        
+        # Use mainnet API for symbol validation (symbols are same on testnet/mainnet)
+        api_url = "https://api.hyperliquid.xyz/info"
+        
+        response = requests.post(
+            api_url,
+            json={"type": "allMids"},
+            timeout=10
+        )
+        response.raise_for_status()
+        mids_data = response.json()
+        
+        # Check if symbol exists and has a valid price
+        if symbol_upper in mids_data:
+            mid_price = mids_data[symbol_upper]
+            if mid_price is not None:
+                try:
+                    price = float(mid_price)
+                    return price > 0
+                except (ValueError, TypeError):
+                    return False
+        
+        return False
+        
+    except Exception as e:
+        logger.debug(f"Symbol validation failed for {symbol}: {e}")
         return False
 
 
 def fetch_remote_symbols(environment: str = "testnet") -> List[Dict[str, str]]:
-    """Call Hyperliquid meta endpoint to retrieve tradable universe."""
+    """
+    Call Hyperliquid meta endpoint to retrieve tradable universe.
+    
+    Uses batch validation with allMids API to efficiently check all symbols
+    in a single API call instead of N individual calls.
+    """
     url = META_ENDPOINTS.get(environment, META_ENDPOINTS["testnet"])
+    
+    # Fetch meta data (universe of all symbols)
     try:
         resp = requests.post(url, json={"type": "meta"}, timeout=10)
         resp.raise_for_status()
@@ -123,9 +169,26 @@ def fetch_remote_symbols(environment: str = "testnet") -> List[Dict[str, str]]:
         logger.warning("Failed to fetch Hyperliquid meta info: %s", err)
         return []
 
+    # Fetch allMids in one batch call for efficient validation
+    all_mids: Dict[str, str] = {}
+    try:
+        # Use mainnet for allMids (symbols are same on testnet/mainnet)
+        mids_resp = requests.post(
+            "https://api.hyperliquid.xyz/info",
+            json={"type": "allMids"},
+            timeout=10
+        )
+        mids_resp.raise_for_status()
+        all_mids = mids_resp.json()
+        logger.info(f"Fetched {len(all_mids)} symbols from allMids API")
+    except Exception as err:
+        logger.warning("Failed to fetch allMids for batch validation: %s", err)
+        # Continue without batch validation - will validate individually
+
     results: List[Dict[str, str]] = []
     seen = set()
     invalid_count = 0
+    delisted_count = 0
 
     for entry in universe:
         if not isinstance(entry, dict):
@@ -138,8 +201,14 @@ def fetch_remote_symbols(environment: str = "testnet") -> List[Dict[str, str]]:
             continue
         seen.add(symbol)
 
-        # Validate symbol is actually tradable
-        if not _validate_symbol_tradability(symbol):
+        # Skip delisted symbols (from meta data)
+        if entry.get("isDelisted"):
+            logger.debug(f"Skipping delisted symbol {symbol}")
+            delisted_count += 1
+            continue
+
+        # Validate symbol is actually tradable using batch allMids data
+        if not _validate_symbol_tradability(symbol, all_mids if all_mids else None):
             logger.debug(f"Skipping symbol {symbol} (not tradable on Hyperliquid)")
             invalid_count += 1
             continue
@@ -152,8 +221,12 @@ def fetch_remote_symbols(environment: str = "testnet") -> List[Dict[str, str]]:
             }
         )
 
+    if delisted_count > 0:
+        logger.info(f"Filtered out {delisted_count} delisted symbols during Hyperliquid symbol refresh")
     if invalid_count > 0:
-        logger.info(f"Filtered out {invalid_count} delisted/non-tradable symbols during Hyperliquid symbol refresh")
+        logger.info(f"Filtered out {invalid_count} non-tradable symbols during Hyperliquid symbol refresh")
+    
+    logger.info(f"Hyperliquid symbol refresh complete: {len(results)} tradable symbols found")
 
     return results
 

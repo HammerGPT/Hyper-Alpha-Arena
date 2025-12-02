@@ -66,6 +66,7 @@ export default function StrategyPanel({
   const [watchlistError, setWatchlistError] = useState<string | null>(null)
   const [watchlistSuccess, setWatchlistSuccess] = useState<string | null>(null)
   const [maxWatchlistSymbols, setMaxWatchlistSymbols] = useState<number>(10)
+  const [symbolSearchQuery, setSymbolSearchQuery] = useState<string>('')
 
   const resetMessages = useCallback(() => {
     setError(null)
@@ -113,6 +114,11 @@ export default function StrategyPanel({
         getHyperliquidAvailableSymbols(),
         getHyperliquidWatchlist(),
       ])
+      // Debug: log market data to verify isTopScalping is being received
+      const topScalpingSymbols = (available.symbols || []).filter(s => s.isTopScalping === true)
+      console.log('[Watchlist] Top scalping symbols:', topScalpingSymbols.map(s => s.symbol))
+      console.log('[Watchlist] Sample symbol data:', available.symbols?.[0])
+      
       setAvailableWatchlistSymbols(available.symbols || [])
       setMaxWatchlistSymbols(watchlist.max_symbols ?? available.max_symbols ?? 10)
       setWatchlistSymbols(watchlist.symbols || [])
@@ -145,6 +151,19 @@ export default function StrategyPanel({
   }, [accountOptions, accountId, accountName])
 
   const watchlistCount = watchlistSymbols.length
+
+  // Filter available symbols based on search query
+  const filteredWatchlistSymbols = useMemo(() => {
+    if (!symbolSearchQuery.trim()) {
+      return availableWatchlistSymbols
+    }
+    const query = symbolSearchQuery.toLowerCase().trim()
+    return availableWatchlistSymbols.filter(
+      (symbol) =>
+        symbol.symbol.toLowerCase().includes(query) ||
+        (symbol.name && symbol.name.toLowerCase().includes(query))
+    )
+  }, [availableWatchlistSymbols, symbolSearchQuery])
 
   useEffect(() => {
     resetMessages()
@@ -441,26 +460,85 @@ export default function StrategyPanel({
                     {watchlistCount} / {maxWatchlistSymbols}
                   </span>
                 </div>
+                {/* Search field for filtering symbols */}
+                <div className="relative">
+                  <Input
+                    type="text"
+                    placeholder="Search symbols..."
+                    value={symbolSearchQuery}
+                    onChange={(e) => setSymbolSearchQuery(e.target.value)}
+                    className="w-full"
+                  />
+                  {symbolSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSymbolSearchQuery('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-sm"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {filteredWatchlistSymbols.length} of {availableWatchlistSymbols.length} symbols
+                  {symbolSearchQuery && ` matching "${symbolSearchQuery}"`}
+                </div>
                 {watchlistError && <div className="text-sm text-destructive">{watchlistError}</div>}
                 {watchlistSuccess && <div className="text-sm text-emerald-600">{watchlistSuccess}</div>}
                 {availableWatchlistSymbols.length === 0 ? (
                   <div className="text-sm text-muted-foreground">No tradable symbols available.</div>
+                ) : filteredWatchlistSymbols.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No symbols match your search.</div>
                 ) : (
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    {availableWatchlistSymbols.map((symbol) => {
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-[400px] overflow-y-auto">
+                    {filteredWatchlistSymbols.map((symbol) => {
                       const active = watchlistSymbols.includes(symbol.symbol)
+                      const isTopScalping = symbol.isTopScalping === true
+                      // Format volume for display (e.g., 1.5M, 500K)
+                      const formatVolume = (vol: number) => {
+                        if (vol >= 1_000_000_000) return `${(vol / 1_000_000_000).toFixed(1)}B`
+                        if (vol >= 1_000_000) return `${(vol / 1_000_000).toFixed(1)}M`
+                        if (vol >= 1_000) return `${(vol / 1_000).toFixed(0)}K`
+                        return vol.toFixed(0)
+                      }
                       return (
                         <button
                           type="button"
                           key={symbol.symbol}
                           onClick={() => toggleWatchlistSymbol(symbol.symbol)}
-                          className={`border rounded-md p-3 text-left transition-colors ${
-                            active ? 'border-primary bg-primary/10 text-foreground' : 'border-border text-foreground'
+                          className={`border-2 rounded-md p-3 text-left transition-colors ${
+                            active 
+                              ? 'border-primary bg-primary/10 text-foreground' 
+                              : isTopScalping 
+                                ? 'border-yellow-500 bg-yellow-200 dark:bg-yellow-600/40 text-foreground shadow-md shadow-yellow-500/20' 
+                                : 'border-border text-foreground'
                           }`}
                         >
-                          <div className="text-base font-semibold">{symbol.symbol}</div>
+                          <div className="flex items-center justify-between">
+                            <div className="text-base font-semibold">{symbol.symbol}</div>
+                            {isTopScalping && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-yellow-400 text-yellow-900 font-medium">
+                                TOP 10
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[11px] text-muted-foreground">
                             {symbol.name || 'Untitled'}
+                          </div>
+                          {/* Market data row: change % and volume */}
+                          <div className="flex items-center gap-2 mt-1">
+                            {symbol.change24h !== undefined && (
+                              <span className={`text-[10px] font-medium ${
+                                (symbol.change24h ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'
+                              }`}>
+                                {(symbol.change24h ?? 0) >= 0 ? '+' : ''}{symbol.change24h?.toFixed(2)}%
+                              </span>
+                            )}
+                            {symbol.volume24h !== undefined && symbol.volume24h > 0 && (
+                              <span className="text-[10px] text-muted-foreground">
+                                Vol: ${formatVolume(symbol.volume24h)}
+                              </span>
+                            )}
                           </div>
                           {symbol.type && (
                             <div className="text-[10px] uppercase tracking-wide text-muted-foreground mt-1">{symbol.type}</div>

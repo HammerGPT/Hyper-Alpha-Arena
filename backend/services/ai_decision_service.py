@@ -778,15 +778,29 @@ def _build_prompt_context(
                         display_orders = open_orders[:10]
                         order_lines = [f"\nOpen orders ({len(open_orders)} pending):"]
                         for order in display_orders:
-                            symbol = order.get('symbol', 'UNKNOWN')
-                            direction = order.get('direction', 'Unknown')
-                            order_type = order.get('order_type', 'Limit')
-                            order_id = order.get('order_id', 'N/A')
-                            price = order.get('price', 0)
-                            size = order.get('size', 0)
-                            order_value = order.get('order_value', 0)
-                            reduce_only = "Yes" if order.get('reduce_only', False) else "No"
-                            trigger_condition = order.get('trigger_condition')
+                            # Support both 'symbol' and 'coin' field names (SDK uses 'coin')
+                            symbol = order.get('symbol') or order.get('coin', 'UNKNOWN')
+                            
+                            # Determine direction from side and reduce_only if direction not provided
+                            direction = order.get('direction')
+                            if not direction:
+                                side = order.get('side', '')
+                                reduce_only = order.get('reduce_only') or order.get('reduceOnly', False)
+                                if side == 'B' or side == 'Buy':
+                                    direction = 'Close Short' if reduce_only else 'Open Long'
+                                elif side == 'A' or side == 'Sell':
+                                    direction = 'Close Long' if reduce_only else 'Open Short'
+                                else:
+                                    direction = 'Unknown'
+                            
+                            order_type = order.get('order_type') or order.get('orderType', 'Limit')
+                            order_id = order.get('order_id') or order.get('oid', 'N/A')
+                            price = float(order.get('price') or order.get('limitPx', 0))
+                            size = float(order.get('size') or order.get('sz', 0))
+                            order_value = float(order.get('order_value', 0)) or (price * size)
+                            reduce_only_flag = order.get('reduce_only') or order.get('reduceOnly', False)
+                            reduce_only = "Yes" if reduce_only_flag else "No"
+                            trigger_condition = order.get('trigger_condition') or order.get('triggerCondition')
                             order_time = order.get('order_time', 'N/A')
 
                             # Build trigger info
@@ -832,6 +846,34 @@ def _build_prompt_context(
         except Exception as e:
             logger.warning(f"Failed to build K-line context: {e}", exc_info=True)
 
+    # ============================================================================
+    # DYNAMIC SYMBOL SECTIONS
+    # ============================================================================
+    # Build dynamic symbol sections based on watchlist symbols.
+    # This allows prompt templates to use {dynamic_symbol_sections} variable
+    # instead of hardcoding sections for specific symbols like BTC, ETH, SOL, DOGE.
+    #
+    # Usage in prompt template:
+    #   {dynamic_symbol_sections}
+    #
+    # This will generate formatted sections for each symbol in the watchlist,
+    # including market data, K-lines, and technical indicators.
+    dynamic_symbol_sections = "No symbols configured for dynamic sections."
+    if ordered_symbols and db:
+        try:
+            dynamic_symbol_sections = _build_dynamic_symbol_sections(
+                symbols=ordered_symbols,
+                symbol_metadata=normalized_symbol_metadata,
+                db=db,
+                environment=environment,
+                timeframe="15m",  # Default timeframe
+                kline_count=200,  # Default candle count
+            )
+            logger.debug(f"Built dynamic symbol sections for {len(ordered_symbols)} symbols")
+        except Exception as e:
+            logger.warning(f"Failed to build dynamic symbol sections: {e}", exc_info=True)
+            dynamic_symbol_sections = f"Error generating dynamic sections: {str(e)[:100]}"
+
     return {
         # Legacy variables (for Default prompt and backward compatibility)
         "account_state": account_state,
@@ -875,6 +917,9 @@ def _build_prompt_context(
         "positions_detail": positions_detail,
         # Recent trades history (NEW - helps AI understand trading patterns)
         "recent_trades_summary": recent_trades_summary,
+        # Dynamic symbol sections (NEW - generates sections for all watchlist symbols)
+        # Usage: {dynamic_symbol_sections} in prompt template
+        "dynamic_symbol_sections": dynamic_symbol_sections,
         # K-line and technical indicator variables (dynamically generated)
         **kline_context,  # Merge K-line/indicator variables like {BTC_klines_15m}, {BTC_MACD_15m}, etc.
     }
@@ -1691,6 +1736,190 @@ def get_active_ai_accounts(db: Session) -> List[Account]:
         return []
         
     return valid_accounts
+
+
+def _build_dynamic_symbol_sections(
+    symbols: List[str],
+    symbol_metadata: Dict[str, Any],
+    db: Session,
+    environment: str = "mainnet",
+    timeframe: str = "15m",
+    kline_count: int = 200,
+) -> str:
+    """
+    Build dynamic symbol sections for prompt template based on watchlist symbols.
+    
+    This function generates formatted sections for each symbol in the watchlist,
+    including market data, K-lines, and technical indicators.
+    
+    Args:
+        symbols: List of symbols from watchlist (e.g., ['BTC', 'ETH', 'SOL'])
+        symbol_metadata: Symbol display names and metadata
+        db: Database session
+        environment: Trading environment (mainnet/testnet)
+        timeframe: K-line timeframe (default: 15m)
+        kline_count: Number of K-line candles to include (default: 200)
+    
+    Returns:
+        Formatted string with all symbol sections ready for prompt injection
+    
+    Example output:
+        📊 **BTC (Bitcoin)** - Priority 1
+        Market Data:
+        Price: $98,500.00
+        24h Change: +2.35%
+        ...
+        
+        📊 **ETH (Ethereum)** - Priority 2
+        ...
+    """
+    from services.market_data import get_kline_data, get_ticker_data
+    from services.technical_indicators import calculate_indicators
+    from services.kline_ai_analysis_service import _format_klines_summary
+    
+    if not symbols:
+        return "No symbols selected for analysis."
+    
+    sections = []
+    
+    # Define tier priorities based on position in list
+    def get_tier(index: int) -> str:
+        if index < 3:
+            return "Tier 1 - High Priority"
+        elif index < 6:
+            return "Tier 2 - Medium Priority"
+        else:
+            return "Tier 3 - Monitor"
+    
+    for idx, symbol in enumerate(symbols):
+        try:
+            # Get display name from metadata
+            display_name = symbol
+            if symbol_metadata:
+                meta = symbol_metadata.get(symbol, {})
+                if isinstance(meta, dict):
+                    display_name = meta.get("name") or meta.get("display_name") or symbol
+                elif isinstance(meta, str):
+                    display_name = meta
+            
+            # Fallback to SUPPORTED_SYMBOLS
+            if display_name == symbol:
+                display_name = SUPPORTED_SYMBOLS.get(symbol, symbol)
+            
+            tier = get_tier(idx)
+            section_lines = [
+                f"📊 **{symbol} ({display_name})** - {tier}",
+                ""
+            ]
+            
+            # 1. Market Data
+            try:
+                ticker = get_ticker_data(symbol, "CRYPTO", environment)
+                if ticker:
+                    price = ticker.get('price', 0)
+                    change24h = ticker.get('change24h', 0)
+                    pct24h = ticker.get('percentage24h', 0)
+                    volume24h = ticker.get('volume24h', 0)
+                    
+                    section_lines.append("**Market Data:**")
+                    section_lines.append(f"Price: ${price:,.2f}")
+                    section_lines.append(f"24h Change: {change24h:+,.2f} ({pct24h:+.2f}%)")
+                    section_lines.append(f"24h Volume: ${volume24h:,.0f}")
+                    
+                    if 'funding_rate' in ticker:
+                        section_lines.append(f"Funding Rate: {ticker['funding_rate']:.6f}%")
+                    if 'open_interest' in ticker:
+                        section_lines.append(f"Open Interest: ${ticker['open_interest']:,.0f}")
+                    section_lines.append("")
+                else:
+                    section_lines.append("**Market Data:** N/A")
+                    section_lines.append("")
+            except Exception as e:
+                logger.warning(f"Failed to get ticker for {symbol}: {e}")
+                section_lines.append("**Market Data:** Error fetching data")
+                section_lines.append("")
+            
+            # 2. K-Line Data
+            try:
+                kline_data = get_kline_data(
+                    symbol=symbol,
+                    market="CRYPTO",
+                    period=timeframe,
+                    count=500,  # Fetch 500 for indicator calculation
+                    environment=environment
+                )
+                
+                if kline_data:
+                    # Display last N candles
+                    display_klines = kline_data[-kline_count:] if len(kline_data) >= kline_count else kline_data
+                    formatted_klines = _format_klines_summary(display_klines)
+                    
+                    section_lines.append(f"**K-Line ({timeframe}):** ({len(display_klines)} candles)")
+                    section_lines.append(formatted_klines)
+                    section_lines.append("")
+                    
+                    # 3. Technical Indicators
+                    indicators_to_calc = ['RSI14', 'MACD', 'ATR14', 'EMA20', 'EMA50']
+                    calculated = calculate_indicators(kline_data, indicators_to_calc)
+                    
+                    # RSI
+                    rsi_data = calculated.get('RSI14', [])
+                    if rsi_data:
+                        current_rsi = rsi_data[-1]
+                        rsi_interp = "Overbought" if current_rsi > 70 else "Oversold" if current_rsi < 30 else "Neutral"
+                        section_lines.append(f"**RSI14:** {current_rsi:.2f} ({rsi_interp})")
+                    else:
+                        section_lines.append("**RSI14:** N/A")
+                    
+                    # MACD
+                    macd_data = calculated.get('MACD', {})
+                    if macd_data:
+                        macd_line = macd_data.get('macd', [])
+                        signal_line = macd_data.get('signal', [])
+                        histogram = macd_data.get('histogram', [])
+                        if macd_line and signal_line and histogram:
+                            momentum = "Bullish" if histogram[-1] > 0 else "Bearish"
+                            section_lines.append(f"**MACD:** Line={macd_line[-1]:.4f}, Signal={signal_line[-1]:.4f}, Hist={histogram[-1]:.4f} ({momentum})")
+                        else:
+                            section_lines.append("**MACD:** N/A")
+                    else:
+                        section_lines.append("**MACD:** N/A")
+                    
+                    # EMA
+                    ema20 = calculated.get('EMA20', [])
+                    ema50 = calculated.get('EMA50', [])
+                    if ema20 and ema50:
+                        trend = "Bullish" if ema20[-1] > ema50[-1] else "Bearish"
+                        section_lines.append(f"**EMA:** EMA20={ema20[-1]:.2f}, EMA50={ema50[-1]:.2f} ({trend} trend)")
+                    else:
+                        section_lines.append("**EMA:** N/A")
+                    
+                    # ATR
+                    atr_data = calculated.get('ATR14', [])
+                    if atr_data:
+                        current_atr = atr_data[-1]
+                        avg_atr = sum(atr_data[-20:]) / min(len(atr_data), 20)
+                        volatility = "High" if current_atr > avg_atr * 1.2 else "Normal"
+                        section_lines.append(f"**ATR14:** {current_atr:.2f} ({volatility} volatility)")
+                    else:
+                        section_lines.append("**ATR14:** N/A")
+                    
+                    section_lines.append("")
+                else:
+                    section_lines.append(f"**K-Line ({timeframe}):** No data available")
+                    section_lines.append("")
+            except Exception as e:
+                logger.warning(f"Failed to get K-line data for {symbol}: {e}")
+                section_lines.append(f"**K-Line ({timeframe}):** Error fetching data")
+                section_lines.append("")
+            
+            sections.append("\n".join(section_lines))
+            
+        except Exception as e:
+            logger.error(f"Error building section for {symbol}: {e}")
+            sections.append(f"📊 **{symbol}** - Error: {str(e)[:50]}\n")
+    
+    return "\n---\n\n".join(sections)
 
 
 def _parse_kline_indicator_variables(template_text: str) -> Dict[str, Dict[str, Any]]:

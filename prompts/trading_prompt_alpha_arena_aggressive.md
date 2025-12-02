@@ -372,6 +372,34 @@ Required fields for each decision:
 }}
 ```
 
+**Example - HOLD with existing position (CRITICAL - SL/TP REQUIRED):**
+```json
+{{
+  "operation": "hold",
+  "symbol": "SOL",
+  "target_portion_of_balance": 0,
+  "leverage": 1,
+  "max_price": null,
+  "min_price": null,
+  "stop_loss_price": 140.22,
+  "take_profit_price": 136.62,
+  "invalidation_condition": "Price breaks above $139.50 resistance",
+  "confidence": 0.55,
+  "risk_usd": 0,
+  "is_add": false,
+  "reason": "Managing existing SHORT position. Entry $138.78, ATR14 $0.72. Position near breakeven, no trailing yet. SL = entry + ATR×2 = $140.22. TP = entry - ATR×3 = $136.62.",
+  "trading_strategy": "SHALLOW edge for holding. Short from $138.78. Keep ATR-based levels: SL $140.22, TP $136.62. Will trail SL to breakeven when profit > ATR×1."
+}}
+```
+
+⚠️ **CRITICAL FOR HOLD WITH EXISTING POSITION:**
+- You MUST calculate and provide EXACT NUMERIC VALUES for stop_loss_price and take_profit_price
+- NEVER use 0 for SL/TP when managing an existing position
+- Use the ATR-based formulas from section 5.1:
+  - For SHORT: SL = entry + ATR×2, TP = entry - ATR×3
+  - For LONG: SL = entry - ATR×2, TP = entry + ATR×3
+- If position is in profit, apply trailing rules (SL moves in your favor)
+
 Example full output:
 {{
   "decisions": [

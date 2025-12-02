@@ -1,13 +1,108 @@
 """
-Hyperliquid market data service using CCXT
+Hyperliquid market data service using CCXT and native API
 """
 import ccxt
 import logging
+import requests
+import threading
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 import time
 
 logger = logging.getLogger(__name__)
+
+
+class PriceCache:
+    """Thread-safe price cache with TTL for Hyperliquid prices"""
+    
+    def __init__(self, ttl_seconds: float = 2.0):
+        self._cache: Dict[str, float] = {}
+        self._last_update: float = 0
+        self._ttl = ttl_seconds
+        self._lock = threading.Lock()
+        self._environment = "mainnet"
+    
+    def set_environment(self, environment: str):
+        """Set the environment for API calls"""
+        with self._lock:
+            if self._environment != environment:
+                self._environment = environment
+                self._cache.clear()
+                self._last_update = 0
+    
+    def get_price(self, symbol: str) -> Optional[float]:
+        """Get price for a symbol, refreshing cache if needed"""
+        symbol_upper = symbol.upper().replace("/USDC", "").replace(":USDC", "").replace("/USD", "")
+        
+        with self._lock:
+            current_time = time.time()
+            
+            # Check if cache is still valid
+            if current_time - self._last_update < self._ttl and symbol_upper in self._cache:
+                return self._cache.get(symbol_upper)
+        
+        # Cache expired or symbol not found, refresh
+        self._refresh_cache()
+        
+        with self._lock:
+            return self._cache.get(symbol_upper)
+    
+    def get_all_prices(self) -> Dict[str, float]:
+        """Get all cached prices, refreshing if needed"""
+        with self._lock:
+            current_time = time.time()
+            if current_time - self._last_update < self._ttl:
+                return self._cache.copy()
+        
+        self._refresh_cache()
+        
+        with self._lock:
+            return self._cache.copy()
+    
+    def _refresh_cache(self):
+        """Refresh the price cache from Hyperliquid API"""
+        try:
+            # Use environment-specific API endpoint
+            if self._environment == "testnet":
+                api_url = "https://api.hyperliquid-testnet.xyz/info"
+            else:
+                api_url = "https://api.hyperliquid.xyz/info"
+            
+            response = requests.post(
+                api_url,
+                json={"type": "allMids"},
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            with self._lock:
+                self._cache.clear()
+                if isinstance(data, dict):
+                    for symbol, price_str in data.items():
+                        try:
+                            self._cache[symbol.upper()] = float(price_str)
+                        except (ValueError, TypeError):
+                            continue
+                
+                self._last_update = time.time()
+                logger.debug(f"Price cache refreshed with {len(self._cache)} symbols")
+                
+        except Exception as e:
+            logger.error(f"Failed to refresh price cache: {e}")
+
+
+# Global price cache instances per environment
+_price_caches: Dict[str, PriceCache] = {}
+
+
+def get_price_cache(environment: str = "mainnet") -> PriceCache:
+    """Get or create price cache for environment"""
+    if environment not in _price_caches:
+        cache = PriceCache(ttl_seconds=2.0)
+        cache.set_environment(environment)
+        _price_caches[environment] = cache
+    return _price_caches[environment]
 
 class HyperliquidClient:
     def __init__(self, environment: str = "mainnet"):
@@ -56,18 +151,25 @@ class HyperliquidClient:
             logger.info("HIP3 market fetch disabled for market data client")
 
     def get_last_price(self, symbol: str) -> Optional[float]:
-        """Get the last price for a symbol"""
+        """Get the last price for a symbol using native API with caching"""
         try:
+            # Try native API cache first (faster, more symbols)
+            cache = get_price_cache(self.environment)
+            price = cache.get_price(symbol)
+            
+            if price is not None:
+                logger.debug(f"Got price for {symbol} from cache: {price}")
+                return price
+            
+            # Fallback to CCXT for symbols not in native API
             if not self.exchange:
                 self._initialize_exchange()
 
-            # Ensure symbol is in CCXT format (e.g., 'BTC/USD')
             formatted_symbol = self._format_symbol(symbol)
-
             ticker = self.exchange.fetch_ticker(formatted_symbol)
             price = ticker['last']
 
-            logger.info(f"Got price for {formatted_symbol}: {price}")
+            logger.info(f"Got price for {formatted_symbol} from CCXT: {price}")
             return float(price) if price else None
 
         except Exception as e:
@@ -376,23 +478,23 @@ class HyperliquidClient:
             return ['BTC/USD', 'ETH/USD', 'SOL/USD']  # Fallback popular pairs
 
     def _format_symbol(self, symbol: str) -> str:
-        """Format symbol for CCXT (e.g., 'BTC' -> 'BTC/USDC:USDC')"""
+        """Format symbol for CCXT (e.g., 'BTC' -> 'BTC/USDC:USDC')
+        
+        Hyperliquid primarily offers perpetual contracts, so we default to
+        perpetual format for all symbols. The exchange will return an error
+        if the symbol doesn't exist.
+        """
         if '/' in symbol and ':' in symbol:
             return symbol
         elif '/' in symbol:
             # If it's BTC/USDC, convert to BTC/USDC:USDC for Hyperliquid
             return f"{symbol}:USDC"
         
-        # For single symbols like 'BTC', check if it's a mainstream crypto
+        # For single symbols like 'BTC', always use perpetual swap format
+        # Hyperliquid is primarily a perpetual exchange, so all tradable
+        # assets should be available as perpetuals
         symbol_upper = symbol.upper()
-        mainstream_cryptos = ['BTC', 'ETH', 'SOL', 'DOGE', 'BNB', 'XRP']
-        
-        if symbol_upper in mainstream_cryptos:
-            # Use perpetual swap format for mainstream cryptos
-            return f"{symbol_upper}/USDC:USDC"
-        else:
-            # Use spot format for other cryptos
-            return f"{symbol_upper}/USDC"
+        return f"{symbol_upper}/USDC:USDC"
 
 
 # Client factory functions

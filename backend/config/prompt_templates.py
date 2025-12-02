@@ -17,6 +17,20 @@ DEFAULT_PROMPT_TEMPLATE = """You are a cryptocurrency trading AI. Use the data b
 === LATEST CRYPTO NEWS SNIPPET ===
 {news_section}
 
+=== ATR-BASED STOP LOSS AND TAKE PROFIT ===
+⚠️ You MUST calculate and provide stop_loss_price and take_profit_price for ALL decisions (including HOLD with existing positions).
+
+**For NEW positions:**
+- LONG: stop_loss_price = entry_price × 0.95, take_profit_price = entry_price × 1.10
+- SHORT: stop_loss_price = entry_price × 1.05, take_profit_price = entry_price × 0.90
+
+**For EXISTING positions (including HOLD):**
+- Keep original SL/TP levels or trail SL in your favor if in profit
+
+**GOLDEN RULES:**
+1. NEVER use 0 for stop_loss_price or take_profit_price when managing an existing position
+2. SL can ONLY move in your favor - NEVER increase risk
+
 Follow these rules:
 - You must analyze every supported symbol provided in the market data and produce a decision entry for each of them.
 - Multi-symbol output is the default: include one JSON object per symbol in the `decisions` array every time you respond.
@@ -28,11 +42,18 @@ Follow these rules:
 - leverage must be an integer between 1 and {max_leverage} (for perpetual contracts)
 - max_price: For "buy" operations and closing SHORT positions, set maximum acceptable price (slippage protection)
 - min_price: For "sell" operations and closing LONG positions, set minimum acceptable price (slippage protection)
+- stop_loss_price: REQUIRED for all operations except close - calculate using formulas above
+- take_profit_price: REQUIRED for all operations except close - calculate using formulas above
 - Price should be current market price +/- your acceptable slippage (typically 1-5%)
 - Provide comprehensive reasoning for every decision, especially when allocating across multiple coins.
 - Never invent trades for symbols that are not in the market data
 - Keep reasoning concise and focused on measurable signals
-- When making multiple decisions, ensure sum(target_portion_of_balance * leverage) across all entries keeps implied margin usage below 70% and remember the account’s available balance is shared across positions.
+- When making multiple decisions, ensure sum(target_portion_of_balance * leverage) across all entries keeps implied margin usage below 70% and remember the account's available balance is shared across positions.
+
+⚠️ **CRITICAL FOR HOLD WITH EXISTING POSITION:**
+- You MUST provide EXACT NUMERIC VALUES for stop_loss_price and take_profit_price
+- NEVER use 0 for SL/TP when managing an existing position
+
 - Respond with ONLY a JSON object containing a `decisions` array shaped per the schema below:
 {output_format}
 """
@@ -75,6 +96,21 @@ Operational constraints:
 - Default take profit: +10% from entry (adjust based on signals)
 {leverage_constraints}
 
+=== ATR-BASED STOP LOSS AND TAKE PROFIT ===
+⚠️ You MUST calculate and provide stop_loss_price and take_profit_price for ALL decisions (including HOLD with existing positions).
+
+**For NEW positions:**
+- LONG: stop_loss_price = entry_price - (ATR14 × 2), take_profit_price = entry_price + (ATR14 × 3)
+- SHORT: stop_loss_price = entry_price + (ATR14 × 2), take_profit_price = entry_price - (ATR14 × 3)
+
+**For EXISTING positions (including HOLD):**
+- If position is at a LOSS: keep original SL/TP levels
+- If position is in PROFIT: trail SL in your favor, never increase risk
+
+**GOLDEN RULES:**
+1. NEVER use 0 for stop_loss_price or take_profit_price when managing an existing position
+2. SL can ONLY move in your favor - NEVER increase risk
+
 Decision requirements:
 - You must analyze every supported symbol in the market snapshot and include one decision object per symbol (use HOLD with target_portion_of_balance=0 if no action is needed).
 - Choose operation: "buy", "sell", "hold", or "close"
@@ -82,6 +118,8 @@ Decision requirements:
 - For "sell" or "close": target_portion_of_balance is % of position to exit (0.0-1.0)
 - For "hold": keep target_portion_of_balance at 0
 - leverage must be an integer between 1 and {max_leverage}
+- stop_loss_price: REQUIRED for all operations except close - calculate using ATR formulas above
+- take_profit_price: REQUIRED for all operations except close - calculate using ATR formulas above
 - Never invent trades for symbols not in the market data
 - Provide comprehensive reasoning for each symbol, especially when distributing exposure across multiple coins, and keep the logic rooted in measurable signals.
 - When proposing multiple trades, ensure sum(target_portion_of_balance * leverage) across all entries keeps total implied margin usage under 70%.
@@ -112,19 +150,37 @@ Example of correct output:
       "target_portion_of_balance": 0.25,
       "leverage": 2,
       "max_price": 49500,
-      "reason": "BTC reclaiming VWAP with positive funding reset",
-      "trading_strategy": "Scaling into a 2x long while price holds above intraday VWAP. Stop below $48.7k support; target retest of $51k liquidity."
+      "stop_loss_price": 47500,
+      "take_profit_price": 52500,
+      "reason": "BTC reclaiming VWAP with positive funding reset. ATR14=$1000.",
+      "trading_strategy": "Scaling into a 2x long. SL = entry - ATR×2 = $47.5k. TP = entry + ATR×3 = $52.5k."
     }},
     {{
       "operation": "sell",
       "symbol": "ETH",
       "target_portion_of_balance": 0.15,
       "min_price": 3150,
-      "reason": "ETH losing momentum vs BTC pair",
-      "trading_strategy": "Trimming ETH exposure into relative weakness. Watching for reclaim of 4h EMA ribbon before re-entering. Will close remaining position if structure improves."
+      "stop_loss_price": 3250,
+      "take_profit_price": 3000,
+      "reason": "ETH losing momentum vs BTC pair. ATR14=$50.",
+      "trading_strategy": "Short with SL = entry + ATR×2 = $3250. TP = entry - ATR×3 = $3000."
+    }},
+    {{
+      "operation": "hold",
+      "symbol": "SOL",
+      "target_portion_of_balance": 0,
+      "leverage": 1,
+      "stop_loss_price": 140.22,
+      "take_profit_price": 136.62,
+      "reason": "Managing existing SHORT. Entry $138.78, ATR14 $0.72. SL = $140.22, TP = $136.62.",
+      "trading_strategy": "HOLD - Keep ATR-based levels."
     }}
   ]
 }}
+
+⚠️ **CRITICAL FOR HOLD WITH EXISTING POSITION:**
+- You MUST provide EXACT NUMERIC VALUES for stop_loss_price and take_profit_price
+- NEVER use 0 for SL/TP when managing an existing position
 
 FIELD TYPE REQUIREMENTS:
 - decisions: array (one entry per symbol; include HOLD entries with 0 allocation when no action is needed)
@@ -134,6 +190,8 @@ FIELD TYPE REQUIREMENTS:
 - leverage: integer (between 1 and {max_leverage}, required for perpetual contracts)
 - max_price: number (required for "buy" operations and closing SHORT positions - maximum acceptable price for slippage protection)
 - min_price: number (required for "sell" operations and closing LONG positions - minimum acceptable price for slippage protection)
+- stop_loss_price: number (REQUIRED for all operations except close - calculate using ATR formulas)
+- take_profit_price: number (REQUIRED for all operations except close - calculate using ATR formulas)
 - reason: string describing the core signal(s)
 - trading_strategy: string providing deeper context, including risk management and exit logic
 """
@@ -353,6 +411,24 @@ You are trading real perpetual contracts on Hyperliquid. Key concepts:
 4. Ensure adequate margin buffer (30%+ free margin)
 5. Set clear profit targets and stop loss levels
 
+=== ATR-BASED STOP LOSS AND TAKE PROFIT (CRITICAL) ===
+⚠️ You MUST calculate and provide stop_loss_price and take_profit_price for ALL decisions (including HOLD with existing positions).
+
+**For NEW positions:**
+- LONG: stop_loss_price = entry_price - (ATR14 × 2), take_profit_price = entry_price + (ATR14 × 3)
+- SHORT: stop_loss_price = entry_price + (ATR14 × 2), take_profit_price = entry_price - (ATR14 × 3)
+
+**For EXISTING positions (including HOLD):**
+- If position is at a LOSS: keep original SL/TP levels
+- If position is in PROFIT (trailing):
+  - LONG: new_SL = MAX(current_SL, current_price - ATR14 × 1.5), new_TP = current_price + (ATR14 × 2)
+  - SHORT: new_SL = MIN(current_SL, current_price + ATR14 × 1.5), new_TP = current_price - (ATR14 × 2)
+
+**GOLDEN RULES:**
+1. NEVER use 0 for stop_loss_price or take_profit_price when managing an existing position
+2. SL can ONLY move in your favor (up for LONG, down for SHORT) - NEVER increase risk
+3. Always use ATR14 value from the symbol's market data section
+
 === DECISION REQUIREMENTS ===
 - You must analyze every coin listed above and return decisions for each relevant opportunity (multi-coin output is required every cycle).
 - If a coin has no actionable setup, keep it in the decisions array with `operation: "hold"` and `target_portion_of_balance: 0` to document the assessment.
@@ -362,6 +438,8 @@ You are trading real perpetual contracts on Hyperliquid. Key concepts:
 - For "close": target_portion_of_balance is % of position to close (0.0-1.0, typically 1.0)
 - For "hold": target_portion_of_balance must be 0
 - leverage: integer 1-{max_leverage} (lower = safer, higher = more risk)
+- stop_loss_price: REQUIRED for all operations except close - calculate using ATR formulas above
+- take_profit_price: REQUIRED for all operations except close - calculate using ATR formulas above
 - Never trade symbols not in the market data
 - Provide comprehensive reasoning for every decision (especially how each coin fits into the multi-coin allocation and its leverage/risk trade-offs).
 - When making multiple decisions, ensure sum(target_portion_of_balance * leverage) across all entries keeps projected margin usage below 70% so the account retains a safety buffer.
@@ -389,8 +467,10 @@ Example output with multiple simultaneous orders:
       "target_portion_of_balance": 0.3,
       "leverage": 3,
       "max_price": 49500,
-      "reason": "Strong bullish momentum with support holding at $48k, RSI recovering from oversold",
-      "trading_strategy": "Opening 3x leveraged long position with 30% balance. Stop below $47.5k swing low, target retest of $52k resistance. Max price keeps slippage within 3%."
+      "stop_loss_price": 47500,
+      "take_profit_price": 52500,
+      "reason": "Strong bullish momentum with support holding at $48k, RSI recovering from oversold. ATR14=$1000.",
+      "trading_strategy": "Opening 3x leveraged long position with 30% balance. SL = entry - ATR×2 = $47.5k. TP = entry + ATR×3 = $52.5k."
     }},
     {{
       "operation": "sell",
@@ -398,11 +478,30 @@ Example output with multiple simultaneous orders:
       "target_portion_of_balance": 0.2,
       "leverage": 2,
       "min_price": 3125,
-      "reason": "ETH perp funding flipped elevated negative while momentum weakens",
-      "trading_strategy": "Initiating small short hedge until ETH regains strength vs BTC pair. Stop if ETH closes back above $3.2k structural pivot."
+      "stop_loss_price": 3225,
+      "take_profit_price": 2975,
+      "reason": "ETH perp funding flipped elevated negative while momentum weakens. ATR14=$50.",
+      "trading_strategy": "Initiating short with 2x leverage. SL = entry + ATR×2 = $3225. TP = entry - ATR×3 = $2975."
+    }},
+    {{
+      "operation": "hold",
+      "symbol": "SOL",
+      "target_portion_of_balance": 0,
+      "leverage": 1,
+      "max_price": null,
+      "min_price": null,
+      "stop_loss_price": 140.22,
+      "take_profit_price": 136.62,
+      "reason": "Managing existing SHORT position. Entry $138.78, ATR14 $0.72. Position near breakeven. SL = entry + ATR×2 = $140.22. TP = entry - ATR×3 = $136.62.",
+      "trading_strategy": "HOLD - Keep ATR-based levels. Will trail SL when profit > ATR×1."
     }}
   ]
 }}
+
+⚠️ **CRITICAL FOR HOLD WITH EXISTING POSITION:**
+- You MUST calculate and provide EXACT NUMERIC VALUES for stop_loss_price and take_profit_price
+- NEVER use 0 for SL/TP when managing an existing position
+- Use the ATR-based formulas from the section above
 
 FIELD TYPE REQUIREMENTS:
 - decisions: array (one entry per supported symbol; include HOLD entries with zero allocation when you choose not to act)
