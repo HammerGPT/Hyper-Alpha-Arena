@@ -757,12 +757,22 @@ export default function AlphaArenaFeed({
                           </div>
                           <span>{formatDate(entry.decision_time)}</span>
                         </div>
-                        <div className="text-sm font-medium text-foreground">
-                          {(entry.operation || 'UNKNOWN').toUpperCase()} {entry.symbol && (
-                            <span className="inline-flex items-center gap-1">
-                              {renderSymbolBadge(entry.symbol, 'sm')}
-                              {entry.symbol}
-                            </span>
+                        <div className="text-sm font-medium text-foreground flex items-center gap-2">
+                          <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                            entry.operation?.toLowerCase() === 'buy'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : entry.operation?.toLowerCase() === 'sell'
+                              ? 'bg-red-100 text-red-800'
+                              : entry.operation?.toLowerCase() === 'close'
+                              ? 'bg-orange-100 text-orange-800'
+                              : 'bg-gray-100 text-gray-800'
+                          }`}>
+                            {(entry.operation || 'UNKNOWN').toUpperCase()}
+                          </span>
+                          {entry.symbol ? (
+                            renderSymbolBadge(entry.symbol, 'sm')
+                          ) : (
+                            <span className="text-muted-foreground text-xs">(no symbol)</span>
                           )}
                         </div>
                         <div className="text-xs text-muted-foreground">

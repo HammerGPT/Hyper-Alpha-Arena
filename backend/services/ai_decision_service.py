@@ -1641,7 +1641,7 @@ def save_ai_decision(
             account_id=account.id,
             reason=reason,
             operation=operation,
-            symbol=symbol if operation != "hold" else None,
+            symbol=symbol,
             prev_portion=Decimal(str(prev_portion)),
             target_portion=Decimal(str(target_portion)),
             total_balance=Decimal(str(portfolio["total_assets"])),
