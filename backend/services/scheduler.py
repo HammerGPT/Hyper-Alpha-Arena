@@ -113,7 +113,10 @@ class TaskScheduler:
             args=args,
             kwargs=kwargs,
             id=task_id,
-            replace_existing=True
+            replace_existing=True,
+            max_instances=1,       # Avoid duplicate execution
+            coalesce=True,         # Combine missed executions into one
+            misfire_grace_time=5   # Allow 5 seconds grace time for late execution
         )
         
         logger.info(f"Added interval task {task_id}: Execute every {interval_seconds} seconds")
