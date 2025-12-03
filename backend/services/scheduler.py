@@ -151,9 +151,12 @@ class TaskScheduler:
             })
         return jobs
 
-    async def _execute_account_snapshot(self, account_id: int):
+    def _execute_account_snapshot(self, account_id: int):
         """
         Internal method to execute account snapshot update
+        
+        Note: This method is called by APScheduler's BackgroundScheduler which is synchronous.
+        Do NOT make this method async - APScheduler cannot await coroutines.
 
         Args:
             account_id: Account ID

@@ -1526,12 +1526,19 @@ class HyperliquidTradingClient:
         """
         Update TP and/or SL orders for an existing position
 
-        This method:
-        1. Gets current TP/SL orders from Hyperliquid API FIRST
-        2. Compares existing prices with requested prices
-        3. If prices match (within 0.1%) → SKIP entirely (no duplicate orders)
-        4. If prices differ → Cancel old orders and place new ones
-        5. Updates in-memory cache after successful operations
+        This method uses a TWO-TIER caching strategy to minimize API calls:
+        
+        TIER 1 - In-Memory Cache Check (NO API call):
+        1. Check if requested TP/SL match cached values (within 0.1%)
+        2. If BOTH match → SKIP entirely (no API call needed)
+        3. If cache miss or values differ → proceed to Tier 2
+        
+        TIER 2 - API Verification (only when cache miss/mismatch):
+        4. Fetch current orders from Hyperliquid API
+        5. Compare API values with requested values
+        6. If prices match → SKIP (update cache)
+        7. If prices differ → Cancel old orders and place new ones
+        8. Update cache after successful operations
 
         Args:
             db: Database session
@@ -1551,6 +1558,7 @@ class HyperliquidTradingClient:
                 - new_tp: New TP price (if updated)
                 - new_sl: New SL price (if updated)
                 - errors: List of error messages (if any)
+                - skipped_by_cache: Boolean indicating if skipped due to cache match
         """
         self._validate_environment(db)
 
@@ -1563,6 +1571,7 @@ class HyperliquidTradingClient:
             'new_tp': None,
             'new_sl': None,
             'errors': [],
+            'skipped_by_cache': False,
         }
 
         # 0.1% threshold to account for rounding differences
@@ -1572,8 +1581,62 @@ class HyperliquidTradingClient:
             import sys
             
             # ============================================================
-            # STEP 1: Get current TP/SL orders from Hyperliquid API FIRST
-            # This is the source of truth - not the in-memory cache
+            # TIER 1: Check in-memory cache FIRST (NO API call)
+            # This prevents unnecessary API calls when TP/SL haven't changed
+            # ============================================================
+            cached_tpsl = _get_cached_tpsl(self.wallet_address, symbol)
+            
+            if cached_tpsl is not None:
+                cached_tp = cached_tpsl.get('tp_price')
+                cached_sl = cached_tpsl.get('sl_price')
+                cache_age_ms = int(time.time() * 1000) - cached_tpsl.get('timestamp', 0)
+                cache_age_seconds = cache_age_ms / 1000
+                
+                # Check if requested values match cached values (within threshold)
+                tp_matches_cache = False
+                sl_matches_cache = False
+                
+                # Check TP match
+                if new_tp_price is None:
+                    tp_matches_cache = True  # No new TP requested
+                elif cached_tp is not None and cached_tp > 0:
+                    tp_diff = abs(cached_tp - new_tp_price) / cached_tp
+                    tp_matches_cache = tp_diff <= PRICE_CHANGE_THRESHOLD_PERCENT
+                
+                # Check SL match
+                if new_sl_price is None:
+                    sl_matches_cache = True  # No new SL requested
+                elif cached_sl is not None and cached_sl > 0:
+                    sl_diff = abs(cached_sl - new_sl_price) / cached_sl
+                    sl_matches_cache = sl_diff <= PRICE_CHANGE_THRESHOLD_PERCENT
+                
+                # If BOTH match cache → SKIP entirely (no API call needed)
+                if tp_matches_cache and sl_matches_cache:
+                    print(
+                        f"[TPSL CACHE HIT] {symbol} - Requested TP={new_tp_price}, SL={new_sl_price} "
+                        f"matches cache TP={cached_tp}, SL={cached_sl} (age={cache_age_seconds:.1f}s) - SKIPPING API CALL",
+                        file=sys.stderr, flush=True
+                    )
+                    logger.info(
+                        f"[TPSL CACHE HIT] {symbol} - Values match cache, skipping API call "
+                        f"(cache age: {cache_age_seconds:.1f}s)"
+                    )
+                    result['skipped_by_cache'] = True
+                    result['old_tp'] = cached_tp
+                    result['old_sl'] = cached_sl
+                    return result
+                else:
+                    print(
+                        f"[TPSL CACHE MISS] {symbol} - Cache TP={cached_tp}, SL={cached_sl} "
+                        f"differs from requested TP={new_tp_price}, SL={new_sl_price} - proceeding to API check",
+                        file=sys.stderr, flush=True
+                    )
+            else:
+                print(f"[TPSL CACHE EMPTY] {symbol} - No cached values, proceeding to API check", file=sys.stderr, flush=True)
+            
+            # ============================================================
+            # TIER 2: Get current TP/SL orders from Hyperliquid API
+            # Only reached if cache miss or values differ from cache
             # ============================================================
             print(f"[TPSL UPDATE] {symbol} - Fetching current orders from Hyperliquid API...", file=sys.stderr, flush=True)
             logger.info(f"[TPSL UPDATE] {symbol} - Fetching current orders from Hyperliquid API")

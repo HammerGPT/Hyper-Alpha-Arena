@@ -75,10 +75,8 @@ class MarketDataStream:
     def _process_symbol(self, symbol: str) -> None:
         """Fetch ticker for symbol, update cache, persist tick, publish event."""
         try:
-            print(f"Fetching price for {symbol}...")
             client = get_default_hyperliquid_client()
             ticker_price = client.get_last_price(symbol)
-            print(f"Got price for {symbol}: {ticker_price}")
         except Exception as fetch_err:
             logger.warning("Failed to fetch price for %s: %s", symbol, fetch_err)
             return

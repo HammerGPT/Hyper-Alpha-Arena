@@ -807,9 +807,183 @@ async def health_check():
             'positions': '/api/hyperliquid/accounts/{id}/positions',
             'snapshots': '/api/hyperliquid/accounts/{id}/snapshots',
             'test': '/api/hyperliquid/accounts/{id}/test-connection',
-            'wallet': '/api/hyperliquid/accounts/{id}/wallet'
+            'wallet': '/api/hyperliquid/accounts/{id}/wallet',
+            'websocket_status': '/api/hyperliquid/websocket/status'
         }
     }
+
+
+@router.get("/websocket/status")
+async def get_websocket_status():
+    """
+    Get Hyperliquid WebSocket connection status and statistics.
+    
+    Returns real-time information about:
+    - WebSocket connection status for mainnet and testnet
+    - Number of active subscriptions
+    - Price cache statistics
+    - HTTP fallback usage count
+    
+    This endpoint helps monitor the health of the WebSocket-based
+    price streaming system and identify if HTTP fallback is being used.
+    """
+    try:
+        from services.hyperliquid_websocket import get_websocket_manager
+        from services.hyperliquid_market_data import get_price_cache
+        
+        result = {
+            'websocket': {
+                'mainnet': {
+                    'connected': False,
+                    'subscriptions': 0,
+                    'cached_prices': 0,
+                },
+                'testnet': {
+                    'connected': False,
+                    'subscriptions': 0,
+                    'cached_prices': 0,
+                }
+            },
+            'price_cache': {
+                'mainnet': {},
+                'testnet': {}
+            },
+            'recommendations': []
+        }
+        
+        # Check mainnet WebSocket
+        try:
+            mainnet_ws = get_websocket_manager("mainnet")
+            result['websocket']['mainnet']['connected'] = mainnet_ws.is_connected
+            result['websocket']['mainnet']['subscriptions'] = len(mainnet_ws._subscriptions)
+            result['websocket']['mainnet']['cached_prices'] = len(mainnet_ws.all_mids)
+        except Exception as e:
+            logger.warning(f"Error checking mainnet WebSocket: {e}")
+        
+        # Check testnet WebSocket
+        try:
+            testnet_ws = get_websocket_manager("testnet")
+            result['websocket']['testnet']['connected'] = testnet_ws.is_connected
+            result['websocket']['testnet']['subscriptions'] = len(testnet_ws._subscriptions)
+            result['websocket']['testnet']['cached_prices'] = len(testnet_ws.all_mids)
+        except Exception as e:
+            logger.warning(f"Error checking testnet WebSocket: {e}")
+        
+        # Check price cache statistics
+        try:
+            mainnet_cache = get_price_cache("mainnet")
+            result['price_cache']['mainnet'] = mainnet_cache.get_stats()
+        except Exception as e:
+            logger.warning(f"Error getting mainnet cache stats: {e}")
+        
+        try:
+            testnet_cache = get_price_cache("testnet")
+            result['price_cache']['testnet'] = testnet_cache.get_stats()
+        except Exception as e:
+            logger.warning(f"Error getting testnet cache stats: {e}")
+        
+        # Generate recommendations
+        if not result['websocket']['mainnet']['connected']:
+            result['recommendations'].append(
+                "Mainnet WebSocket not connected. Price data will use HTTP polling (higher API quota usage)."
+            )
+        
+        if not result['websocket']['testnet']['connected']:
+            result['recommendations'].append(
+                "Testnet WebSocket not connected. Price data will use HTTP polling (higher API quota usage)."
+            )
+        
+        mainnet_http_fallback = result['price_cache']['mainnet'].get('http_fallback_count', 0)
+        testnet_http_fallback = result['price_cache']['testnet'].get('http_fallback_count', 0)
+        
+        if mainnet_http_fallback > 100:
+            result['recommendations'].append(
+                f"High HTTP fallback usage on mainnet ({mainnet_http_fallback} calls). "
+                "Consider restarting the application to re-establish WebSocket connection."
+            )
+        
+        if testnet_http_fallback > 100:
+            result['recommendations'].append(
+                f"High HTTP fallback usage on testnet ({testnet_http_fallback} calls). "
+                "Consider restarting the application to re-establish WebSocket connection."
+            )
+        
+        if not result['recommendations']:
+            result['recommendations'].append("All systems operating normally with WebSocket streaming.")
+        
+        # Calculate overall status
+        mainnet_ok = result['websocket']['mainnet']['connected']
+        testnet_ok = result['websocket']['testnet']['connected']
+        
+        if mainnet_ok and testnet_ok:
+            result['overall_status'] = 'healthy'
+        elif mainnet_ok or testnet_ok:
+            result['overall_status'] = 'degraded'
+        else:
+            result['overall_status'] = 'unhealthy'
+        
+        return result
+        
+    except ImportError as e:
+        return {
+            'overall_status': 'unavailable',
+            'error': f'WebSocket module not available: {str(e)}',
+            'recommendations': ['WebSocket module not installed. Using HTTP polling for all price data.']
+        }
+    except Exception as e:
+        logger.error(f"Error getting WebSocket status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get WebSocket status: {str(e)}")
+
+
+@router.post("/websocket/reconnect")
+async def reconnect_websocket(
+    environment: str = Query("mainnet", pattern="^(mainnet|testnet)$", description="Environment to reconnect")
+):
+    """
+    Manually reconnect Hyperliquid WebSocket for a specific environment.
+    
+    Use this endpoint if WebSocket connection is lost and automatic
+    reconnection has failed.
+    
+    Args:
+        environment: "mainnet" or "testnet"
+    """
+    try:
+        from services.hyperliquid_websocket import get_websocket_manager
+        
+        manager = get_websocket_manager(environment)
+        
+        # Disconnect if connected
+        if manager.is_connected:
+            await manager.disconnect()
+        
+        # Reconnect
+        success = await manager.connect()
+        
+        if success:
+            # Resubscribe to allMids
+            await manager.subscribe_all_mids()
+            
+            return {
+                'success': True,
+                'environment': environment,
+                'message': f'WebSocket reconnected and subscribed to allMids for {environment}',
+                'connected': manager.is_connected,
+                'subscriptions': len(manager._subscriptions)
+            }
+        else:
+            return {
+                'success': False,
+                'environment': environment,
+                'message': f'Failed to reconnect WebSocket for {environment}',
+                'connected': False
+            }
+            
+    except ImportError as e:
+        raise HTTPException(status_code=503, detail=f"WebSocket module not available: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error reconnecting WebSocket: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to reconnect WebSocket: {str(e)}")
 
 
 # ========== Wallet Management API (New Multi-Wallet Architecture) ==========

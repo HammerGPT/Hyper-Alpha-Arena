@@ -2,6 +2,7 @@
 
 import logging
 import threading
+import asyncio
 
 from services.auto_trader import (
     place_ai_driven_crypto_order,
@@ -22,6 +23,75 @@ from services.hyperliquid_symbol_service import (
 
 logger = logging.getLogger(__name__)
 
+# Track WebSocket initialization status
+_websocket_initialized = False
+
+
+async def initialize_hyperliquid_websocket():
+    """
+    Initialize Hyperliquid WebSocket connections for real-time data.
+    
+    This dramatically reduces API quota consumption by using WebSocket
+    for price data instead of HTTP polling.
+    
+    WebSocket connections do NOT count toward address-based rate limits.
+    """
+    global _websocket_initialized
+    
+    print(">>> initialize_hyperliquid_websocket() called")
+    
+    if _websocket_initialized:
+        print(">>> Hyperliquid WebSocket already initialized")
+        logger.info("Hyperliquid WebSocket already initialized")
+        return
+    
+    try:
+        from services.hyperliquid_websocket import (
+            start_websocket_manager,
+            get_websocket_manager,
+        )
+        
+        # Initialize WebSocket for mainnet
+        print(">>> Initializing Hyperliquid WebSocket for mainnet...")
+        logger.info("Initializing Hyperliquid WebSocket for mainnet...")
+        mainnet_manager = await start_websocket_manager("mainnet")
+        
+        if mainnet_manager.is_connected:
+            # Subscribe to all mid prices (real-time price streaming)
+            await mainnet_manager.subscribe_all_mids()
+            print(">>> ✅ Hyperliquid mainnet WebSocket connected and subscribed to allMids")
+            logger.info("✅ Hyperliquid mainnet WebSocket connected and subscribed to allMids")
+        else:
+            print(">>> ⚠️ Failed to connect Hyperliquid mainnet WebSocket")
+            logger.warning("⚠️ Failed to connect Hyperliquid mainnet WebSocket")
+        
+        # Initialize WebSocket for testnet
+        print(">>> Initializing Hyperliquid WebSocket for testnet...")
+        logger.info("Initializing Hyperliquid WebSocket for testnet...")
+        testnet_manager = await start_websocket_manager("testnet")
+        
+        if testnet_manager.is_connected:
+            await testnet_manager.subscribe_all_mids()
+            print(">>> ✅ Hyperliquid testnet WebSocket connected and subscribed to allMids")
+            logger.info("✅ Hyperliquid testnet WebSocket connected and subscribed to allMids")
+        else:
+            print(">>> ⚠️ Failed to connect Hyperliquid testnet WebSocket")
+            logger.warning("⚠️ Failed to connect Hyperliquid testnet WebSocket")
+        
+        _websocket_initialized = True
+        print(">>> Hyperliquid WebSocket initialization complete")
+        logger.info("Hyperliquid WebSocket initialization complete")
+        
+    except ImportError as e:
+        print(f">>> WebSocket module not available: {e}")
+        logger.warning(f"WebSocket module not available: {e}. Using HTTP fallback for prices.")
+    except Exception as e:
+        print(f">>> Failed to initialize Hyperliquid WebSocket: {e}")
+        import traceback
+        traceback.print_exc()
+        logger.error(f"Failed to initialize Hyperliquid WebSocket: {e}")
+        logger.warning("Falling back to HTTP polling for price data (higher API quota usage)")
+
 
 def initialize_services():
     """Initialize all services"""
@@ -31,6 +101,12 @@ def initialize_services():
         start_scheduler()
         print("Scheduler started")
         logger.info("Scheduler service started")
+
+        # Initialize Hyperliquid WebSocket for real-time price data
+        # This MUST be done early to reduce API quota consumption
+        # Note: WebSocket initialization is deferred to startup_event() which runs in async context
+        print("Hyperliquid WebSocket will be initialized in async startup event")
+        logger.info("Hyperliquid WebSocket initialization deferred to async startup")
 
         # Refresh Hyperliquid symbol catalog + schedule periodic updates
         refresh_hyperliquid_symbols()
@@ -85,7 +161,6 @@ def initialize_services():
 
         # Start Hyperliquid account snapshot service (every 30 seconds)
         from services.hyperliquid_snapshot_service import hyperliquid_snapshot_service
-        import asyncio
         asyncio.create_task(hyperliquid_snapshot_service.start())
         logger.info("Hyperliquid snapshot service started (30-second interval)")
 
@@ -101,13 +176,30 @@ def initialize_services():
         raise
 
 
+async def shutdown_hyperliquid_websocket():
+    """Shutdown Hyperliquid WebSocket connections"""
+    global _websocket_initialized
+    
+    try:
+        from services.hyperliquid_websocket import stop_all_websocket_managers
+        
+        logger.info("Shutting down Hyperliquid WebSocket connections...")
+        await stop_all_websocket_managers()
+        _websocket_initialized = False
+        logger.info("Hyperliquid WebSocket connections closed")
+        
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.error(f"Error shutting down Hyperliquid WebSocket: {e}")
+
+
 def shutdown_services():
     """Shut down all services"""
     try:
         from services.scheduler import stop_scheduler
         from services.hyperliquid_snapshot_service import hyperliquid_snapshot_service
         from services.kline_realtime_collector import realtime_collector
-        import asyncio
 
         stop_strategy_manager()
         stop_market_stream()
@@ -116,6 +208,16 @@ def shutdown_services():
 
         # Stop K-line realtime collector
         asyncio.create_task(realtime_collector.stop())
+
+        # Stop Hyperliquid WebSocket connections
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(shutdown_hyperliquid_websocket())
+            else:
+                loop.run_until_complete(shutdown_hyperliquid_websocket())
+        except RuntimeError:
+            asyncio.run(shutdown_hyperliquid_websocket())
 
         stop_scheduler()
         logger.info("All services have been shut down")
@@ -127,11 +229,16 @@ def shutdown_services():
 async def startup_event():
     """FastAPI application startup event"""
     initialize_services()
+    
+    # Ensure WebSocket is initialized in async context
+    await initialize_hyperliquid_websocket()
 
 
 async def shutdown_event():
     """FastAPI application shutdown event"""
-    await shutdown_services()
+    # Shutdown WebSocket first
+    await shutdown_hyperliquid_websocket()
+    shutdown_services()
 
 
 def schedule_auto_trading(interval_seconds: int = 300, max_ratio: float = 0.2, use_ai: bool = True) -> None:

@@ -20,6 +20,7 @@ from services.market_data import get_last_price
 from services.scheduler import add_account_snapshot_job, remove_account_snapshot_job
 from services.hyperliquid_cache import get_cached_account_state, get_cached_positions
 from services.hyperliquid_environment import get_hyperliquid_client
+from services.hyperliquid_websocket import get_websocket_manager, get_realtime_price
 
 
 class ConnectionManager:
@@ -474,18 +475,25 @@ async def _send_hyperliquid_snapshot(db: Session, account_id: int, environment: 
         }
 
         # Transform Hyperliquid positions to frontend format
+        # Use WebSocket manager for real-time prices (zero API cost)
+        ws_manager = get_websocket_manager(environment)
+        
         enriched_positions = []
         for p in positions_data:
+            coin = p.get("coin", "")
+            # Get real-time price from WebSocket cache (no HTTP call!)
+            last_price = ws_manager.get_mid_price(coin) if ws_manager.is_connected else None
+            
             enriched_positions.append({
                 "id": 0,  # Hyperliquid positions don't have local DB ID
                 "account_id": account_id,
-                "symbol": p.get("coin", ""),
-                "name": p.get("coin", ""),
+                "symbol": coin,
+                "name": coin,
                 "market": "HYPERLIQUID_PERP",
                 "quantity": abs(p.get("szi", 0)),  # Absolute size
                 "available_quantity": abs(p.get("szi", 0)),
                 "avg_cost": p.get("entry_px", 0),
-                "last_price": None,  # Can fetch from market data if needed
+                "last_price": last_price,  # From WebSocket cache - zero API cost!
                 "market_value": p.get("position_value", 0),
                 "current_value": p.get("position_value", 0),
                 "unrealized_pnl": p.get("unrealized_pnl", 0),
@@ -587,6 +595,13 @@ async def _send_hyperliquid_snapshot(db: Session, account_id: int, environment: 
                 "margin_usage_percent": account_state.get("margin_usage_percent", 0),
                 "source": data_source,
                 "wallet_address": wallet_address,
+            },
+            # WebSocket status for monitoring API quota savings
+            "websocket_status": {
+                "connected": ws_manager.is_connected,
+                "environment": environment,
+                "cached_prices_count": len(ws_manager.all_mids),
+                "price_source": "websocket" if ws_manager.is_connected else "http_fallback",
             }
         }
 
