@@ -140,6 +140,8 @@ class HyperliquidClient:
             hip3_options = fetch_markets_options.setdefault('hip3', {})
             hip3_options['enabled'] = False
             hip3_options['dex'] = []
+            # Manually initialize hip3TokensByName to prevent KeyError in coin_to_market_id()
+            self.exchange.options.setdefault('hip3TokensByName', {})
         except Exception as options_error:
             logger.debug(f"Unable to update HIP3 fetch options: {options_error}")
 

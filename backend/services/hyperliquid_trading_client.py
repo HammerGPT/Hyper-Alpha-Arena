@@ -169,6 +169,13 @@ class HyperliquidTradingClient:
             })
             self._disable_hip3_markets()
 
+            # Load markets to initialize token mappings (required for CCXT 4.5+)
+            try:
+                self.exchange.load_markets()
+                logger.info(f"CCXT markets loaded successfully for {environment}")
+            except Exception as market_err:
+                logger.warning(f"Failed to load CCXT markets (non-critical): {market_err}")
+
             logger.info(
                 f"CCXT HyperliquidClient initialized: account_id={account_id} "
                 f"environment={environment.upper()} wallet={self.wallet_address}"
@@ -214,6 +221,8 @@ class HyperliquidTradingClient:
             hip3_options = fetch_markets_options.setdefault('hip3', {})
             hip3_options['enabled'] = False
             hip3_options['dex'] = []
+            # Manually initialize hip3TokensByName to prevent KeyError in coin_to_market_id()
+            self.exchange.options.setdefault('hip3TokensByName', {})
         except Exception as options_error:
             logger.debug(f"Unable to update HIP3 fetch options: {options_error}")
 

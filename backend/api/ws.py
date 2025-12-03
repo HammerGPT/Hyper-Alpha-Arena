@@ -733,10 +733,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
     try:
         while True:
-            # Check if WebSocket is still connected before trying to receive
-            if websocket.client_state.name != "CONNECTED":
-                break
-                
             try:
                 data = await websocket.receive_text()
             except WebSocketDisconnect:
