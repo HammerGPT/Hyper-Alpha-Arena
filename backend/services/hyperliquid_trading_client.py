@@ -2527,8 +2527,8 @@ class HyperliquidTradingClient:
         try:
             # Set leverage before placing order
             try:
-                self.exchange.set_leverage(leverage, f"{symbol}/USDC:USDC")
-                logger.debug(f"Set leverage to {leverage}x for {symbol}")
+                result = self.sdk_exchange.update_leverage(leverage, symbol, is_cross = True) # True: Cross, False: Isolated
+                logger.debug(f"Set leverage to {leverage}x for {symbol} result: {result}")
                 self._record_exchange_action(
                     action_type="set_leverage",
                     status="success",
