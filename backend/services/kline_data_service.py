@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import insert, and_
 import logging
 
 from database.connection import SessionLocal
@@ -112,36 +112,42 @@ class KlineDataService:
 
         try:
             with SessionLocal() as db:
+                dialect = db.bind.dialect.name
+                records = []
                 for kline in klines_data:
                     # Generate datetime_str from timestamp (UTC)
                     datetime_str = datetime.utcfromtimestamp(kline.timestamp).strftime('%Y-%m-%d %H:%M:%S')
 
-                    # 使用原生SQL的ON CONFLICT DO NOTHING实现去重
                     # NOTE: K线数据库只存储 mainnet 数据，testnet 数据实时获取不存储
-                    db.execute(text("""
-                        INSERT INTO crypto_klines (
-                            exchange, symbol, market, timestamp, period, datetime_str,
-                            open_price, high_price, low_price, close_price, volume,
-                            environment, created_at
-                        ) VALUES (
-                            :exchange, :symbol, :market, :timestamp, :period, :datetime_str,
-                            :open_price, :high_price, :low_price, :close_price, :volume,
-                            'mainnet', CURRENT_TIMESTAMP
-                        ) ON CONFLICT (exchange, symbol, market, period, timestamp, environment) DO NOTHING
-                    """), {
-                        'exchange': kline.exchange,
-                        'symbol': kline.symbol,
-                        'market': 'CRYPTO',
-                        'timestamp': kline.timestamp,
-                        'period': kline.period,
-                        'datetime_str': datetime_str,
-                        'open_price': kline.open_price,
-                        'high_price': kline.high_price,
-                        'low_price': kline.low_price,
-                        'close_price': kline.close_price,
-                        'volume': kline.volume
+                    records.append({
+                        "exchange": kline.exchange,
+                        "symbol": kline.symbol,
+                        "market": 'CRYPTO',
+                        "timestamp": kline.timestamp,
+                        "period": kline.period,
+                        "datetime_str": datetime_str,
+                        "open_price": kline.open_price,
+                        "high_price": kline.high_price,
+                        "low_price": kline.low_price,
+                        "close_price": kline.close_price,
+                        "volume": kline.volume,
+                        "environment": "mainnet",
+                        "created_at": datetime.utcnow()
                     })
 
+                # Use INSERT IGNORE with checking dialect for deduplication
+                if dialect == 'mysql':
+                    from sqlalchemy.dialects.mysql import insert as ms_insert
+                    stmt = ms_insert(CryptoKline).values(records).prefix_with("IGNORE")
+                elif dialect == 'postgresql':
+                    from sqlalchemy.dialects.postgresql import insert as pg_insert
+                    stmt = pg_insert(CryptoKline).values(records).on_conflict_do_nothing()
+                elif dialect == 'sqlite':
+                    stmt = insert(CryptoKline).values(records).prefix_with("OR IGNORE")
+                else:
+                    stmt = insert(CryptoKline).values(records)
+
+                db.execute(stmt)
                 db.commit()
                 logger.debug(f"Inserted {len(klines_data)} klines for {klines_data[0].symbol}")
                 return True
@@ -156,20 +162,18 @@ class KlineDataService:
 
         try:
             with SessionLocal() as db:
-                query = """
-                    SELECT * FROM kline_coverage_stats
-                    WHERE exchange = :exchange
-                """
-                params = {'exchange': self.exchange_id}
-
+                # KlineCoverageStats model there is not
+                query = db.query(KlineCoverageStats).filter(
+                    KlineCoverageStats.exchange == self.exchange_id
+                )
+                
                 if symbols:
-                    query += " AND symbol = ANY(:symbols)"
-                    params['symbols'] = symbols
-
-                query += " ORDER BY symbol, period"
-
-                result = db.execute(text(query), params)
-                return [dict(row._mapping) for row in result]
+                    query = query.filter(KlineCoverageStats.symbol.in_(symbols))
+                
+                query = query.order_by(KlineCoverageStats.symbol, KlineCoverageStats.period)
+                
+                result = query.all()
+                return [vars(row) for row in result]
 
         except Exception as e:
             logger.error(f"Failed to get data coverage: {e}")
@@ -188,20 +192,17 @@ class KlineDataService:
         try:
             with SessionLocal() as db:
                 # 获取现有的时间戳
-                result = db.execute(text("""
-                    SELECT timestamp FROM crypto_klines
-                    WHERE exchange = :exchange AND symbol = :symbol
-                    AND period = :period AND timestamp BETWEEN :start_ts AND :end_ts
-                    ORDER BY timestamp
-                """), {
-                    'exchange': self.exchange_id,
-                    'symbol': symbol,
-                    'period': period,
-                    'start_ts': int(start_time.timestamp()),
-                    'end_ts': int(end_time.timestamp())
-                })
+                result = db.query(CryptoKline.timestamp).filter(
+                    and_(
+                        CryptoKline.exchange == self.exchange_id,
+                        CryptoKline.symbol == symbol,
+                        CryptoKline.period == period,
+                        CryptoKline.timestamp >= int(start_time.timestamp()),
+                        CryptoKline.timestamp <= int(end_time.timestamp())
+                    )
+                ).order_by(CryptoKline.timestamp).all()
 
-                existing_timestamps = {row[0] for row in result}
+                existing_timestamps = {row.timestamp for row in result}
 
                 # 生成期望的时间戳序列（1分钟间隔）
                 expected_timestamps = []

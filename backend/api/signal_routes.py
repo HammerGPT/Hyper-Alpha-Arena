@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 from typing import List, Optional
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import text
 
 from database.connection import SessionLocal
+from database.models import SignalDefinition, SignalPool, SignalTriggerLog, User
 from schemas.signal import (
     SignalDefinitionCreate,
     SignalDefinitionUpdate,
@@ -37,41 +38,33 @@ def get_db():
 @router.get("/", response_model=SignalListResponse)
 def list_signals(db: Session = Depends(get_db)) -> SignalListResponse:
     """List all signal definitions and pools"""
-    import json
-
-    signals_result = db.execute(text("""
-        SELECT id, signal_name, description, trigger_condition, enabled, created_at, updated_at
-        FROM signal_definitions ORDER BY id
-    """))
+    signals_result = db.query(SignalDefinition).order_by(SignalDefinition.id).all()
     signals = []
     for row in signals_result:
         # Parse trigger_condition from JSON string if needed
-        trigger_condition = row[3]
+        trigger_condition = row.trigger_condition
         if isinstance(trigger_condition, str):
             trigger_condition = json.loads(trigger_condition)
         signals.append(SignalDefinitionResponse(
-            id=row[0], signal_name=row[1], description=row[2],
-            trigger_condition=trigger_condition, enabled=row[4],
-            created_at=row[5], updated_at=row[6]
+            id=row.id, signal_name=row.signal_name, description=row.description,
+            trigger_condition=trigger_condition, enabled=row.enabled,
+            created_at=row.created_at, updated_at=row.updated_at
         ))
 
-    pools_result = db.execute(text("""
-        SELECT id, pool_name, signal_ids, symbols, enabled, created_at, logic
-        FROM signal_pools ORDER BY id
-    """))
+    pools_result = db.query(SignalPool).order_by(SignalPool.id).all()
     pools = []
     for row in pools_result:
         # Parse JSON fields if they are strings
-        signal_ids = row[2]
+        signal_ids = row.signal_ids
         if isinstance(signal_ids, str):
             signal_ids = json.loads(signal_ids)
-        symbols = row[3]
+        symbols = row.symbols
         if isinstance(symbols, str):
             symbols = json.loads(symbols)
         pools.append(SignalPoolResponse(
-            id=row[0], pool_name=row[1], signal_ids=signal_ids or [],
-            symbols=symbols or [], enabled=row[4], created_at=row[5],
-            logic=row[6] or "OR"
+            id=row.id, pool_name=row.pool_name, signal_ids=signal_ids or [],
+            symbols=symbols or [], enabled=row.enabled, created_at=row.created_at,
+            logic=row.logic or "OR"
         ))
 
     return SignalListResponse(signals=signals, pools=pools)
@@ -80,97 +73,80 @@ def list_signals(db: Session = Depends(get_db)) -> SignalListResponse:
 @router.post("/definitions", response_model=SignalDefinitionResponse)
 def create_signal(payload: SignalDefinitionCreate, db: Session = Depends(get_db)):
     """Create a new signal definition"""
-    import json
-    result = db.execute(text("""
-        INSERT INTO signal_definitions (signal_name, description, trigger_condition, enabled)
-        VALUES (:name, :desc, :condition, :enabled)
-        RETURNING id, signal_name, description, trigger_condition, enabled, created_at, updated_at
-    """), {
-        "name": payload.signal_name,
-        "desc": payload.description,
-        "condition": json.dumps(payload.trigger_condition),
-        "enabled": payload.enabled
-    })
+    result = SignalDefinition(
+        signal_name=payload.signal_name,
+        description=payload.description,
+        trigger_condition=json.dumps(payload.trigger_condition),
+        enabled=payload.enabled
+    )
+    db.add(result)
     db.commit()
-    row = result.fetchone()
-    trigger_condition = row[3]
+    db.refresh(result)
+    
+    trigger_condition = result.trigger_condition
     if isinstance(trigger_condition, str):
         trigger_condition = json.loads(trigger_condition)
     return SignalDefinitionResponse(
-        id=row[0], signal_name=row[1], description=row[2],
-        trigger_condition=trigger_condition, enabled=row[4],
-        created_at=row[5], updated_at=row[6]
+        id=result.id, signal_name=result.signal_name, description=result.description,
+        trigger_condition=trigger_condition, enabled=result.enabled,
+        created_at=result.created_at, updated_at=result.updated_at
     )
 
 
 @router.get("/definitions/{signal_id}", response_model=SignalDefinitionResponse)
 def get_signal(signal_id: int, db: Session = Depends(get_db)):
     """Get a signal definition by ID"""
-    import json
-    result = db.execute(text("""
-        SELECT id, signal_name, description, trigger_condition, enabled, created_at, updated_at
-        FROM signal_definitions WHERE id = :id
-    """), {"id": signal_id})
-    row = result.fetchone()
-    if not row:
+    result = db.query(SignalDefinition).filter(SignalDefinition.id == signal_id).first()
+    if not result:
         raise HTTPException(status_code=404, detail="Signal not found")
-    trigger_condition = row[3]
+    
+    trigger_condition = result.trigger_condition
     if isinstance(trigger_condition, str):
         trigger_condition = json.loads(trigger_condition)
     return SignalDefinitionResponse(
-        id=row[0], signal_name=row[1], description=row[2],
-        trigger_condition=trigger_condition, enabled=row[4],
-        created_at=row[5], updated_at=row[6]
+        id=result.id, signal_name=result.signal_name, description=result.description,
+        trigger_condition=trigger_condition, enabled=result.enabled,
+        created_at=result.created_at, updated_at=result.updated_at
     )
 
 
 @router.put("/definitions/{signal_id}", response_model=SignalDefinitionResponse)
 def update_signal(signal_id: int, payload: SignalDefinitionUpdate, db: Session = Depends(get_db)):
     """Update a signal definition"""
-    import json
-    # Build dynamic update query
-    updates = []
-    params = {"id": signal_id}
-    if payload.signal_name is not None:
-        updates.append("signal_name = :name")
-        params["name"] = payload.signal_name
-    if payload.description is not None:
-        updates.append("description = :desc")
-        params["desc"] = payload.description
-    if payload.trigger_condition is not None:
-        updates.append("trigger_condition = :condition")
-        params["condition"] = json.dumps(payload.trigger_condition)
-    if payload.enabled is not None:
-        updates.append("enabled = :enabled")
-        params["enabled"] = payload.enabled
-
-    if not updates:
-        raise HTTPException(status_code=400, detail="No fields to update")
-
-    updates.append("updated_at = CURRENT_TIMESTAMP")
-    query = f"UPDATE signal_definitions SET {', '.join(updates)} WHERE id = :id RETURNING *"
-    result = db.execute(text(query), params)
-    db.commit()
-    row = result.fetchone()
-    if not row:
+    result = db.query(SignalDefinition).filter(SignalDefinition.id == signal_id).first()
+    if not result:
         raise HTTPException(status_code=404, detail="Signal not found")
-    trigger_condition = row[3]
+    
+    if payload.signal_name is not None:
+        result.signal_name = payload.signal_name
+    if payload.description is not None:
+        result.description = payload.description
+    if payload.trigger_condition is not None:
+        result.trigger_condition = json.dumps(payload.trigger_condition)
+    if payload.enabled is not None:
+        result.enabled = payload.enabled
+    
+    db.commit()
+    db.refresh(result)
+    
+    trigger_condition = result.trigger_condition
     if isinstance(trigger_condition, str):
         trigger_condition = json.loads(trigger_condition)
     return SignalDefinitionResponse(
-        id=row[0], signal_name=row[1], description=row[2],
-        trigger_condition=trigger_condition, enabled=row[4],
-        created_at=row[5], updated_at=row[6]
+        id=result.id, signal_name=result.signal_name, description=result.description,
+        trigger_condition=trigger_condition, enabled=result.enabled,
+        created_at=result.created_at, updated_at=result.updated_at
     )
 
 
 @router.delete("/definitions/{signal_id}")
 def delete_signal(signal_id: int, db: Session = Depends(get_db)):
     """Delete a signal definition"""
-    result = db.execute(text("DELETE FROM signal_definitions WHERE id = :id"), {"id": signal_id})
-    db.commit()
-    if result.rowcount == 0:
+    result = db.query(SignalDefinition).filter(SignalDefinition.id == signal_id).first()
+    if not result:
         raise HTTPException(status_code=404, detail="Signal not found")
+    db.delete(result)
+    db.commit()
     return {"message": "Signal deleted successfully"}
 
 
@@ -179,108 +155,92 @@ def delete_signal(signal_id: int, db: Session = Depends(get_db)):
 @router.post("/pools", response_model=SignalPoolResponse)
 def create_pool(payload: SignalPoolCreate, db: Session = Depends(get_db)):
     """Create a new signal pool"""
-    import json
-    result = db.execute(text("""
-        INSERT INTO signal_pools (pool_name, signal_ids, symbols, enabled, logic)
-        VALUES (:name, :signal_ids, :symbols, :enabled, :logic)
-        RETURNING id, pool_name, signal_ids, symbols, enabled, created_at, logic
-    """), {
-        "name": payload.pool_name,
-        "signal_ids": json.dumps(payload.signal_ids),
-        "symbols": json.dumps(payload.symbols),
-        "enabled": payload.enabled,
-        "logic": payload.logic
-    })
+    result = SignalPool(
+        pool_name=payload.pool_name,
+        signal_ids=json.dumps(payload.signal_ids),
+        symbols=json.dumps(payload.symbols),
+        enabled=payload.enabled,
+        logic=payload.logic
+    )
+    db.add(result)
     db.commit()
-    row = result.fetchone()
-    signal_ids = row[2]
+    db.refresh(result)
+    
+    signal_ids = result.signal_ids
     if isinstance(signal_ids, str):
         signal_ids = json.loads(signal_ids)
-    symbols = row[3]
+    symbols = result.symbols
     if isinstance(symbols, str):
         symbols = json.loads(symbols)
     return SignalPoolResponse(
-        id=row[0], pool_name=row[1], signal_ids=signal_ids or [],
-        symbols=symbols or [], enabled=row[4], created_at=row[5],
-        logic=row[6] or "OR"
+        id=result.id, pool_name=result.pool_name, signal_ids=signal_ids or [],
+        symbols=symbols or [], enabled=result.enabled, created_at=result.created_at,
+        logic=result.logic or "OR"
     )
 
 
 @router.get("/pools/{pool_id}", response_model=SignalPoolResponse)
 def get_pool(pool_id: int, db: Session = Depends(get_db)):
     """Get a signal pool by ID"""
-    import json
-    result = db.execute(text("""
-        SELECT id, pool_name, signal_ids, symbols, enabled, created_at, logic
-        FROM signal_pools WHERE id = :id
-    """), {"id": pool_id})
-    row = result.fetchone()
-    if not row:
+    result = db.query(SignalPool).filter(SignalPool.id == pool_id).first()
+    if not result:
         raise HTTPException(status_code=404, detail="Pool not found")
-    signal_ids = row[2]
+    
+    signal_ids = result.signal_ids
     if isinstance(signal_ids, str):
         signal_ids = json.loads(signal_ids)
-    symbols = row[3]
+    symbols = result.symbols
     if isinstance(symbols, str):
         symbols = json.loads(symbols)
     return SignalPoolResponse(
-        id=row[0], pool_name=row[1], signal_ids=signal_ids or [],
-        symbols=symbols or [], enabled=row[4], created_at=row[5],
-        logic=row[6] or "OR"
+        id=result.id, pool_name=result.pool_name, signal_ids=signal_ids or [],
+        symbols=symbols or [], enabled=result.enabled, created_at=result.created_at,
+        logic=result.logic or "OR"
     )
 
 
 @router.put("/pools/{pool_id}", response_model=SignalPoolResponse)
 def update_pool(pool_id: int, payload: SignalPoolUpdate, db: Session = Depends(get_db)):
     """Update a signal pool"""
-    import json
-    updates = []
-    params = {"id": pool_id}
-    if payload.pool_name is not None:
-        updates.append("pool_name = :name")
-        params["name"] = payload.pool_name
-    if payload.signal_ids is not None:
-        updates.append("signal_ids = :signal_ids")
-        params["signal_ids"] = json.dumps(payload.signal_ids)
-    if payload.symbols is not None:
-        updates.append("symbols = :symbols")
-        params["symbols"] = json.dumps(payload.symbols)
-    if payload.enabled is not None:
-        updates.append("enabled = :enabled")
-        params["enabled"] = payload.enabled
-    if payload.logic is not None:
-        updates.append("logic = :logic")
-        params["logic"] = payload.logic
-
-    if not updates:
-        raise HTTPException(status_code=400, detail="No fields to update")
-
-    query = f"UPDATE signal_pools SET {', '.join(updates)} WHERE id = :id RETURNING id, pool_name, signal_ids, symbols, enabled, created_at, logic"
-    result = db.execute(text(query), params)
-    db.commit()
-    row = result.fetchone()
-    if not row:
+    result = db.query(SignalPool).filter(SignalPool.id == pool_id).first()
+    if not result:
         raise HTTPException(status_code=404, detail="Pool not found")
-    signal_ids = row[2]
+    
+    if payload.pool_name is not None:
+        result.pool_name = payload.pool_name
+    if payload.signal_ids is not None:
+        result.signal_ids = json.dumps(payload.signal_ids)
+    if payload.symbols is not None:
+        result.symbols = json.dumps(payload.symbols)
+    if payload.enabled is not None:
+        result.enabled = payload.enabled
+    if payload.logic is not None:
+        result.logic = payload.logic
+    
+    db.commit()
+    db.refresh(result)
+    
+    signal_ids = result.signal_ids
     if isinstance(signal_ids, str):
         signal_ids = json.loads(signal_ids)
-    symbols = row[3]
+    symbols = result.symbols
     if isinstance(symbols, str):
         symbols = json.loads(symbols)
     return SignalPoolResponse(
-        id=row[0], pool_name=row[1], signal_ids=signal_ids or [],
-        symbols=symbols or [], enabled=row[4], created_at=row[5],
-        logic=row[6] or "OR"
+        id=result.id, pool_name=result.pool_name, signal_ids=signal_ids or [],
+        symbols=symbols or [], enabled=result.enabled, created_at=result.created_at,
+        logic=result.logic or "OR"
     )
 
 
 @router.delete("/pools/{pool_id}")
 def delete_pool(pool_id: int, db: Session = Depends(get_db)):
     """Delete a signal pool"""
-    result = db.execute(text("DELETE FROM signal_pools WHERE id = :id"), {"id": pool_id})
-    db.commit()
-    if result.rowcount == 0:
+    result = db.query(SignalPool).filter(SignalPool.id == pool_id).first()
+    if not result:
         raise HTTPException(status_code=404, detail="Pool not found")
+    db.delete(result)
+    db.commit()
     return {"message": "Pool deleted successfully"}
 
 
@@ -389,37 +349,24 @@ def get_trigger_logs(
     db: Session = Depends(get_db)
 ):
     """Get signal trigger logs with optional filters"""
-    conditions = []
-    params = {"limit": limit}
-
+    result = db.query(SignalTriggerLog)
+    
     if pool_id is not None:
-        conditions.append("pool_id = :pool_id")
-        params["pool_id"] = pool_id
+        result = result.filter(SignalTriggerLog.pool_id == pool_id)
     if signal_id is not None:
-        conditions.append("signal_id = :signal_id")
-        params["signal_id"] = signal_id
+        result = result.filter(SignalTriggerLog.signal_id == signal_id)
     if symbol is not None:
-        conditions.append("symbol = :symbol")
-        params["symbol"] = symbol
-
-    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-    query = f"""
-        SELECT id, signal_id, pool_id, symbol, trigger_value, triggered_at
-        FROM signal_trigger_logs {where_clause}
-        ORDER BY triggered_at DESC LIMIT :limit
-    """
-    result = db.execute(text(query), params)
+        result = result.filter(SignalTriggerLog.symbol == symbol)
+    
+    total = result.count()
+    result = result.order_by(SignalTriggerLog.triggered_at.desc()).limit(limit).all()
+    
     logs = []
     for row in result:
         logs.append(SignalTriggerLogResponse(
-            id=row[0], signal_id=row[1], pool_id=row[2],
-            symbol=row[3], trigger_value=row[4], triggered_at=row[5]
+            id=row.id, signal_id=row.signal_id, pool_id=row.pool_id,
+            symbol=row.symbol, trigger_value=row.trigger_value, triggered_at=row.triggered_at
         ))
-
-    # Get total count
-    count_query = f"SELECT COUNT(*) FROM signal_trigger_logs {where_clause}"
-    count_params = {k: v for k, v in params.items() if k != "limit"}
-    total = db.execute(text(count_query), count_params).scalar()
 
     return SignalTriggerLogsResponse(logs=logs, total=total)
 
@@ -440,20 +387,16 @@ def test_signal(
     from services.market_flow_collector import market_flow_collector
 
     # Get signal definition
-    result = db.execute(text("""
-        SELECT id, signal_name, description, trigger_condition, enabled
-        FROM signal_definitions WHERE id = :id
-    """), {"id": signal_id})
-    row = result.fetchone()
-    if not row:
+    result = db.query(SignalDefinition).filter(SignalDefinition.id == signal_id).first()
+    if not result:
         raise HTTPException(status_code=404, detail="Signal not found")
 
     signal_def = {
-        "id": row[0],
-        "signal_name": row[1],
-        "description": row[2],
-        "trigger_condition": row[3],
-        "enabled": row[4]
+        "id": result.id,
+        "signal_name": result.signal_name,
+        "description": result.description,
+        "trigger_condition": result.trigger_condition,
+        "enabled": result.enabled
     }
 
     # Get current market data from collector
@@ -534,7 +477,6 @@ from services.ai_signal_generation_service import (
     get_signal_conversation_history,
     get_signal_conversation_messages
 )
-from database.models import User
 
 
 class AiSignalChatRequest(BaseModel):
@@ -698,8 +640,6 @@ def create_pool_from_config(
     Create a signal pool from AI-generated configuration.
     Creates individual signals and combines them into a pool.
     """
-    import json
-
     if not request.signals:
         raise HTTPException(status_code=400, detail="No signals provided")
 
@@ -732,45 +672,38 @@ def create_pool_from_config(
                 )
 
             # Create signal
-            result = db.execute(text("""
-                INSERT INTO signal_definitions (signal_name, description, trigger_condition, enabled)
-                VALUES (:name, :desc, :condition, :enabled)
-                RETURNING id, signal_name, description, trigger_condition, enabled, created_at
-            """), {
-                "name": sig_name,
-                "desc": sig.get("description") or f"Part of {request.name}",
-                "condition": json.dumps(trigger_condition),
-                "enabled": True
-            })
-            row = result.fetchone()
-            created_signal_ids.append(row[0])
+            result = SignalDefinition(
+                signal_name=sig_name,
+                description=sig.get("description") or f"Part of {request.name}",
+                trigger_condition=json.dumps(trigger_condition),
+                enabled=True
+            )
+            db.add(result)
+            db.flush()
+            
+            created_signal_ids.append(result.id)
             created_signals.append({
-                "id": row[0],
-                "signal_name": row[1],
+                "id": result.id,
+                "signal_name": result.signal_name,
                 "trigger_condition": trigger_condition
             })
 
         # Create the pool
-        pool_result = db.execute(text("""
-            INSERT INTO signal_pools (pool_name, signal_ids, symbols, enabled, logic)
-            VALUES (:name, :signal_ids, :symbols, :enabled, :logic)
-            RETURNING id, pool_name, signal_ids, symbols, enabled, created_at, logic
-        """), {
-            "name": request.name,
-            "signal_ids": json.dumps(created_signal_ids),
-            "symbols": json.dumps([request.symbol]),
-            "enabled": True,
-            "logic": request.logic
-        })
-        pool_row = pool_result.fetchone()
-
+        pool_result = SignalPool(
+            pool_name=request.name,
+            signal_ids=json.dumps(created_signal_ids),
+            symbols=json.dumps([request.symbol]),
+            enabled=True,
+            logic=request.logic
+        )
+        db.add(pool_result)
         db.commit()
 
         return {
             "success": True,
             "pool": {
-                "id": pool_row[0],
-                "pool_name": pool_row[1],
+                "id": pool_result.id,
+                "pool_name": pool_result.pool_name,
                 "signal_ids": created_signal_ids,
                 "symbols": [request.symbol],
                 "logic": request.logic
