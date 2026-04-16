@@ -3163,6 +3163,781 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn market_status_route_marks_legacy_fallback_with_source_header() {
+        let legacy_market_status_hits = Arc::new(AtomicUsize::new(0));
+        let upstream = Router::new().route(
+            "/api/market/status/{symbol}",
+            get({
+                let legacy_market_status_hits = Arc::clone(&legacy_market_status_hits);
+                move |axum::extract::Path(symbol): axum::extract::Path<String>,
+                      axum::extract::Query(query): axum::extract::Query<
+                    std::collections::HashMap<String, String>,
+                >| {
+                    let legacy_market_status_hits = Arc::clone(&legacy_market_status_hits);
+                    async move {
+                        legacy_market_status_hits.fetch_add(1, Ordering::SeqCst);
+                        assert_eq!(symbol, "BTC");
+                        assert_eq!(query.get("market").map(String::as_str), Some("US"));
+                        Json(json!({
+                            "symbol": "BTC",
+                            "market": "US",
+                            "market_status": "CLOSED",
+                            "timestamp": 1_776_312_400_000_i64,
+                            "current_time": "2026-04-16T00:00:00Z"
+                        }))
+                    }
+                }
+            }),
+        );
+        let upstream_addr = spawn_test_legacy_server(upstream).await;
+        let router = build_router(test_config_for_legacy_http(upstream_addr));
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/market/status/BTC?market=US")
+                    .body(Body::empty())
+                    .expect("market-status request should be valid"),
+            )
+            .await
+            .expect("router should answer market-status request");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("x-rust-market-status-source")
+                .and_then(|value| value.to_str().ok()),
+            Some("legacy-fallback")
+        );
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("market-status response body should be readable");
+        let payload: Value =
+            serde_json::from_slice(&body).expect("market-status response should be json");
+        assert_eq!(payload["symbol"], json!("BTC"));
+        assert_eq!(payload["market"], json!("US"));
+        assert_eq!(payload["market_status"], json!("CLOSED"));
+        assert_eq!(payload["current_time"], json!("2026-04-16T00:00:00Z"));
+        assert_eq!(legacy_market_status_hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn market_status_route_uses_native_status_without_legacy_fallback() {
+        let legacy_market_status_hits = Arc::new(AtomicUsize::new(0));
+        let upstream = Router::new().route(
+            "/api/market/status/{symbol}",
+            get({
+                let legacy_market_status_hits = Arc::clone(&legacy_market_status_hits);
+                move || {
+                    let legacy_market_status_hits = Arc::clone(&legacy_market_status_hits);
+                    async move {
+                        legacy_market_status_hits.fetch_add(1, Ordering::SeqCst);
+                        Json(json!({"source": "legacy"}))
+                    }
+                }
+            }),
+        );
+        let upstream_addr = spawn_test_legacy_server(upstream).await;
+        let router = build_router(test_config_for_legacy_http(upstream_addr));
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/market/status/BTC?market=hyperliquid")
+                    .body(Body::empty())
+                    .expect("native market-status request should be valid"),
+            )
+            .await
+            .expect("router should answer native market-status request");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("x-rust-market-status-source")
+                .and_then(|value| value.to_str().ok()),
+            Some("native-synthetic")
+        );
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("native market-status response body should be readable");
+        let payload: Value =
+            serde_json::from_slice(&body).expect("native market-status response should be json");
+        assert_eq!(payload["symbol"], json!("BTC"));
+        assert_eq!(payload["market"], json!("hyperliquid"));
+        assert_eq!(payload["market_status"], json!("TRADING"));
+        assert!(
+            payload["timestamp"]
+                .as_i64()
+                .is_some_and(|timestamp| timestamp > 0),
+            "timestamp should be generated"
+        );
+        assert!(
+            payload["current_time"]
+                .as_str()
+                .is_some_and(|current_time| !current_time.is_empty()),
+            "current_time should be generated"
+        );
+        assert_eq!(legacy_market_status_hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn market_status_route_rejects_post_without_proxying() {
+        let legacy_market_status_hits = Arc::new(AtomicUsize::new(0));
+        let upstream = Router::new().route(
+            "/api/market/status/{symbol}",
+            get({
+                let legacy_market_status_hits = Arc::clone(&legacy_market_status_hits);
+                move || {
+                    let legacy_market_status_hits = Arc::clone(&legacy_market_status_hits);
+                    async move {
+                        legacy_market_status_hits.fetch_add(1, Ordering::SeqCst);
+                        Json(json!({"source": "legacy"}))
+                    }
+                }
+            }),
+        );
+        let upstream_addr = spawn_test_legacy_server(upstream).await;
+        let router = build_router(test_config_for_legacy_http(upstream_addr));
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/market/status/BTC?market=US")
+                    .body(Body::empty())
+                    .expect("POST market-status request should be valid"),
+            )
+            .await
+            .expect("router should answer POST market-status request");
+
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(legacy_market_status_hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn market_health_route_marks_source_header() {
+        let legacy_market_price_hits = Arc::new(AtomicUsize::new(0));
+        let upstream = Router::new().route(
+            "/api/market/price/{symbol}",
+            get({
+                let legacy_market_price_hits = Arc::clone(&legacy_market_price_hits);
+                move |axum::extract::Path(symbol): axum::extract::Path<String>,
+                      axum::extract::Query(query): axum::extract::Query<
+                    std::collections::HashMap<String, String>,
+                >| {
+                    let legacy_market_price_hits = Arc::clone(&legacy_market_price_hits);
+                    async move {
+                        legacy_market_price_hits.fetch_add(1, Ordering::SeqCst);
+                        assert_eq!(symbol, "BTC");
+                        assert_eq!(query.get("market").map(String::as_str), Some("hyperliquid"));
+
+                        Json(json!({
+                            "symbol": "BTC",
+                            "market": "hyperliquid",
+                            "price": 100.25,
+                            "oracle_price": 100.25,
+                            "change24h": 0.5,
+                            "volume24h": 1000.0,
+                            "percentage24h": 0.2,
+                            "open_interest": 0.0,
+                            "funding_rate": 0.0,
+                            "timestamp": 1_776_312_400_000_i64
+                        }))
+                    }
+                }
+            }),
+        );
+        let upstream_addr = spawn_test_legacy_server(upstream).await;
+        let router = build_router(test_config_for_legacy_http(upstream_addr));
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/market/health")
+                    .body(Body::empty())
+                    .expect("market-health request should be valid"),
+            )
+            .await
+            .expect("router should answer market-health request");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let source_header = response
+            .headers()
+            .get("x-rust-market-health-source")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("market-health response body should be readable");
+        let payload: Value =
+            serde_json::from_slice(&body).expect("market-health response should be json");
+        let legacy_hits = legacy_market_price_hits.load(Ordering::SeqCst);
+        let expected_source = if legacy_hits == 0 {
+            "native-db"
+        } else {
+            "legacy-fallback"
+        };
+        assert_eq!(source_header.as_deref(), Some(expected_source));
+        assert_eq!(payload["status"], json!("healthy"));
+        assert_eq!(payload["test_price"]["symbol"], json!("BTC"));
+        assert!(
+            payload["test_price"]["price"].as_f64().is_some(),
+            "health test_price.price should be numeric"
+        );
+        assert_eq!(
+            payload["message"],
+            json!("Market data service is running normally")
+        );
+        assert!(
+            payload["timestamp"]
+                .as_i64()
+                .is_some_and(|timestamp| timestamp > 0),
+            "timestamp should be generated"
+        );
+        assert!(
+            payload.get("error").is_none(),
+            "healthy payload should not include error"
+        );
+        assert!(
+            legacy_hits <= 1,
+            "health probe should call legacy price at most once"
+        );
+    }
+
+    #[tokio::test]
+    async fn market_health_route_rejects_post_without_proxying() {
+        let legacy_market_price_hits = Arc::new(AtomicUsize::new(0));
+        let upstream = Router::new().route(
+            "/api/market/price/{symbol}",
+            get({
+                let legacy_market_price_hits = Arc::clone(&legacy_market_price_hits);
+                move || {
+                    let legacy_market_price_hits = Arc::clone(&legacy_market_price_hits);
+                    async move {
+                        legacy_market_price_hits.fetch_add(1, Ordering::SeqCst);
+                        Json(json!({"source": "legacy"}))
+                    }
+                }
+            }),
+        );
+        let upstream_addr = spawn_test_legacy_server(upstream).await;
+        let router = build_router(test_config_for_legacy_http(upstream_addr));
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/market/health")
+                    .body(Body::empty())
+                    .expect("POST market-health request should be valid"),
+            )
+            .await
+            .expect("router should answer POST market-health request");
+
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(legacy_market_price_hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn crypto_price_route_marks_legacy_fallback_with_source_header() {
+        let symbol = format!("ZZ{}", &Uuid::new_v4().simple().to_string()[..10]).to_uppercase();
+        let legacy_market_price_hits = Arc::new(AtomicUsize::new(0));
+        let upstream = Router::new().route(
+            "/api/market/price/{symbol}",
+            get({
+                let legacy_market_price_hits = Arc::clone(&legacy_market_price_hits);
+                let expected_symbol = symbol.clone();
+                move |axum::extract::Path(symbol): axum::extract::Path<String>,
+                      axum::extract::Query(query): axum::extract::Query<
+                    std::collections::HashMap<String, String>,
+                >| {
+                    let legacy_market_price_hits = Arc::clone(&legacy_market_price_hits);
+                    let expected_symbol = expected_symbol.clone();
+                    async move {
+                        legacy_market_price_hits.fetch_add(1, Ordering::SeqCst);
+                        assert_eq!(symbol, expected_symbol);
+                        assert_eq!(query.get("market").map(String::as_str), Some("CRYPTO"));
+
+                        Json(json!({
+                            "symbol": "BTC.CRYPTO",
+                            "market": "CRYPTO",
+                            "price": 100.25,
+                            "oracle_price": 100.25,
+                            "change24h": 0.5,
+                            "volume24h": 1000.0,
+                            "percentage24h": 0.2,
+                            "open_interest": 0.0,
+                            "funding_rate": 0.0,
+                            "timestamp": 1_776_312_400_000_i64
+                        }))
+                    }
+                }
+            }),
+        );
+        let upstream_addr = spawn_test_legacy_server(upstream).await;
+        let router = build_router(test_config_for_legacy_http(upstream_addr));
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/api/crypto/price/{symbol}"))
+                    .body(Body::empty())
+                    .expect("crypto-price request should be valid"),
+            )
+            .await
+            .expect("router should answer crypto-price request");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("x-rust-crypto-price-source")
+                .and_then(|value| value.to_str().ok()),
+            Some("legacy-fallback")
+        );
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("crypto-price response body should be readable");
+        let payload: Value =
+            serde_json::from_slice(&body).expect("crypto-price response should be json");
+        assert_eq!(
+            payload,
+            json!({
+                "symbol": symbol,
+                "price": 100.25,
+                "market": "CRYPTO"
+            })
+        );
+        assert_eq!(legacy_market_price_hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn crypto_price_route_rejects_post_without_proxying() {
+        let legacy_market_price_hits = Arc::new(AtomicUsize::new(0));
+        let upstream = Router::new().route(
+            "/api/market/price/{symbol}",
+            get({
+                let legacy_market_price_hits = Arc::clone(&legacy_market_price_hits);
+                move || {
+                    let legacy_market_price_hits = Arc::clone(&legacy_market_price_hits);
+                    async move {
+                        legacy_market_price_hits.fetch_add(1, Ordering::SeqCst);
+                        Json(json!({"source": "legacy"}))
+                    }
+                }
+            }),
+        );
+        let upstream_addr = spawn_test_legacy_server(upstream).await;
+        let router = build_router(test_config_for_legacy_http(upstream_addr));
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/crypto/price/BTC")
+                    .body(Body::empty())
+                    .expect("POST crypto-price request should be valid"),
+            )
+            .await
+            .expect("router should answer POST crypto-price request");
+
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(legacy_market_price_hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn crypto_status_route_marks_native_source_header() {
+        let legacy_market_status_hits = Arc::new(AtomicUsize::new(0));
+        let upstream = Router::new().route(
+            "/api/market/status/{symbol}",
+            get({
+                let legacy_market_status_hits = Arc::clone(&legacy_market_status_hits);
+                move || {
+                    let legacy_market_status_hits = Arc::clone(&legacy_market_status_hits);
+                    async move {
+                        legacy_market_status_hits.fetch_add(1, Ordering::SeqCst);
+                        Json(json!({"source": "legacy"}))
+                    }
+                }
+            }),
+        );
+        let upstream_addr = spawn_test_legacy_server(upstream).await;
+        let router = build_router(test_config_for_legacy_http(upstream_addr));
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/crypto/status/BTC")
+                    .body(Body::empty())
+                    .expect("crypto-status request should be valid"),
+            )
+            .await
+            .expect("router should answer crypto-status request");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("x-rust-crypto-status-source")
+                .and_then(|value| value.to_str().ok()),
+            Some("native-synthetic")
+        );
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("crypto-status response body should be readable");
+        let payload: Value =
+            serde_json::from_slice(&body).expect("crypto-status response should be json");
+        assert_eq!(payload["symbol"], json!("BTC"));
+        assert_eq!(payload["market"], json!("CRYPTO"));
+        assert_eq!(payload["market_status"], json!("TRADING"));
+        assert!(
+            payload["timestamp"]
+                .as_i64()
+                .is_some_and(|timestamp| timestamp > 0),
+            "timestamp should be generated"
+        );
+        assert!(
+            payload["current_time"]
+                .as_str()
+                .is_some_and(|current_time| !current_time.is_empty()),
+            "current_time should be generated"
+        );
+        assert_eq!(legacy_market_status_hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn crypto_status_route_rejects_post_without_proxying() {
+        let legacy_market_status_hits = Arc::new(AtomicUsize::new(0));
+        let upstream = Router::new().route(
+            "/api/market/status/{symbol}",
+            get({
+                let legacy_market_status_hits = Arc::clone(&legacy_market_status_hits);
+                move || {
+                    let legacy_market_status_hits = Arc::clone(&legacy_market_status_hits);
+                    async move {
+                        legacy_market_status_hits.fetch_add(1, Ordering::SeqCst);
+                        Json(json!({"source": "legacy"}))
+                    }
+                }
+            }),
+        );
+        let upstream_addr = spawn_test_legacy_server(upstream).await;
+        let router = build_router(test_config_for_legacy_http(upstream_addr));
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/crypto/status/BTC")
+                    .body(Body::empty())
+                    .expect("POST crypto-status request should be valid"),
+            )
+            .await
+            .expect("router should answer POST crypto-status request");
+
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(legacy_market_status_hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn crypto_popular_route_marks_source_header() {
+        let legacy_market_price_hits = Arc::new(AtomicUsize::new(0));
+        let upstream = Router::new().route(
+            "/api/market/price/{symbol}",
+            get({
+                let legacy_market_price_hits = Arc::clone(&legacy_market_price_hits);
+                move |axum::extract::Path(symbol): axum::extract::Path<String>,
+                      axum::extract::Query(query): axum::extract::Query<
+                    std::collections::HashMap<String, String>,
+                >| {
+                    let legacy_market_price_hits = Arc::clone(&legacy_market_price_hits);
+                    async move {
+                        legacy_market_price_hits.fetch_add(1, Ordering::SeqCst);
+                        assert_eq!(query.get("market").map(String::as_str), Some("CRYPTO"));
+                        let price = match symbol.as_str() {
+                            "BTC" => 101_000.0,
+                            "ETH" => 5_100.0,
+                            "SOL" => 180.0,
+                            "DOGE" => 0.23,
+                            "BNB" => 720.0,
+                            "XRP" => 1.8,
+                            unexpected => panic!("unexpected symbol requested: {unexpected}"),
+                        };
+                        Json(json!({
+                            "symbol": format!("{symbol}.CRYPTO"),
+                            "market": "CRYPTO",
+                            "price": price,
+                            "oracle_price": price,
+                            "change24h": 0.5,
+                            "volume24h": 1000.0,
+                            "percentage24h": 0.2,
+                            "open_interest": 0.0,
+                            "funding_rate": 0.0,
+                            "timestamp": 1_776_312_400_000_i64
+                        }))
+                    }
+                }
+            }),
+        );
+        let upstream_addr = spawn_test_legacy_server(upstream).await;
+        let router = build_router(test_config_for_legacy_http(upstream_addr));
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/crypto/popular")
+                    .body(Body::empty())
+                    .expect("crypto-popular request should be valid"),
+            )
+            .await
+            .expect("router should answer crypto-popular request");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let source_header = response
+            .headers()
+            .get("x-rust-crypto-popular-source")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("crypto-popular response body should be readable");
+        let payload: Value =
+            serde_json::from_slice(&body).expect("crypto-popular response should be json");
+        let legacy_hits = legacy_market_price_hits.load(Ordering::SeqCst);
+
+        let expected_source = if legacy_hits == 0 {
+            "native-db"
+        } else if legacy_hits == 6 {
+            "legacy-fallback"
+        } else {
+            "mixed"
+        };
+        assert_eq!(source_header.as_deref(), Some(expected_source));
+        assert_eq!(payload.as_array().map(Vec::len), Some(6));
+        for item in payload
+            .as_array()
+            .expect("crypto-popular payload should be array")
+        {
+            let symbol = item["symbol"]
+                .as_str()
+                .expect("symbol should be present in each entry");
+            assert_eq!(item["name"], json!(symbol));
+            assert_eq!(item["market"], json!("CRYPTO"));
+            assert!(
+                item["price"].as_f64().is_some(),
+                "price should be numeric in each entry"
+            );
+        }
+
+        let expected_symbols = ["BTC", "ETH", "SOL", "DOGE", "BNB", "XRP"];
+        let actual_symbols = payload
+            .as_array()
+            .expect("crypto-popular payload should be array")
+            .iter()
+            .map(|item| item["symbol"].as_str().unwrap_or_default().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(actual_symbols, expected_symbols);
+        assert!(
+            legacy_hits <= 6,
+            "fallback call count should not exceed popular symbol count"
+        );
+    }
+
+    #[tokio::test]
+    async fn crypto_popular_route_rejects_post_without_proxying() {
+        let legacy_market_price_hits = Arc::new(AtomicUsize::new(0));
+        let upstream = Router::new().route(
+            "/api/market/price/{symbol}",
+            get({
+                let legacy_market_price_hits = Arc::clone(&legacy_market_price_hits);
+                move || {
+                    let legacy_market_price_hits = Arc::clone(&legacy_market_price_hits);
+                    async move {
+                        legacy_market_price_hits.fetch_add(1, Ordering::SeqCst);
+                        Json(json!({"source": "legacy"}))
+                    }
+                }
+            }),
+        );
+        let upstream_addr = spawn_test_legacy_server(upstream).await;
+        let router = build_router(test_config_for_legacy_http(upstream_addr));
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/crypto/popular")
+                    .body(Body::empty())
+                    .expect("POST crypto-popular request should be valid"),
+            )
+            .await
+            .expect("router should answer POST crypto-popular request");
+
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(legacy_market_price_hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn crypto_symbols_route_marks_legacy_fallback_with_source_header() {
+        let _guard = crypto_symbols_config_test_lock().lock().await;
+        let pool = local_db_pool().await;
+        let backup = backup_system_config(&pool, CRYPTO_SYMBOLS_CONFIG_KEY).await;
+        delete_system_config(&pool, CRYPTO_SYMBOLS_CONFIG_KEY).await;
+
+        let legacy_crypto_symbols_hits = Arc::new(AtomicUsize::new(0));
+        let upstream = Router::new().route(
+            "/api/crypto/symbols",
+            get({
+                let legacy_crypto_symbols_hits = Arc::clone(&legacy_crypto_symbols_hits);
+                move || {
+                    let legacy_crypto_symbols_hits = Arc::clone(&legacy_crypto_symbols_hits);
+                    async move {
+                        legacy_crypto_symbols_hits.fetch_add(1, Ordering::SeqCst);
+                        Json(json!(["BTC/USD", "ETH/USD"]))
+                    }
+                }
+            }),
+        );
+        let upstream_addr = spawn_test_legacy_server(upstream).await;
+        let router = build_router(test_config_for_legacy_http(upstream_addr));
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/crypto/symbols")
+                    .body(Body::empty())
+                    .expect("crypto-symbols request should be valid"),
+            )
+            .await
+            .expect("router should answer crypto-symbols request");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("x-rust-crypto-symbols-source")
+                .and_then(|value| value.to_str().ok()),
+            Some("legacy-fallback")
+        );
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("crypto-symbols response body should be readable");
+        let payload: Value =
+            serde_json::from_slice(&body).expect("crypto-symbols response should be json");
+        let legacy_hits = legacy_crypto_symbols_hits.load(Ordering::SeqCst);
+
+        restore_system_config(&pool, CRYPTO_SYMBOLS_CONFIG_KEY, backup).await;
+
+        assert_eq!(payload, json!(["BTC/USD", "ETH/USD"]));
+        assert_eq!(legacy_hits, 1);
+    }
+
+    #[tokio::test]
+    async fn crypto_symbols_route_uses_native_config_without_legacy_fallback() {
+        let _guard = crypto_symbols_config_test_lock().lock().await;
+        let pool = local_db_pool().await;
+        let backup = backup_system_config(&pool, CRYPTO_SYMBOLS_CONFIG_KEY).await;
+        upsert_system_config(
+            &pool,
+            CRYPTO_SYMBOLS_CONFIG_KEY,
+            r#"[{"symbol":"BTC/USD"},{"symbol":"ETH/USD"}]"#,
+            Some("crypto symbols native-config fixture"),
+        )
+        .await;
+
+        let legacy_crypto_symbols_hits = Arc::new(AtomicUsize::new(0));
+        let upstream = Router::new().route(
+            "/api/crypto/symbols",
+            get({
+                let legacy_crypto_symbols_hits = Arc::clone(&legacy_crypto_symbols_hits);
+                move || {
+                    let legacy_crypto_symbols_hits = Arc::clone(&legacy_crypto_symbols_hits);
+                    async move {
+                        legacy_crypto_symbols_hits.fetch_add(1, Ordering::SeqCst);
+                        Json(json!(["legacy"]))
+                    }
+                }
+            }),
+        );
+        let upstream_addr = spawn_test_legacy_server(upstream).await;
+        let router = build_router(test_config_for_legacy_http(upstream_addr));
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/crypto/symbols")
+                    .body(Body::empty())
+                    .expect("native crypto-symbols request should be valid"),
+            )
+            .await
+            .expect("router should answer native crypto-symbols request");
+
+        let response_status = response.status();
+        let source_header = response
+            .headers()
+            .get("x-rust-crypto-symbols-source")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("native crypto-symbols response body should be readable");
+        let payload: Value =
+            serde_json::from_slice(&body).expect("native crypto-symbols response should be json");
+        let legacy_hits = legacy_crypto_symbols_hits.load(Ordering::SeqCst);
+
+        restore_system_config(&pool, CRYPTO_SYMBOLS_CONFIG_KEY, backup).await;
+
+        assert_eq!(response_status, StatusCode::OK);
+        assert_eq!(source_header.as_deref(), Some("native-config"));
+        assert_eq!(payload, json!(["BTC/USD", "ETH/USD"]));
+        assert_eq!(legacy_hits, 0);
+    }
+
+    #[tokio::test]
+    async fn crypto_symbols_route_rejects_post_without_proxying() {
+        let legacy_crypto_symbols_hits = Arc::new(AtomicUsize::new(0));
+        let upstream = Router::new().route(
+            "/api/crypto/symbols",
+            get({
+                let legacy_crypto_symbols_hits = Arc::clone(&legacy_crypto_symbols_hits);
+                move || {
+                    let legacy_crypto_symbols_hits = Arc::clone(&legacy_crypto_symbols_hits);
+                    async move {
+                        legacy_crypto_symbols_hits.fetch_add(1, Ordering::SeqCst);
+                        Json(json!(["legacy"]))
+                    }
+                }
+            }),
+        );
+        let upstream_addr = spawn_test_legacy_server(upstream).await;
+        let router = build_router(test_config_for_legacy_http(upstream_addr));
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/crypto/symbols")
+                    .body(Body::empty())
+                    .expect("POST crypto-symbols request should be valid"),
+            )
+            .await
+            .expect("router should answer POST crypto-symbols request");
+
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(legacy_crypto_symbols_hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
     async fn market_kline_route_marks_legacy_fallback_with_source_header() {
         let legacy_market_kline_hits = Arc::new(AtomicUsize::new(0));
         let upstream = Router::new().route(
@@ -6873,6 +7648,7 @@ mod tests {
         "hyper_insight_wallet_access_token",
         "hyper_insight_wallet_token_synced_at",
     ];
+    const CRYPTO_SYMBOLS_CONFIG_KEY: &str = "hyperliquid_available_symbols";
 
     #[derive(Clone)]
     struct SystemConfigBackup {
@@ -6884,6 +7660,88 @@ mod tests {
     fn wallet_runtime_test_lock() -> &'static AsyncMutex<()> {
         static LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| AsyncMutex::new(()))
+    }
+
+    fn crypto_symbols_config_test_lock() -> &'static AsyncMutex<()> {
+        static LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| AsyncMutex::new(()))
+    }
+
+    async fn backup_system_config(pool: &PgPool, key: &str) -> Option<SystemConfigBackup> {
+        sqlx::query(
+            r#"
+            SELECT key, value, description
+            FROM system_configs
+            WHERE key = $1
+            LIMIT 1
+            "#,
+        )
+        .bind(key)
+        .fetch_optional(pool)
+        .await
+        .expect("system config backup should load")
+        .map(|row| SystemConfigBackup {
+            key: row
+                .try_get::<String, _>("key")
+                .expect("system config backup key should read"),
+            value: row
+                .try_get::<Option<String>, _>("value")
+                .expect("system config backup value should read"),
+            description: row
+                .try_get::<Option<String>, _>("description")
+                .expect("system config backup description should read"),
+        })
+    }
+
+    async fn upsert_system_config(
+        pool: &PgPool,
+        key: &str,
+        value: &str,
+        description: Option<&str>,
+    ) {
+        sqlx::query(
+            r#"
+            INSERT INTO system_configs (key, value, description, created_at, updated_at)
+            VALUES ($1, $2, $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT (key)
+            DO UPDATE SET
+                value = EXCLUDED.value,
+                description = EXCLUDED.description,
+                updated_at = CURRENT_TIMESTAMP
+            "#,
+        )
+        .bind(key)
+        .bind(value)
+        .bind(description)
+        .execute(pool)
+        .await
+        .expect("system config should upsert");
+    }
+
+    async fn delete_system_config(pool: &PgPool, key: &str) {
+        sqlx::query("DELETE FROM system_configs WHERE key = $1")
+            .bind(key)
+            .execute(pool)
+            .await
+            .expect("system config should delete");
+    }
+
+    async fn restore_system_config(pool: &PgPool, key: &str, backup: Option<SystemConfigBackup>) {
+        delete_system_config(pool, key).await;
+        if let Some(item) = backup {
+            sqlx::query(
+                r#"
+                INSERT INTO system_configs (key, value, description, created_at, updated_at)
+                VALUES ($1, $2, $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                "#,
+            )
+            .bind(item.key)
+            .bind(item.value)
+            .bind(item.description)
+            .execute(pool)
+            .await
+            .expect("system config backup should restore");
+        }
     }
 
     async fn backup_wallet_runtime_configs(pool: &PgPool) -> Vec<SystemConfigBackup> {

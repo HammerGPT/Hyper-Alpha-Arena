@@ -16,9 +16,15 @@ const MARKET_PRICE_SOURCE_HEADER: &str = "x-rust-market-price-source";
 const MARKET_PRICES_SOURCE_HEADER: &str = "x-rust-market-prices-source";
 const MARKET_PRICES_LEGACY_FALLBACK_COUNT_HEADER: &str =
     "x-rust-market-prices-legacy-fallback-count";
+const MARKET_HEALTH_SOURCE_HEADER: &str = "x-rust-market-health-source";
 const MARKET_KLINE_SOURCE_HEADER: &str = "x-rust-market-kline-source";
 const MARKET_KLINE_WITH_INDICATORS_SOURCE_HEADER: &str =
     "x-rust-market-kline-with-indicators-source";
+const MARKET_STATUS_SOURCE_HEADER: &str = "x-rust-market-status-source";
+const CRYPTO_SYMBOLS_SOURCE_HEADER: &str = "x-rust-crypto-symbols-source";
+const CRYPTO_PRICE_SOURCE_HEADER: &str = "x-rust-crypto-price-source";
+const CRYPTO_STATUS_SOURCE_HEADER: &str = "x-rust-crypto-status-source";
+const CRYPTO_POPULAR_SOURCE_HEADER: &str = "x-rust-crypto-popular-source";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MarketPriceSource {
@@ -48,6 +54,62 @@ impl MarketPricesSource {
             Self::NativeDb => "native-db",
             Self::LegacyFallback => "legacy-fallback",
             Self::Mixed => "mixed",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MarketHealthSource {
+    NativeDb,
+    LegacyFallback,
+    Unknown,
+}
+
+impl MarketHealthSource {
+    fn as_header_value(self) -> &'static str {
+        match self {
+            Self::NativeDb => "native-db",
+            Self::LegacyFallback => "legacy-fallback",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+impl From<MarketPriceSource> for MarketHealthSource {
+    fn from(source: MarketPriceSource) -> Self {
+        match source {
+            MarketPriceSource::NativeDb => Self::NativeDb,
+            MarketPriceSource::LegacyFallback => Self::LegacyFallback,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MarketStatusSource {
+    NativeSynthetic,
+    LegacyFallback,
+}
+
+impl MarketStatusSource {
+    fn as_header_value(self) -> &'static str {
+        match self {
+            Self::NativeSynthetic => "native-synthetic",
+            Self::LegacyFallback => "legacy-fallback",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CryptoSymbolsSource {
+    NativeConfig,
+    LegacyFallback,
+}
+
+impl CryptoSymbolsSource {
+    fn as_header_value(self) -> &'static str {
+        match self {
+            Self::NativeConfig => "native-config",
+            Self::LegacyFallback => "legacy-fallback",
         }
     }
 }
@@ -272,46 +334,77 @@ pub async fn get_market_status(
     State(state): State<AppState>,
     Path(symbol): Path<String>,
     Query(query): Query<MarketQuery>,
-) -> Result<Json<MarketStatusResponse>, AppError> {
-    if normalize_exchange(&query.market).is_some() {
-        return Ok(Json(MarketStatusResponse {
-            symbol: symbol.to_uppercase(),
-            market: Some(query.market),
-            market_status: "TRADING".to_owned(),
-            timestamp: Utc::now().timestamp_millis(),
-            current_time: Utc::now().to_rfc3339(),
-        }));
-    }
+) -> Result<impl IntoResponse, AppError> {
+    let (response, source) = resolve_market_status_response(&state, &symbol, &query.market).await?;
 
-    fallback_get_json(
-        &state,
-        &format!("/api/market/status/{}?market={}", symbol, query.market),
-    )
-    .await
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        HeaderName::from_static(MARKET_STATUS_SOURCE_HEADER),
+        HeaderValue::from_static(source.as_header_value()),
+    );
+
+    Ok((headers, Json(response)))
 }
 
 pub async fn market_data_health(
     State(state): State<AppState>,
-) -> Result<Json<MarketHealthResponse>, AppError> {
-    match resolve_price_response(&state, "BTC", "hyperliquid").await {
-        Ok((price, _)) => Ok(Json(MarketHealthResponse {
-            status: "healthy".to_owned(),
-            timestamp: Utc::now().timestamp_millis(),
-            test_price: serde_json::json!({
-                "symbol": "BTC",
-                "price": price.price
-            }),
-            message: "Market data service is running normally".to_owned(),
-            error: None,
-        })),
-        Err(error) => Ok(Json(MarketHealthResponse {
-            status: "unhealthy".to_owned(),
-            timestamp: Utc::now().timestamp_millis(),
-            test_price: serde_json::json!({}),
-            message: "Market data service abnormal".to_owned(),
-            error: Some(error.message),
-        })),
-    }
+) -> Result<impl IntoResponse, AppError> {
+    let (response, source) = match resolve_price_response(&state, "BTC", "hyperliquid").await {
+        Ok((price, source)) => {
+            if matches!(source, MarketPriceSource::LegacyFallback) {
+                warn!(
+                    route = "/api/market/health",
+                    probe_symbol = "BTC",
+                    probe_market = "hyperliquid",
+                    fallback_reason = "native-db-miss-or-unsupported-market",
+                    legacy_path = "/api/market/price/BTC?market=hyperliquid",
+                    "market health used legacy fallback"
+                );
+            }
+
+            (
+                MarketHealthResponse {
+                    status: "healthy".to_owned(),
+                    timestamp: Utc::now().timestamp_millis(),
+                    test_price: serde_json::json!({
+                        "symbol": "BTC",
+                        "price": price.price
+                    }),
+                    message: "Market data service is running normally".to_owned(),
+                    error: None,
+                },
+                MarketHealthSource::from(source),
+            )
+        }
+        Err(error) => {
+            let error_message = error.message;
+            warn!(
+                route = "/api/market/health",
+                probe_symbol = "BTC",
+                probe_market = "hyperliquid",
+                error = %error_message,
+                "market health probe failed"
+            );
+            (
+                MarketHealthResponse {
+                    status: "unhealthy".to_owned(),
+                    timestamp: Utc::now().timestamp_millis(),
+                    test_price: serde_json::json!({}),
+                    message: "Market data service abnormal".to_owned(),
+                    error: Some(error_message),
+                },
+                MarketHealthSource::Unknown,
+            )
+        }
+    };
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        HeaderName::from_static(MARKET_HEALTH_SOURCE_HEADER),
+        HeaderValue::from_static(source.as_header_value()),
+    );
+
+    Ok((headers, Json(response)))
 }
 
 pub async fn get_kline_with_indicators(
@@ -366,61 +459,133 @@ pub async fn get_available_indicators() -> Json<Value> {
 
 pub async fn get_crypto_symbols(
     State(state): State<AppState>,
-) -> Result<Json<Vec<String>>, AppError> {
-    let symbols = if let Some(hyperliquid_symbols) =
-        load_available_symbol_names(&state, "hyperliquid_available_symbols").await?
-    {
-        hyperliquid_symbols
-    } else {
-        fallback_get_json::<Vec<String>>(&state, "/api/crypto/symbols")
-            .await?
-            .0
-    };
-    Ok(Json(symbols))
+) -> Result<impl IntoResponse, AppError> {
+    let (symbols, source) = resolve_crypto_symbols(&state).await?;
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        HeaderName::from_static(CRYPTO_SYMBOLS_SOURCE_HEADER),
+        HeaderValue::from_static(source.as_header_value()),
+    );
+    Ok((headers, Json(symbols)))
 }
 
 pub async fn get_crypto_price(
     State(state): State<AppState>,
     Path(symbol): Path<String>,
-) -> Result<Json<Value>, AppError> {
-    let (price, _) = resolve_price_response(&state, &symbol, "CRYPTO").await?;
-    Ok(Json(serde_json::json!({
-        "symbol": symbol.to_uppercase(),
-        "price": price.price,
-        "market": "CRYPTO"
-    })))
+) -> Result<impl IntoResponse, AppError> {
+    let (price, source) = resolve_price_response(&state, &symbol, "CRYPTO").await?;
+    if matches!(source, MarketPriceSource::LegacyFallback) {
+        let legacy_path = format!("/api/market/price/{}?market=CRYPTO", symbol);
+        warn!(
+            route = "/api/crypto/price/{symbol}",
+            symbol = %symbol.to_uppercase(),
+            market = "CRYPTO",
+            fallback_reason = "native-db-miss",
+            legacy_path = %legacy_path,
+            "crypto price used legacy fallback"
+        );
+    }
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        HeaderName::from_static(CRYPTO_PRICE_SOURCE_HEADER),
+        HeaderValue::from_static(source.as_header_value()),
+    );
+
+    Ok((
+        headers,
+        Json(serde_json::json!({
+            "symbol": symbol.to_uppercase(),
+            "price": price.price,
+            "market": "CRYPTO"
+        })),
+    ))
 }
 
 pub async fn get_crypto_market_status(
     State(state): State<AppState>,
     Path(symbol): Path<String>,
-) -> Result<Json<Value>, AppError> {
-    let status = get_market_status(
-        State(state),
-        Path(symbol.clone()),
-        Query(MarketQuery {
-            market: "CRYPTO".to_owned(),
-        }),
-    )
-    .await?;
-    Ok(Json(serde_json::to_value(status.0).unwrap_or(Value::Null)))
+) -> Result<impl IntoResponse, AppError> {
+    let (status, source) = resolve_market_status_response(&state, &symbol, "CRYPTO").await?;
+    if matches!(source, MarketStatusSource::LegacyFallback) {
+        let legacy_path = format!("/api/market/status/{}?market=CRYPTO", symbol);
+        warn!(
+            route = "/api/crypto/status/{symbol}",
+            symbol = %symbol.to_uppercase(),
+            market = "CRYPTO",
+            fallback_reason = "unexpected-crypto-status-fallback",
+            legacy_path = %legacy_path,
+            "crypto status used legacy fallback"
+        );
+    }
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        HeaderName::from_static(CRYPTO_STATUS_SOURCE_HEADER),
+        HeaderValue::from_static(source.as_header_value()),
+    );
+
+    Ok((headers, Json(status)))
 }
 
 pub async fn get_popular_cryptos(
     State(state): State<AppState>,
-) -> Result<Json<Vec<Value>>, AppError> {
+) -> Result<impl IntoResponse, AppError> {
     let mut results = Vec::new();
+    let mut native_success_count = 0usize;
+    let mut legacy_fallback_symbols = Vec::new();
     for symbol in ["BTC", "ETH", "SOL", "DOGE", "BNB", "XRP"] {
-        if let Ok((price, _)) = resolve_price_response(&state, symbol, "CRYPTO").await {
-            results.push(serde_json::json!({
-                "symbol": symbol,
-                "name": symbol,
-                "price": price.price,
-                "market": "CRYPTO"
-            }));
+        match resolve_price_response(&state, symbol, "CRYPTO").await {
+            Ok((price, source)) => {
+                if matches!(source, MarketPriceSource::LegacyFallback) {
+                    legacy_fallback_symbols.push(symbol.to_owned());
+                } else {
+                    native_success_count += 1;
+                }
+                results.push(serde_json::json!({
+                    "symbol": symbol,
+                    "name": symbol,
+                    "price": price.price,
+                    "market": "CRYPTO"
+                }));
+            }
+            Err(error) => {
+                warn!(
+                    route = "/api/crypto/popular",
+                    symbol,
+                    market = "CRYPTO",
+                    error = %error.message,
+                    "crypto popular symbol resolution failed"
+                );
+            }
         }
     }
-    Ok(Json(results))
+
+    if !legacy_fallback_symbols.is_empty() {
+        warn!(
+            route = "/api/crypto/popular",
+            market = "CRYPTO",
+            fallback_symbols = %legacy_fallback_symbols.join(","),
+            fallback_count = legacy_fallback_symbols.len(),
+            "crypto popular used legacy fallback"
+        );
+    }
+
+    let source = if native_success_count > 0 && !legacy_fallback_symbols.is_empty() {
+        MarketPricesSource::Mixed
+    } else if !legacy_fallback_symbols.is_empty() {
+        MarketPricesSource::LegacyFallback
+    } else {
+        MarketPricesSource::NativeDb
+    };
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        HeaderName::from_static(CRYPTO_POPULAR_SOURCE_HEADER),
+        HeaderValue::from_static(source.as_header_value()),
+    );
+
+    Ok((headers, Json(results)))
 }
 
 #[derive(Deserialize)]
@@ -458,6 +623,65 @@ async fn resolve_price_response(
     Ok((
         fallback_get_json(state, &legacy_path).await?.0,
         MarketPriceSource::LegacyFallback,
+    ))
+}
+
+async fn resolve_market_status_response(
+    state: &AppState,
+    symbol: &str,
+    market: &str,
+) -> Result<(MarketStatusResponse, MarketStatusSource), AppError> {
+    if normalize_exchange(market).is_some() {
+        return Ok((
+            MarketStatusResponse {
+                symbol: symbol.to_uppercase(),
+                market: Some(market.to_owned()),
+                market_status: "TRADING".to_owned(),
+                timestamp: Utc::now().timestamp_millis(),
+                current_time: Utc::now().to_rfc3339(),
+            },
+            MarketStatusSource::NativeSynthetic,
+        ));
+    }
+
+    let legacy_path = format!("/api/market/status/{}?market={}", symbol, market);
+    warn!(
+        route = "/api/market/status/{symbol}",
+        symbol = %symbol.to_uppercase(),
+        market = %market,
+        fallback_reason = "unsupported-market",
+        legacy_path = %legacy_path,
+        "market status used legacy fallback"
+    );
+
+    Ok((
+        fallback_get_json(state, &legacy_path).await?.0,
+        MarketStatusSource::LegacyFallback,
+    ))
+}
+
+async fn resolve_crypto_symbols(
+    state: &AppState,
+) -> Result<(Vec<String>, CryptoSymbolsSource), AppError> {
+    if let Some(hyperliquid_symbols) =
+        load_available_symbol_names(state, "hyperliquid_available_symbols").await?
+    {
+        return Ok((hyperliquid_symbols, CryptoSymbolsSource::NativeConfig));
+    }
+
+    let legacy_path = "/api/crypto/symbols";
+    warn!(
+        route = "/api/crypto/symbols",
+        fallback_reason = "missing-native-symbol-config",
+        legacy_path,
+        "crypto symbols used legacy fallback"
+    );
+
+    Ok((
+        fallback_get_json::<Vec<String>>(state, legacy_path)
+            .await?
+            .0,
+        CryptoSymbolsSource::LegacyFallback,
     ))
 }
 
@@ -811,8 +1035,9 @@ fn read_market_error(error: sqlx::Error) -> AppError {
 #[cfg(test)]
 mod tests {
     use super::{
-        MarketPriceSource, MarketPricesSource, default_indicator_count, default_indicator_period,
-        normalize_exchange, validate_period,
+        CryptoSymbolsSource, MarketHealthSource, MarketPriceSource, MarketPricesSource,
+        MarketStatusSource, default_indicator_count, default_indicator_period, normalize_exchange,
+        validate_period,
     };
 
     #[test]
@@ -848,5 +1073,39 @@ mod tests {
             "legacy-fallback"
         );
         assert_eq!(MarketPricesSource::Mixed.as_header_value(), "mixed");
+    }
+
+    #[test]
+    fn market_status_source_header_values_are_stable() {
+        assert_eq!(
+            MarketStatusSource::NativeSynthetic.as_header_value(),
+            "native-synthetic"
+        );
+        assert_eq!(
+            MarketStatusSource::LegacyFallback.as_header_value(),
+            "legacy-fallback"
+        );
+    }
+
+    #[test]
+    fn market_health_source_header_values_are_stable() {
+        assert_eq!(MarketHealthSource::NativeDb.as_header_value(), "native-db");
+        assert_eq!(
+            MarketHealthSource::LegacyFallback.as_header_value(),
+            "legacy-fallback"
+        );
+        assert_eq!(MarketHealthSource::Unknown.as_header_value(), "unknown");
+    }
+
+    #[test]
+    fn crypto_symbols_source_header_values_are_stable() {
+        assert_eq!(
+            CryptoSymbolsSource::NativeConfig.as_header_value(),
+            "native-config"
+        );
+        assert_eq!(
+            CryptoSymbolsSource::LegacyFallback.as_header_value(),
+            "legacy-fallback"
+        );
     }
 }
