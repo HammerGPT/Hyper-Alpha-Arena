@@ -177,6 +177,7 @@ class HyperliquidTradingClient:
                 'privateKey': private_key,  # Signing key (master or agent)
                 'walletAddress': self.query_address,  # Address for balance/position queries
                 'options': {
+                    'refSet': True,
                     'fetchMarkets': {
                         'hip3': {
                             'dex': []  # Empty list to skip HIP3 DEX markets (we only need perp markets)
