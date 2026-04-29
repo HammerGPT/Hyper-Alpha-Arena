@@ -1384,15 +1384,23 @@ def check_pnl_sync_status(
     from database.models import ProgramExecutionLog
 
     # Check AI Decision logs
-    ai_query = db.query(AIDecisionLog).filter(
-        AIDecisionLog.operation.in_(["buy", "sell", "close"]),
-        AIDecisionLog.executed == "true",
-        AIDecisionLog.pnl_updated_at == None,
-        or_(
-            AIDecisionLog.hyperliquid_order_id != None,
-            AIDecisionLog.tp_order_id != None,
-            AIDecisionLog.sl_order_id != None,
-        ),
+    ai_query = (
+        db.query(AIDecisionLog)
+        .outerjoin(Order, AIDecisionLog.order_id == Order.id)
+        .filter(
+            AIDecisionLog.operation.in_(["buy", "sell", "close"]),
+            AIDecisionLog.executed == "true",
+            AIDecisionLog.pnl_updated_at.is_(None),
+            or_(
+                AIDecisionLog.hyperliquid_order_id.isnot(None),
+                AIDecisionLog.tp_order_id.isnot(None),
+                AIDecisionLog.sl_order_id.isnot(None),
+            ),
+            or_(
+                Order.filled_quantity > 0,
+                Order.id.is_(None), # Order 表里没有对应记录的也保留
+            ),
+        )
     )
 
     if trading_mode:
@@ -1409,14 +1417,23 @@ def check_pnl_sync_status(
     prog_query = db.query(ProgramExecutionLog).filter(
         ProgramExecutionLog.success == True,
         ProgramExecutionLog.decision_action.in_(["buy", "sell", "close"]),
-        ProgramExecutionLog.pnl_updated_at == None,
+        ProgramExecutionLog.pnl_updated_at.is_(None),
         or_(
-            ProgramExecutionLog.hyperliquid_order_id != None,
-            ProgramExecutionLog.tp_order_id != None,
-            ProgramExecutionLog.sl_order_id != None,
+            ProgramExecutionLog.hyperliquid_order_id.isnot(None),
+            ProgramExecutionLog.tp_order_id.isnot(None),
+            ProgramExecutionLog.sl_order_id.isnot(None),
         ),
+        db.query(Order.id)
+        .filter(
+            Order.filled_quantity > 0,
+            or_(
+                Order.hyperliquid_order_id == ProgramExecutionLog.hyperliquid_order_id,
+                Order.hyperliquid_order_id == ProgramExecutionLog.tp_order_id,
+                Order.hyperliquid_order_id == ProgramExecutionLog.sl_order_id,
+            ),
+        )
+        .exists(),
     )
-
     if trading_mode:
         if trading_mode == "paper":
             prog_query = prog_query.filter(ProgramExecutionLog.environment == None)
