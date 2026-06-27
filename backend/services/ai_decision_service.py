@@ -1088,6 +1088,21 @@ def _build_prompt_context(
             logger.warning(f"Failed to build news context: {e}", exc_info=True)
 
     # ============================================================================
+    # ADANOS MARKET SENTIMENT VARIABLES
+    # ============================================================================
+    # Process optional Adanos variables like {adanos_sentiment} and
+    # {BTC_adanos_sentiment}. This stays prompt-scoped and fail-open.
+    adanos_context = {}
+    if template_text:
+        try:
+            from services.adanos_sentiment import build_adanos_sentiment_context
+            adanos_context = build_adanos_sentiment_context(template_text, ordered_symbols)
+            if adanos_context:
+                logger.debug(f"Built Adanos sentiment context with {len(adanos_context)} variables")
+        except Exception as e:
+            logger.warning(f"Failed to build Adanos sentiment context: {e}", exc_info=True)
+
+    # ============================================================================
     # TRIGGER CONTEXT FORMATTING
     # ============================================================================
     # Format trigger context into structured text for AI prompt.
@@ -1402,6 +1417,8 @@ Regime Types:
         "recent_trades_summary": recent_trades_summary,
         # Trigger context (signal or scheduled trigger information)
         "trigger_context": trigger_context_text,
+        # Optional Adanos Market Sentiment prompt variables
+        "adanos_sentiment": adanos_context.get("adanos_sentiment", "N/A"),
         # K-line and technical indicator variables (dynamically generated)
         **kline_context,  # Merge K-line/indicator variables like {BTC_klines_15m}, {BTC_MACD_15m}, etc.
         # Market Regime classification variables (multi-timeframe)
@@ -1410,6 +1427,8 @@ Regime Types:
         **factor_context,
         # News intelligence variables like {BTC_news_sentiment}, {macro_news}, etc.
         **news_context,
+        # Adanos Market Sentiment variables like {adanos_sentiment}, {BTC_adanos_sentiment}
+        **adanos_context,
     }
 
 
