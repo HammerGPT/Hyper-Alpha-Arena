@@ -505,6 +505,30 @@ Deep analysis:
 
 ---
 
+## Adanos Market Sentiment Variables (Optional)
+
+Adanos variables add external crypto market sentiment from Reddit discussion
+when `ADANOS_API_KEY` is configured. If the key is missing, these variables
+resolve to an unavailable message and the prompt continues rendering.
+
+| Variable | Description |
+|----------|-------------|
+| `{adanos_sentiment}` | Sentiment summary for the selected symbols |
+| `{adanos_sentiment_14d}` | Selected-symbol summary using a custom lookback in days |
+| `{BTC_adanos_sentiment}` | BTC-specific Adanos sentiment summary |
+| `{ETH_adanos_sentiment_30d}` | ETH-specific summary using a custom lookback |
+
+Lookback suffixes use calendar days (`_1d` to `_365d`). The default is 7 days.
+
+Example:
+```
+=== EXTERNAL SENTIMENT ===
+{adanos_sentiment}
+{BTC_adanos_sentiment}
+```
+
+---
+
 ## Legacy Variables (Backward Compatibility)
 
 | Variable | Description | Recommended Alternative |
