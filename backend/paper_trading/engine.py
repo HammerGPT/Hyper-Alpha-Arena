@@ -220,38 +220,39 @@ class PaperEngine:
             gate_prices = dict(mark_prices or {})
             gate_prices[symbol] = fill_price
             state = self.compute_state(paper, gate_prices)
-            # For netting (after close), allow open even if margin is tight since close realizes PnL
-            is_netting = filled_qty > EPS
-            if state["available_balance"] < margin_needed and not is_netting:
-                return {
-                    "status": "error",
-                    "error": (
-                        f"Insufficient available balance: need ${margin_needed:.2f}, "
-                        f"have ${state['available_balance']:.2f}"
-                    ),
-                }
-            fee = fee_mod.calc_fee(notional, fee_rate_pct)
-            paper.total_fees = float(paper.total_fees) + fee
-            total_fee += fee
-            self._record_fill(paper, symbol, side, remaining, fill_price, leverage, order_no, fee)
-            pos = (
-                self.db.query(PaperPosition)
-                .filter(PaperPosition.paper_account_id == paper.id, PaperPosition.symbol == symbol)
-                .first()
-            )
-            if pos and pos.side == opening_side:
-                old_size = float(pos.size)
-                new_size = old_size + remaining
-                pos.entry_price = (float(pos.entry_price) * old_size + fill_price * remaining) / new_size
-                pos.size = new_size
-                pos.leverage = leverage
+            if state["available_balance"] < margin_needed:
+                if filled_qty <= EPS:
+                    return {
+                        "status": "error",
+                        "error": (
+                            f"Insufficient available balance: need ${margin_needed:.2f}, "
+                            f"have ${state['available_balance']:.2f}"
+                        ),
+                    }
+                remaining = 0.0  # netting part already filled; skip the new open
             else:
-                self.db.add(PaperPosition(
-                    paper_account_id=paper.id, symbol=symbol, side=opening_side,
-                    size=remaining, entry_price=fill_price, leverage=leverage,
-                    cycle=paper.cycle, opened_at=datetime.utcnow(),
-                ))
-            filled_qty += remaining
+                fee = fee_mod.calc_fee(notional, fee_rate_pct)
+                paper.total_fees = float(paper.total_fees) + fee
+                total_fee += fee
+                self._record_fill(paper, symbol, side, remaining, fill_price, leverage, order_no, fee)
+                pos = (
+                    self.db.query(PaperPosition)
+                    .filter(PaperPosition.paper_account_id == paper.id, PaperPosition.symbol == symbol)
+                    .first()
+                )
+                if pos and pos.side == opening_side:
+                    old_size = float(pos.size)
+                    new_size = old_size + remaining
+                    pos.entry_price = (float(pos.entry_price) * old_size + fill_price * remaining) / new_size
+                    pos.size = new_size
+                    pos.leverage = leverage
+                else:
+                    self.db.add(PaperPosition(
+                        paper_account_id=paper.id, symbol=symbol, side=opening_side,
+                        size=remaining, entry_price=fill_price, leverage=leverage,
+                        cycle=paper.cycle, opened_at=datetime.utcnow(),
+                    ))
+                filled_qty += remaining
 
         self.db.flush()
         return {

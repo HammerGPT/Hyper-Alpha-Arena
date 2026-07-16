@@ -42,14 +42,30 @@ def test_partial_close(engine):
 def test_reverse_position_nets_then_opens(engine):
     paper = engine.get_or_create(1, "hyperliquid")
     _open_long(engine, paper, size=0.1)
-    # sell 0.3 at 110000: closes 0.1 long (pnl 1000), opens 0.2 short
-    result = engine.place_order(paper, "BTC", False, 0.3, 110000.0, 110000.0, leverage=2)
+    # sell 0.3 at 110000: closes 0.1 long (pnl 1000), opens 0.2 short.
+    # leverage=3 here: after netting, available ~= 10990.55 (10000 + 1000
+    # realized - 9.45 accumulated fees); the 0.2 open leg needs
+    # 0.2*110000/3 ~= 7333.33 margin, which fits (at leverage=2 it would need
+    # 11000, ~9.45 short of available -- infeasible under strict margin).
+    result = engine.place_order(paper, "BTC", False, 0.3, 110000.0, 110000.0, leverage=3)
     assert result["status"] == "filled"
     assert result["realized_pnl"] == pytest.approx(1000.0)
     pos = engine.positions(paper)[0]
     assert pos.side == "short"
     assert float(pos.size) == pytest.approx(0.2)
     assert float(pos.entry_price) == pytest.approx(110000.0)
+
+
+def test_oversized_reversal_open_leg_skipped(engine):
+    paper = engine.get_or_create(1, "hyperliquid")
+    # tiny long, then a reversal far beyond any margin: close fills, open leg must be skipped
+    engine.place_order(paper, "BTC", True, 0.001, 50000.0, 50000.0, leverage=1)
+    result = engine.place_order(paper, "BTC", False, 100.001, 50000.0, 50000.0, leverage=50)
+    assert result["status"] == "filled"
+    assert result["filled_amount"] == pytest.approx(0.001)  # only the netting close
+    assert engine.positions(paper) == []  # no short was opened
+    state = engine.compute_state(paper, {})
+    assert state["used_margin"] == 0
 
 
 def test_gtc_resting_then_trigger(engine):
