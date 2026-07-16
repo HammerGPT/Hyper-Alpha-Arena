@@ -56,9 +56,16 @@ class PaperMonitor:
                 symbols |= {o.symbol for o in engine.pending_orders(paper)}
                 if not symbols:
                     paper.last_monitor_at = datetime.utcnow()
+                    db.commit()
                     continue
                 prices = self._get_prices(paper.data_exchange, sorted(symbols))
                 if not prices:
+                    # Price outage: don't advance last_monitor_at so a later
+                    # catch-up can replay this window once prices recover.
+                    logger.warning(
+                        f"[PAPER MONITOR] Account {paper.account_id} sweep skipped: "
+                        f"no prices for symbols {sorted(symbols)}"
+                    )
                     continue
                 fills = self._sweep_account(db, engine, paper, prices)
                 for fill in fills:
@@ -175,7 +182,14 @@ class PaperMonitor:
                 logger.error(f"[PAPER MONITOR] Catch-up failed for {paper.account_id}: {e}")
 
     def catch_up(self, db: Session, engine, paper) -> None:
-        """Replay 1m kline highs/lows since last_monitor_at through pending orders."""
+        """Replay 1m kline highs/lows since last_monitor_at through pending orders.
+
+        Note: at 1m kline granularity, the intra-candle path (whether price hit
+        the low or high first) is unknowable, so if both a TP and an SL could
+        trigger within the same candle, resolution falls back to
+        PaperEngine.pending_orders' deterministic order-by-id ordering rather
+        than the true (unknown) intra-candle sequence.
+        """
         if not paper.last_monitor_at:
             return
         gap_minutes = int((datetime.utcnow() - paper.last_monitor_at).total_seconds() // 60)
@@ -206,23 +220,26 @@ class PaperMonitor:
         sdb = SnapshotSessionLocal()
         try:
             for paper in db.query(PaperAccount).all():
-                symbols = [p.symbol for p in engine.positions(paper)]
-                prices = self._get_prices(paper.data_exchange, symbols) if symbols else {}
-                state = engine.compute_state(paper, prices)
-                sdb.add(HyperliquidAccountSnapshot(
-                    account_id=paper.account_id,
-                    environment="paper",
-                    wallet_address=f"paper-{paper.account_id}",
-                    total_equity=state["total_equity"],
-                    available_balance=state["available_balance"],
-                    used_margin=state["used_margin"],
-                    maintenance_margin=state["maintenance_margin"],
-                    trigger_event="scheduled",
-                ))
+                try:
+                    symbols = [p.symbol for p in engine.positions(paper)]
+                    prices = self._get_prices(paper.data_exchange, symbols) if symbols else {}
+                    state = engine.compute_state(paper, prices)
+                    sdb.add(HyperliquidAccountSnapshot(
+                        account_id=paper.account_id,
+                        environment="paper",
+                        wallet_address=f"paper-{paper.account_id}",
+                        total_equity=state["total_equity"],
+                        available_balance=state["available_balance"],
+                        used_margin=state["used_margin"],
+                        maintenance_margin=state["maintenance_margin"],
+                        trigger_event="scheduled",
+                    ))
+                except Exception as e:
+                    logger.error(f"[PAPER MONITOR] Snapshot failed for account {paper.account_id}: {e}")
             sdb.commit()
         except Exception as e:
             sdb.rollback()
-            logger.error(f"[PAPER MONITOR] Snapshot failed: {e}")
+            logger.error(f"[PAPER MONITOR] Snapshot commit failed: {e}")
         finally:
             sdb.close()
 

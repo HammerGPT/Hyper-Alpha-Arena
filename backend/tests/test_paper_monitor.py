@@ -54,3 +54,27 @@ def test_sweep_account_triggers_tp(db_session, engine, monkeypatch):
     assert len(fills) == 1
     assert fills[0]["exit_reason"] == "tp"
     assert engine.positions(paper) == []
+
+
+def test_run_once_commits_last_monitor_at_for_idle_account(db_session, engine, monkeypatch):
+    from paper_trading.monitor import PaperMonitor
+    paper = engine.get_or_create(1, "hyperliquid")
+    db_session.commit()
+    monitor = PaperMonitor()
+    monitor.run_once(db_session)
+    # idle account (no positions/orders): watermark persisted through commit
+    db_session.expire_all()
+    from database.models import PaperAccount
+    fresh = db_session.query(PaperAccount).filter(PaperAccount.account_id == 1).one()
+    assert fresh.last_monitor_at is not None
+
+
+def test_pending_orders_deterministic_order(db_session, engine):
+    paper = engine.get_or_create(1, "hyperliquid")
+    engine.place_order(
+        paper, "BTC", True, 0.1, 100000.0, 100000.0, leverage=2,
+        take_profit_price=110000.0, stop_loss_price=95000.0,
+    )
+    orders = engine.pending_orders(paper)
+    ids = [o.id for o in orders]
+    assert ids == sorted(ids)

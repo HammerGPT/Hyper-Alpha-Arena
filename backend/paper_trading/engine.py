@@ -65,7 +65,10 @@ class PaperEngine:
         )
         if symbol:
             q = q.filter(PaperOrder.symbol == symbol)
-        return q.all()
+        # Deterministic order: when a single candle's low/high could trigger both
+        # a TP and an SL for the same position, order-creation order decides which
+        # fires first, rather than arbitrary row order.
+        return q.order_by(PaperOrder.id).all()
 
     def used_margin(self, paper: PaperAccount) -> float:
         total = 0.0
