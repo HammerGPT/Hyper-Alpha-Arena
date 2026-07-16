@@ -79,3 +79,18 @@ def test_close_position(client, db_session):
 def test_close_position_no_position(client, db_session):
     result = client.close_position("ETH", cancel_tpsl=True, db=db_session)
     assert result is None
+
+
+def test_close_position_fills_with_real_slippage(client, db_session, monkeypatch):
+    from paper_trading import engine as engine_mod
+    client.place_order_with_tpsl(
+        db=db_session, symbol="BTC", is_buy=True, size=0.1, price=100000.0, leverage=2,
+    )
+    # simulate real orderbook: sells fill 0.05% below reference, buys 0.05% above
+    monkeypatch.setattr(
+        engine_mod.slip_mod, "compute_fill_price",
+        lambda ex, sym, side, size, ref, fb: (ref * (0.9995 if side == "sell" else 1.0005), "orderbook"),
+    )
+    result = client.close_position("BTC", cancel_tpsl=True, db=db_session)
+    assert result.get("status") == "filled"
+    assert client.get_positions(db_session) == []

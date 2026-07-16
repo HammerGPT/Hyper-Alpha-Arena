@@ -181,9 +181,15 @@ class PaperTradingClient:
             position_symbols = [p.symbol for p in engine.positions(paper) if p.symbol != symbol]
             mark_prices = self._prices_for(db, position_symbols) if position_symbols else None
 
+            # Apply 1% tolerance in fill direction to account for real orderbook slippage.
+            # Closing a LONG (sell): buyer walks the bid side, so limit lower (0.99).
+            # Closing a SHORT (buy): seller walks the ask side, so limit higher (1.01).
+            # This mirrors the trading pipeline's ±1% oracle price window.
+            limit_price = market_price * 0.99 if is_long else market_price * 1.01
+
             fill = engine.place_order(
                 paper, symbol, is_buy=not is_long, size=size,
-                limit_price=market_price, market_price=market_price,
+                limit_price=limit_price, market_price=market_price,
                 leverage=leverage, time_in_force="Ioc", reduce_only=True,
                 mark_prices=mark_prices,
             )
