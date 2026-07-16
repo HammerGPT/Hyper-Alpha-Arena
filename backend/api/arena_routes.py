@@ -1396,10 +1396,9 @@ def check_pnl_sync_status(
     )
 
     if trading_mode:
-        if trading_mode == "paper":
-            ai_query = ai_query.filter(AIDecisionLog.hyperliquid_environment == None)
-        else:
-            ai_query = ai_query.filter(AIDecisionLog.hyperliquid_environment == trading_mode)
+        # "paper" now means the new paper-trading environment (environment == "paper"),
+        # not the legacy deprecated internal paper mode (environment IS NULL).
+        ai_query = ai_query.filter(AIDecisionLog.hyperliquid_environment == trading_mode)
     else:
         ai_query = ai_query.filter(AIDecisionLog.hyperliquid_environment.isnot(None))
 
@@ -1418,10 +1417,8 @@ def check_pnl_sync_status(
     )
 
     if trading_mode:
-        if trading_mode == "paper":
-            prog_query = prog_query.filter(ProgramExecutionLog.environment == None)
-        else:
-            prog_query = prog_query.filter(ProgramExecutionLog.environment == trading_mode)
+        # Same repointing as the ai_query filter above: "paper" == new paper environment.
+        prog_query = prog_query.filter(ProgramExecutionLog.environment == trading_mode)
     else:
         prog_query = prog_query.filter(ProgramExecutionLog.environment.isnot(None))
 
@@ -1437,6 +1434,100 @@ def check_pnl_sync_status(
     }
 
 
+def _backfill_paper_pnl(db: Session, snapshot_db: Session) -> dict:
+    """
+    Paper trading PnL backfill safety net for /update-pnl.
+
+    paper_trading/monitor.py's PaperMonitor._backfill_decision_pnl backfills
+    AIDecisionLog/ProgramExecutionLog.realized_pnl + pnl_updated_at in real time
+    the moment a TP/SL PaperOrder fills. This function is the safety net for
+    anything the monitor missed (e.g. it was down when the fill happened): for
+    executed/successful paper-environment decision/program rows that are still
+    unsynced (pnl_updated_at IS NULL), check whether their TP/SL PaperOrder has
+    since filled.
+
+    DEVIATION from the Task 13 brief: the brief's literal snippet only ever
+    stamps `pnl_updated_at` and never touches `realized_pnl` -- so a record the
+    monitor missed would be marked "synced" while realized_pnl stays NULL
+    forever (it silently drops out of the "needs sync" count with no PnL ever
+    recorded). That is incoherent, so this implementation additionally
+    recovers the PnL when possible: it reads the fill's price/quantity from the
+    snapshot DB's HyperliquidTrade row (environment="paper",
+    order_id=<tp/sl order_no>) and combines it with the PaperOrder's
+    entry_price/side (recorded at TP/SL registration time -- see
+    PaperEngine._register_tpsl), mirroring the exact math PaperEngine._close_qty
+    uses:
+        pnl = (fill_price - entry_price) * qty   if close side == "sell" (was long)
+        pnl = (entry_price - fill_price) * qty   if close side == "buy"  (was short)
+    Only when that recovery isn't possible (no matching fill row, or the
+    PaperOrder has no entry_price -- e.g. legacy rows) does it fall back to the
+    brief's literal behavior of stamping pnl_updated_at alone, leaving
+    realized_pnl untouched (NULL).
+
+    Caller (update_pnl_data) owns both sessions' lifecycle: db is the FastAPI
+    request-scoped session, snapshot_db is opened/closed around the whole
+    endpoint. This helper only reads/writes/commits `db`; it never opens or
+    closes either session, so it is safe to call directly with test fixture
+    sessions too.
+    """
+    from database.models import AIDecisionLog, ProgramExecutionLog, PaperOrder
+    from decimal import Decimal
+
+    paper_updated = 0
+
+    paper_decisions = db.query(AIDecisionLog).filter(
+        AIDecisionLog.hyperliquid_environment == "paper",
+        AIDecisionLog.executed == "true",
+        AIDecisionLog.operation.in_(["buy", "sell", "close"]),
+        AIDecisionLog.pnl_updated_at == None,
+    ).all()
+    paper_programs = db.query(ProgramExecutionLog).filter(
+        ProgramExecutionLog.environment == "paper",
+        ProgramExecutionLog.success == True,
+        ProgramExecutionLog.decision_action.in_(["buy", "sell", "close"]),
+        ProgramExecutionLog.pnl_updated_at == None,
+    ).all()
+
+    def _filled_order(order_no):
+        if not order_no:
+            return None
+        return db.query(PaperOrder).filter(
+            PaperOrder.order_no == order_no,
+            PaperOrder.status == "filled",
+        ).first()
+
+    for rec in list(paper_decisions) + list(paper_programs):
+        # Entry orders with TP/SL still pending stay unsynced (position not closed yet).
+        po = _filled_order(rec.tp_order_id) or _filled_order(rec.sl_order_id)
+        if po is None or po.filled_at is None:
+            continue
+        if rec.realized_pnl is not None:
+            # Already has PnL via some other path; nothing to backfill here.
+            continue
+
+        recovered_pnl = None
+        fill = snapshot_db.query(HyperliquidTrade).filter(
+            HyperliquidTrade.environment == "paper",
+            HyperliquidTrade.order_id == po.order_no,
+        ).order_by(HyperliquidTrade.id.desc()).first()
+        if fill is not None and po.entry_price is not None:
+            entry = Decimal(str(po.entry_price))
+            qty = Decimal(str(fill.quantity))
+            price = Decimal(str(fill.price))
+            was_long = po.side == "sell"  # close side "sell" => original position was long
+            recovered_pnl = (price - entry) * qty if was_long else (entry - price) * qty
+
+        # Monitor normally backfills in real time; this is the safety net for missed fills.
+        rec.pnl_updated_at = po.filled_at
+        if recovered_pnl is not None:
+            rec.realized_pnl = recovered_pnl
+        paper_updated += 1
+
+    if paper_updated:
+        db.commit()
+    return {"backfilled": paper_updated}
+
+
 @router.post("/update-pnl")
 def update_pnl_data(db: Session = Depends(get_db)):
     """
@@ -1447,6 +1538,7 @@ def update_pnl_data(db: Session = Depends(get_db)):
     2. Updates HyperliquidTrade.fee with actual fee data
     3. Creates missing HyperliquidTrade records for resting orders that later filled
     4. Updates AIDecisionLog.realized_pnl for closed positions
+    5. Backfills paper trading PnL missed by the real-time paper monitor (safety net)
 
     Returns summary of updated records.
     """
@@ -1472,6 +1564,12 @@ def update_pnl_data(db: Session = Depends(get_db)):
     snapshot_db = SnapshotSessionLocal()
 
     try:
+        # ---- Paper trading backfill (no exchange API; fills already in snapshot DB) ----
+        try:
+            result["paper"] = _backfill_paper_pnl(db, snapshot_db)
+        except Exception as e:
+            result["errors"].append(f"paper backfill: {e}")
+
         # ========== Process Hyperliquid wallets ==========
         hl_wallets = db.query(HyperliquidWallet).all()
         if hl_wallets:
