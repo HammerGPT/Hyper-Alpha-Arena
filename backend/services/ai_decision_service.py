@@ -2527,7 +2527,7 @@ def save_ai_decision(
     sl_order_id: Optional[str] = None,
     # Exchange identifier for attribution analysis
     exchange: Optional[str] = None,
-) -> None:
+) -> Optional[AIDecisionLog]:
     """Save AI decision to the decision log"""
     try:
         operation = decision.get("operation", "").lower() if decision.get("operation") else ""
@@ -2687,9 +2687,12 @@ def save_ai_decision(
         except Exception as notif_err:
             logger.warning(f"Failed to send bot notification: {notif_err}")
 
+        return decision_log
+
     except Exception as err:
         logger.error(f"Failed to save AI decision log: {err}")
         db.rollback()
+        return None
 
 
 def get_active_ai_accounts(db: Session) -> List[Account]:

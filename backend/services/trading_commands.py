@@ -498,22 +498,31 @@ def place_ai_driven_hyperliquid_order(
 
             # Get global trading mode (environment) for Hyperliquid
             from services.hyperliquid_environment import get_global_trading_mode, get_leverage_settings
-            environment = get_global_trading_mode(db)
-            logger.info(f"Processing Hyperliquid trading for account: {account.name} (environment: {environment})")
+            from paper_trading import get_execution_mode
 
-            # Get Hyperliquid client (will check wallet configuration)
-            try:
-                client = get_hyperliquid_client(db, account.id, override_environment=environment)
-            except ValueError as wallet_err:
-                logger.info(
-                    f"AI Trader '{account.name}' (ID: {account.id}) skipped - "
-                    f"Hyperliquid wallet not configured. {str(wallet_err)} "
-                    f"Please configure wallet in AI Traders management page."
-                )
-                continue
-            except Exception as client_err:
-                logger.error(f"Failed to get Hyperliquid client for {account.name}: {client_err}")
-                continue
+            is_paper = get_execution_mode(db, account.id) == "paper"
+            if is_paper:
+                environment = "paper"
+                from paper_trading.client import PaperTradingClient
+                client = PaperTradingClient(account.id, "hyperliquid")
+                logger.info(f"Processing PAPER trading for account: {account.name} (hyperliquid data)")
+            else:
+                environment = get_global_trading_mode(db)
+                logger.info(f"Processing Hyperliquid trading for account: {account.name} (environment: {environment})")
+
+                # Get Hyperliquid client (will check wallet configuration)
+                try:
+                    client = get_hyperliquid_client(db, account.id, override_environment=environment)
+                except ValueError as wallet_err:
+                    logger.info(
+                        f"AI Trader '{account.name}' (ID: {account.id}) skipped - "
+                        f"Hyperliquid wallet not configured. {str(wallet_err)} "
+                        f"Please configure wallet in AI Traders management page."
+                    )
+                    continue
+                except Exception as client_err:
+                    logger.error(f"Failed to get Hyperliquid client for {account.name}: {client_err}")
+                    continue
             wallet_address = getattr(client, "wallet_address", None)
             decision_kwargs = {"wallet_address": wallet_address, "exchange": "hyperliquid"}
 
@@ -603,12 +612,28 @@ def place_ai_driven_hyperliquid_order(
                 'positions': positions
             }
 
+            # Paper mode always trades against mainnet market data, regardless of the
+            # global testnet/mainnet toggle used for prompt_environment. Use a local
+            # variable scoped to this account's iteration only -- never reassign the
+            # loop-outer `prices` (that would leak testnet/mainnet prices across
+            # accounts processed later in the same loop).
+            account_prices = prices
+            if is_paper and prompt_environment != "mainnet":
+                paper_tickers = _get_realtime_ticker_snapshot(selected_symbols, environment="mainnet")
+                paper_prices = {
+                    s: float(t.get("price", 0) or 0)
+                    for s, t in paper_tickers.items()
+                    if float(t.get("price", 0) or 0) > 0
+                }
+                if paper_prices:
+                    account_prices = paper_prices
+
             # Call AI for trading decision with trigger context
             decisions = call_ai_for_decision(
                 db,
                 account,
                 portfolio,
-                prices,
+                account_prices,
                 symbols=selected_symbols,
                 hyperliquid_state=hyperliquid_state,
                 symbol_metadata=prompt_symbol_metadata,
@@ -662,10 +687,17 @@ def place_ai_driven_hyperliquid_order(
                     save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
                     continue
 
-                # Get leverage settings from HyperliquidWallet (or Account fallback)
-                leverage_settings = get_leverage_settings(db, account.id, environment)
-                max_leverage = leverage_settings["max_leverage"]
-                default_leverage = leverage_settings["default_leverage"]
+                # Get leverage settings from HyperliquidWallet (or Account fallback).
+                # get_leverage_settings() requires environment to be "testnet"/"mainnet"
+                # (raises ValueError otherwise) and paper accounts have no real wallet
+                # row to look up, so use the same Account-table fallback it would use.
+                if is_paper:
+                    max_leverage = account.max_leverage if account.max_leverage is not None else 3
+                    default_leverage = account.default_leverage if account.default_leverage is not None else 1
+                else:
+                    leverage_settings = get_leverage_settings(db, account.id, environment)
+                    max_leverage = leverage_settings["max_leverage"]
+                    default_leverage = leverage_settings["default_leverage"]
 
                 if leverage < 1 or leverage > max_leverage:
                     logger.warning(
@@ -679,7 +711,7 @@ def place_ai_driven_hyperliquid_order(
                     save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
                     continue
 
-                price = prices.get(symbol)
+                price = account_prices.get(symbol)
                 if not price or price <= 0:
                     logger.warning(f"Invalid price for {symbol} for {account.name}")
                     save_ai_decision(db, account, decision, portfolio, executed=False, **decision_kwargs)
@@ -939,7 +971,7 @@ def place_ai_driven_hyperliquid_order(
                         f"{symbol} size={close_size} (closing {'long' if is_long else 'short'})"
                     )
 
-                    current_price = prices.get(symbol, 0)
+                    current_price = account_prices.get(symbol, 0)
 
                     # Price validation for Hyperliquid 1% oracle limit
                     max_price_close = decision.get("max_price")
@@ -1070,7 +1102,7 @@ def place_ai_driven_hyperliquid_order(
                             attempt_price = close_price
                         else:
                             # Refresh market price for retry attempts
-                            current_price_retry = prices.get(symbol, current_price)
+                            current_price_retry = account_prices.get(symbol, current_price)
                             attempt_price = current_price_retry * price_multipliers[retry_count]
                             attempt_price, _, _ = _enforce_price_bounds(
                                 symbol=symbol,
@@ -1136,7 +1168,7 @@ def place_ai_driven_hyperliquid_order(
                     if (not order_result or order_result.get('status') != 'filled') and not fallback_gtc_attempted:
                         fallback_gtc_attempted = True
                         boundary_multiplier = 0.99 if is_long else 1.01
-                        latest_price = prices.get(symbol, current_price)
+                        latest_price = account_prices.get(symbol, current_price)
                         if not latest_price or latest_price <= 0:
                             latest_price = current_price or close_price
                         fallback_price = latest_price * boundary_multiplier
@@ -1183,7 +1215,12 @@ def place_ai_driven_hyperliquid_order(
                             f"[HYPERLIQUID] Order executed successfully for {account.name}: "
                             f"{operation.upper()} {symbol} order_id={order_id}"
                         )
-                        save_ai_decision(db, account, decision, portfolio, executed=True, **decision_kwargs)
+                        decision_log = save_ai_decision(db, account, decision, portfolio, executed=True, **decision_kwargs)
+                        if environment == "paper" and decision_log is not None and order_result.get("realized_pnl"):
+                            from datetime import datetime as _dt
+                            decision_log.realized_pnl = order_result["realized_pnl"]
+                            decision_log.pnl_updated_at = _dt.utcnow()
+                            db.commit()
 
                         # For full close (target_portion = 1.0), cancel any remaining pending orders
                         if operation == "close" and should_cancel_orders:
@@ -1341,44 +1378,57 @@ def place_ai_driven_binance_order(
     for account in accounts:
         db = SessionLocal()
         try:
-            # Get global trading mode (same as Hyperliquid)
             from services.hyperliquid_environment import get_global_trading_mode
-            environment = get_global_trading_mode(db)
-            if not environment:
-                logger.info(f"AI Trader '{account.name}' skipped - No trading environment configured")
-                continue
+            from paper_trading import get_execution_mode
 
-            # Check Binance wallet configuration for the current environment
-            wallet = db.query(BinanceWallet).filter(
-                BinanceWallet.account_id == account.id,
-                BinanceWallet.environment == environment,
-                BinanceWallet.is_active == "true"
-            ).first()
+            is_paper = get_execution_mode(db, account.id) == "paper"
+            if is_paper:
+                environment = "paper"
+                from paper_trading.client import PaperTradingClient
+                client = PaperTradingClient(account.id, "binance")
+                # Paper accounts have no BinanceWallet row; downstream code that
+                # references `wallet` (leverage fallback, quota check, trade
+                # attribution) must handle wallet=None.
+                wallet = None
+                decision_kwargs = {"wallet_address": f"paper-{account.id}", "exchange": "binance"}
+                logger.info(f"Processing PAPER trading for account: {account.name} (binance data)")
+            else:
+                environment = get_global_trading_mode(db)
+                if not environment:
+                    logger.info(f"AI Trader '{account.name}' skipped - No trading environment configured")
+                    continue
 
-            if not wallet or not wallet.api_key_encrypted or not wallet.secret_key_encrypted:
-                logger.info(
-                    f"AI Trader '{account.name}' (ID: {account.id}) skipped - "
-                    f"Binance wallet not configured."
+                # Check Binance wallet configuration for the current environment
+                wallet = db.query(BinanceWallet).filter(
+                    BinanceWallet.account_id == account.id,
+                    BinanceWallet.environment == environment,
+                    BinanceWallet.is_active == "true"
+                ).first()
+
+                if not wallet or not wallet.api_key_encrypted or not wallet.secret_key_encrypted:
+                    logger.info(
+                        f"AI Trader '{account.name}' (ID: {account.id}) skipped - "
+                        f"Binance wallet not configured."
+                    )
+                    continue
+
+                # Decrypt API credentials
+                from utils.encryption import decrypt_private_key
+                api_key = decrypt_private_key(wallet.api_key_encrypted)
+                secret_key = decrypt_private_key(wallet.secret_key_encrypted)
+
+                # Initialize Binance trading client
+                client = BinanceTradingClient(
+                    api_key=api_key,
+                    secret_key=secret_key,
+                    environment=wallet.environment or "testnet"
                 )
-                continue
 
-            # Decrypt API credentials
-            from utils.encryption import decrypt_private_key
-            api_key = decrypt_private_key(wallet.api_key_encrypted)
-            secret_key = decrypt_private_key(wallet.secret_key_encrypted)
-
-            # Initialize Binance trading client
-            client = BinanceTradingClient(
-                api_key=api_key,
-                secret_key=secret_key,
-                environment=wallet.environment or "testnet"
-            )
-
-            # Build decision_kwargs for tracking (same as Hyperliquid)
-            # Note: BinanceWallet has no wallet_address field (unlike HyperliquidWallet),
-            # so we use wallet.id as identifier. The key must be "wallet_address" to match
-            # save_ai_decision() function signature.
-            decision_kwargs = {"wallet_address": str(wallet.id), "exchange": "binance"}
+                # Build decision_kwargs for tracking (same as Hyperliquid)
+                # Note: BinanceWallet has no wallet_address field (unlike HyperliquidWallet),
+                # so we use wallet.id as identifier. The key must be "wallet_address" to match
+                # save_ai_decision() function signature.
+                decision_kwargs = {"wallet_address": str(wallet.id), "exchange": "binance"}
 
             # Get tracking fields for decision analysis
             try:
@@ -1415,7 +1465,11 @@ def place_ai_driven_binance_order(
 
             # Get positions
             try:
-                positions = client.get_positions(include_timing=True)
+                # Explicit db: BinanceTradingClient.get_positions accepts/ignores it
+                # (kept only for Hyperliquid-interface compatibility), but
+                # PaperTradingClient.get_positions requires it to look up simulated
+                # positions -- omitting it would break paper accounts.
+                positions = client.get_positions(db, include_timing=True)
                 logger.info(f"Account {account.name} has {len(positions)} open positions")
             except Exception as e:
                 logger.error(f"Failed to get Binance positions for {account.name}: {e}")
@@ -1476,10 +1530,13 @@ def place_ai_driven_binance_order(
                 _execute_binance_decision(
                     db, account, client, decision, portfolio, positions, prices,
                     available_balance=available_balance,
-                    max_leverage=wallet.max_leverage or 20,
-                    default_leverage=wallet.default_leverage or 5,
+                    # wallet is None for paper accounts (no BinanceWallet row exists);
+                    # fall back to the Account-table leverage fields in that case.
+                    max_leverage=(wallet.max_leverage or 20) if wallet else (getattr(account, "max_leverage", None) or 20),
+                    default_leverage=(wallet.default_leverage or 5) if wallet else (getattr(account, "default_leverage", None) or 5),
                     decision_kwargs=decision_kwargs,
-                    wallet=wallet
+                    wallet=wallet,
+                    is_paper=is_paper,
                 )
 
         except Exception as e:
@@ -1502,6 +1559,7 @@ def _execute_binance_decision(
     default_leverage: int = 5,
     decision_kwargs: Optional[Dict[str, Any]] = None,
     wallet=None,
+    is_paper: bool = False,
 ) -> None:
     """
     Execute a single AI decision on Binance.
@@ -1601,6 +1659,9 @@ def _execute_binance_decision(
             )
 
             # 8. Place order with TP/SL
+            # Note: order_type is omitted here -- both BinanceTradingClient
+            # (default "MARKET") and PaperTradingClient (no such param) work
+            # correctly without it; PaperTradingClient raises TypeError if passed.
             order_result = client.place_order_with_tpsl(
                 db=db,
                 symbol=symbol,
@@ -1608,7 +1669,6 @@ def _execute_binance_decision(
                 size=quantity,
                 price=price,
                 leverage=leverage,
-                order_type="MARKET",
                 reduce_only=False,
                 take_profit_price=take_profit_price,
                 stop_loss_price=stop_loss_price
@@ -1640,7 +1700,6 @@ def _execute_binance_decision(
                 size=quantity,
                 price=price,
                 leverage=leverage,
-                order_type="MARKET",
                 reduce_only=False,
                 take_profit_price=take_profit_price,
                 stop_loss_price=stop_loss_price
@@ -1702,7 +1761,7 @@ def _execute_binance_decision(
             status = order_result.get("status", "error")
             executed = status in ["filled", "resting"]
 
-            save_ai_decision(
+            decision_log = save_ai_decision(
                 db, account, decision, portfolio,
                 executed=executed,
                 hyperliquid_order_id=str(order_result.get("order_id")) if order_result.get("order_id") else None,
@@ -1710,6 +1769,11 @@ def _execute_binance_decision(
                 sl_order_id=str(order_result.get("sl_order_id")) if order_result.get("sl_order_id") else None,
                 **decision_kwargs
             )
+            if is_paper and status == "filled" and decision_log is not None and order_result.get("realized_pnl"):
+                from datetime import datetime as _dt
+                decision_log.realized_pnl = order_result["realized_pnl"]
+                decision_log.pnl_updated_at = _dt.utcnow()
+                db.commit()
 
             if executed:
                 logger.info(
