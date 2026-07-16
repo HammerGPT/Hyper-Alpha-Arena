@@ -55,6 +55,7 @@ class StrategyState:
     scheduled_trigger_enabled: bool  # Enable/disable scheduled trigger
     last_trigger_at: Optional[datetime]
     exchange: str = "hyperliquid"  # "hyperliquid" or "binance"
+    execution_mode: str = "real"  # "real" or "paper"
     running: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -175,6 +176,7 @@ class StrategyManager:
                         scheduled_trigger_enabled=strategy.scheduled_trigger_enabled,
                         last_trigger_at=_as_aware(strategy.last_trigger_at),
                         exchange=getattr(strategy, 'exchange', None) or "hyperliquid",
+                        execution_mode=getattr(strategy, "execution_mode", None) or "real",
                     )
                     self.strategies[strategy.account_id] = state
 
@@ -429,6 +431,7 @@ class HyperliquidStrategyManager(StrategyManager):
                         scheduled_trigger_enabled=strategy.scheduled_trigger_enabled,
                         last_trigger_at=_as_aware(strategy.last_trigger_at),
                         exchange=getattr(strategy, 'exchange', None) or "hyperliquid",
+                        execution_mode=getattr(strategy, "execution_mode", None) or "real",
                     )
                     self.strategies[strategy.account_id] = state
 

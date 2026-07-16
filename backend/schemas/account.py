@@ -53,6 +53,7 @@ class StrategyConfigBase(BaseModel):
     enabled: bool = True
     scheduled_trigger_enabled: bool = True  # Enable/disable scheduled trigger
     exchange: str = "hyperliquid"  # "hyperliquid" or "binance"
+    execution_mode: str = "real"  # "real" or "paper"
     price_threshold: Optional[float] = None  # Deprecated, kept for compatibility
     signal_pool_id: Optional[int] = None  # Deprecated: use signal_pool_ids instead
     signal_pool_ids: Optional[List[int]] = None  # Multiple signal pools binding (OR relationship)
