@@ -24,6 +24,7 @@ interface AssetCurveData {
   is_initial?: boolean
   user_id: number
   username: string
+  is_paper?: boolean
 }
 
 interface AssetCurveProps {
@@ -197,11 +198,21 @@ export default function AssetCurve({
   // Split processedData into stable and live parts to reduce re-renders
   const baseProcessedData = useMemo(() => {
     if (!data || data.length === 0) {
-      return { chartData: [], accountSummaries: [], uniqueUsers: [], userAccountMap: new Map() }
+      return { chartData: [], accountSummaries: [], uniqueUsers: [], userAccountMap: new Map(), paperUsernames: new Set<string>() }
     }
 
     const uniqueUsers = Array.from(new Set(data.map(item => item.username))).sort()
     const userAccountMap = new Map<string, number | undefined>()
+    // Paper series share their account_id with the corresponding real-money
+    // account/series (same underlying Account row, different environment), so
+    // they can't be told apart by account_id alone. Track paper usernames
+    // separately so live WebSocket overrides -- which only ever carry
+    // real-account equity -- can be excluded from paper series specifically,
+    // rather than skipped by account_id (which would also block the real
+    // series' legitimate update). Prefer the explicit is_paper flag the
+    // backend stamps on every paper row; fall back to the " [PAPER]" username
+    // suffix (also backend-applied) in case a data path ever omits the flag.
+    const paperUsernames = new Set<string>()
 
     const groupedData = data.reduce((acc, item) => {
       const key = item.datetime_str || item.date || item.timestamp?.toString() || ''
@@ -210,6 +221,9 @@ export default function AssetCurve({
       const accountId = item.account_id
       if (!userAccountMap.has(item.username)) {
         userAccountMap.set(item.username, accountId)
+      }
+      if (item.is_paper || item.username?.endsWith(' [PAPER]')) {
+        paperUsernames.add(item.username)
       }
 
       acc[key][item.username] = item.total_assets ?? null
@@ -268,18 +282,23 @@ export default function AssetCurve({
       }
     })
 
-    return { chartData, accountSummaries, uniqueUsers, userAccountMap }
+    return { chartData, accountSummaries, uniqueUsers, userAccountMap, paperUsernames }
   }, [data, timeframe])
 
   // Apply live updates to the last data point only
   const processedData = useMemo(() => {
-    const { chartData, accountSummaries, uniqueUsers, userAccountMap } = baseProcessedData
+    const { chartData, accountSummaries, uniqueUsers, userAccountMap, paperUsernames } = baseProcessedData
 
     // Create a copy of chartData and update only the last point with live data
     const updatedChartData = [...chartData]
     if (updatedChartData.length > 0) {
       const lastPoint = { ...updatedChartData[updatedChartData.length - 1] }
       uniqueUsers.forEach((username) => {
+        // arena_asset_update only ever carries real-money equity (it's built
+        // from HyperliquidWallet/BinanceWallet-backed accounts), so applying
+        // it to a paper series -- which shares its account_id with the real
+        // series -- would overwrite the paper curve's real equity onto it.
+        if (paperUsernames.has(username)) return
         const accountId = userAccountMap.get(username)
         if (accountId !== undefined && accountId !== null) {
           const liveOverride = liveAccountTotals.get(accountId)
@@ -291,9 +310,11 @@ export default function AssetCurve({
       updatedChartData[updatedChartData.length - 1] = lastPoint
     }
 
-    // Update account summaries with live data
+    // Update account summaries with live data (same paper exclusion as above)
     const updatedAccountSummaries = accountSummaries.map(account => {
-      const liveOverride = account.accountId !== undefined ? liveAccountTotals.get(account.accountId) : undefined
+      const liveOverride = (!paperUsernames.has(account.username) && account.accountId !== undefined)
+        ? liveAccountTotals.get(account.accountId)
+        : undefined
       return {
         ...account,
         assets: liveOverride ?? account.assets
