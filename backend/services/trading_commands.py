@@ -1247,34 +1247,40 @@ def place_ai_driven_hyperliquid_order(
                             except Exception as orders_err:
                                 logger.warning(f"[CLOSE {symbol}] Failed to fetch remaining orders: {orders_err}")
 
-                        try:
-                            from database.snapshot_connection import SnapshotSessionLocal
-                            from database.snapshot_models import HyperliquidTrade
-                            from decimal import Decimal
-
-                            snapshot_db = SnapshotSessionLocal()
+                        # Paper fills are already recorded by PaperEngine._record_fill (the
+                        # authoritative writer for environment="paper", with the real fee).
+                        # Writing here too would create a second HyperliquidTrade row with
+                        # the same order_id and fee=0, corrupting fee-attribution joins that
+                        # key on order_id.
+                        if environment != "paper":
                             try:
-                                trade_record = HyperliquidTrade(
-                                    account_id=account.id,
-                                    environment=environment,
-                                    wallet_address=wallet_address,
-                                    symbol=symbol,
-                                    side=operation,
-                                    quantity=Decimal(str(order_result.get('filled_amount', 0))),
-                                    price=Decimal(str(order_result.get('average_price', 0))),
-                                    leverage=leverage,
-                                    order_id=order_id,
-                                    order_status=order_status,
-                                    trade_value=Decimal(str(order_result.get('filled_amount', 0))) * Decimal(str(order_result.get('average_price', 0))),
-                                    fee=Decimal(str(order_result.get('fee', 0)))
-                                )
-                                snapshot_db.add(trade_record)
-                                snapshot_db.commit()
-                                logger.info(f"[HYPERLIQUID] Trade record saved for {account.name}")
-                            finally:
-                                snapshot_db.close()
-                        except Exception as trade_err:
-                            logger.warning(f"Failed to save Hyperliquid trade record: {trade_err}")
+                                from database.snapshot_connection import SnapshotSessionLocal
+                                from database.snapshot_models import HyperliquidTrade
+                                from decimal import Decimal
+
+                                snapshot_db = SnapshotSessionLocal()
+                                try:
+                                    trade_record = HyperliquidTrade(
+                                        account_id=account.id,
+                                        environment=environment,
+                                        wallet_address=wallet_address,
+                                        symbol=symbol,
+                                        side=operation,
+                                        quantity=Decimal(str(order_result.get('filled_amount', 0))),
+                                        price=Decimal(str(order_result.get('average_price', 0))),
+                                        leverage=leverage,
+                                        order_id=order_id,
+                                        order_status=order_status,
+                                        trade_value=Decimal(str(order_result.get('filled_amount', 0))) * Decimal(str(order_result.get('average_price', 0))),
+                                        fee=Decimal(str(order_result.get('fee', 0)))
+                                    )
+                                    snapshot_db.add(trade_record)
+                                    snapshot_db.commit()
+                                    logger.info(f"[HYPERLIQUID] Trade record saved for {account.name}")
+                                finally:
+                                    snapshot_db.close()
+                            except Exception as trade_err:
+                                logger.warning(f"Failed to save Hyperliquid trade record: {trade_err}")
 
                     elif order_status == 'resting':
                         logger.info(
@@ -1737,42 +1743,46 @@ def _execute_binance_decision(
                     decision_log.realized_pnl = result["realized_pnl"]
                     decision_log.pnl_updated_at = _dt.utcnow()
                     db.commit()
-                # Save HyperliquidTrade record (consistent with Hyperliquid)
-                try:
-                    from database.snapshot_connection import SnapshotSessionLocal
-                    from database.snapshot_models import HyperliquidTrade
-                    from decimal import Decimal
-
-                    snapshot_db = SnapshotSessionLocal()
+                # Save HyperliquidTrade record (consistent with Hyperliquid).
+                # Skip for paper: PaperEngine._record_fill already wrote the authoritative
+                # row (with the real fee) for this fill; writing here too would duplicate
+                # it with fee=0 and corrupt fee-attribution joins keyed on order_id.
+                if not is_paper:
                     try:
-                        # Use Binance official fields, fallback to market price if 0
-                        filled_qty = float(result.get('filled_qty', 0))
-                        avg_price_val = float(result.get('avg_price', 0))
-                        # For close, use filled_qty or position size from result
-                        trade_qty = Decimal(str(filled_qty)) if filled_qty > 0 else Decimal('0')
-                        trade_price = Decimal(str(avg_price_val)) if avg_price_val > 0 else Decimal(str(price))
+                        from database.snapshot_connection import SnapshotSessionLocal
+                        from database.snapshot_models import HyperliquidTrade
+                        from decimal import Decimal
 
-                        trade_record = HyperliquidTrade(
-                            account_id=account.id,
-                            environment=("paper" if is_paper else (wallet.environment if wallet else "mainnet")),
-                            wallet_address=f"binance_{account.id}",
-                            symbol=symbol,
-                            side="close",
-                            quantity=trade_qty,
-                            price=trade_price,
-                            leverage=1,
-                            order_id=str(result.get('order_id', '')),
-                            order_status=result.get('status', 'filled'),
-                            trade_value=trade_qty * trade_price,
-                            fee=Decimal('0')
-                        )
-                        snapshot_db.add(trade_record)
-                        snapshot_db.commit()
-                        logger.info(f"[BINANCE] Close trade record saved for {account.name}")
-                    finally:
-                        snapshot_db.close()
-                except Exception as trade_err:
-                    logger.warning(f"Failed to save Binance close trade record: {trade_err}")
+                        snapshot_db = SnapshotSessionLocal()
+                        try:
+                            # Use Binance official fields, fallback to market price if 0
+                            filled_qty = float(result.get('filled_qty', 0))
+                            avg_price_val = float(result.get('avg_price', 0))
+                            # For close, use filled_qty or position size from result
+                            trade_qty = Decimal(str(filled_qty)) if filled_qty > 0 else Decimal('0')
+                            trade_price = Decimal(str(avg_price_val)) if avg_price_val > 0 else Decimal(str(price))
+
+                            trade_record = HyperliquidTrade(
+                                account_id=account.id,
+                                environment=(wallet.environment if wallet else "mainnet"),
+                                wallet_address=f"binance_{account.id}",
+                                symbol=symbol,
+                                side="close",
+                                quantity=trade_qty,
+                                price=trade_price,
+                                leverage=1,
+                                order_id=str(result.get('order_id', '')),
+                                order_status=result.get('status', 'filled'),
+                                trade_value=trade_qty * trade_price,
+                                fee=Decimal('0')
+                            )
+                            snapshot_db.add(trade_record)
+                            snapshot_db.commit()
+                            logger.info(f"[BINANCE] Close trade record saved for {account.name}")
+                        finally:
+                            snapshot_db.close()
+                    except Exception as trade_err:
+                        logger.warning(f"Failed to save Binance close trade record: {trade_err}")
             else:
                 logger.info(f"[BINANCE] No position to close for {symbol}")
                 save_ai_decision(db, account, decision, portfolio, executed=True, **decision_kwargs)
@@ -1803,42 +1813,46 @@ def _execute_binance_decision(
                     f"order_id={order_result.get('order_id')} "
                     f"tp_id={order_result.get('tp_order_id')} sl_id={order_result.get('sl_order_id')}"
                 )
-                # Save HyperliquidTrade record (consistent with Hyperliquid)
-                try:
-                    from database.snapshot_connection import SnapshotSessionLocal
-                    from database.snapshot_models import HyperliquidTrade
-                    from decimal import Decimal
-
-                    snapshot_db = SnapshotSessionLocal()
+                # Save HyperliquidTrade record (consistent with Hyperliquid).
+                # Skip for paper: PaperEngine._record_fill already wrote the authoritative
+                # row (with the real fee) for this fill; writing here too would duplicate
+                # it with fee=0 and corrupt fee-attribution joins keyed on order_id.
+                if not is_paper:
                     try:
-                        # Use Binance official fields, fallback to decision values if 0
-                        filled_qty = float(order_result.get('filled_qty', 0))
-                        avg_price = float(order_result.get('avg_price', 0))
-                        # If Binance returns 0 (MARKET order not yet filled), use decision values
-                        trade_qty = Decimal(str(filled_qty)) if filled_qty > 0 else Decimal(str(quantity))
-                        trade_price = Decimal(str(avg_price)) if avg_price > 0 else Decimal(str(price))
+                        from database.snapshot_connection import SnapshotSessionLocal
+                        from database.snapshot_models import HyperliquidTrade
+                        from decimal import Decimal
 
-                        trade_record = HyperliquidTrade(
-                            account_id=account.id,
-                            environment=("paper" if is_paper else (wallet.environment if wallet else "mainnet")),
-                            wallet_address=f"binance_{account.id}",
-                            symbol=symbol,
-                            side=operation,
-                            quantity=trade_qty,
-                            price=trade_price,
-                            leverage=leverage,
-                            order_id=str(order_result.get('order_id', '')),
-                            order_status=status,
-                            trade_value=trade_qty * trade_price,
-                            fee=Decimal('0')
-                        )
-                        snapshot_db.add(trade_record)
-                        snapshot_db.commit()
-                        logger.info(f"[BINANCE] Trade record saved for {account.name}")
-                    finally:
-                        snapshot_db.close()
-                except Exception as trade_err:
-                    logger.warning(f"Failed to save Binance trade record: {trade_err}")
+                        snapshot_db = SnapshotSessionLocal()
+                        try:
+                            # Use Binance official fields, fallback to decision values if 0
+                            filled_qty = float(order_result.get('filled_qty', 0))
+                            avg_price = float(order_result.get('avg_price', 0))
+                            # If Binance returns 0 (MARKET order not yet filled), use decision values
+                            trade_qty = Decimal(str(filled_qty)) if filled_qty > 0 else Decimal(str(quantity))
+                            trade_price = Decimal(str(avg_price)) if avg_price > 0 else Decimal(str(price))
+
+                            trade_record = HyperliquidTrade(
+                                account_id=account.id,
+                                environment=(wallet.environment if wallet else "mainnet"),
+                                wallet_address=f"binance_{account.id}",
+                                symbol=symbol,
+                                side=operation,
+                                quantity=trade_qty,
+                                price=trade_price,
+                                leverage=leverage,
+                                order_id=str(order_result.get('order_id', '')),
+                                order_status=status,
+                                trade_value=trade_qty * trade_price,
+                                fee=Decimal('0')
+                            )
+                            snapshot_db.add(trade_record)
+                            snapshot_db.commit()
+                            logger.info(f"[BINANCE] Trade record saved for {account.name}")
+                        finally:
+                            snapshot_db.close()
+                    except Exception as trade_err:
+                        logger.warning(f"Failed to save Binance trade record: {trade_err}")
             else:
                 logger.warning(f"[BINANCE] {operation.upper()} order failed: {order_result}")
 

@@ -808,9 +808,13 @@ class ProgramExecutionService:
                 log.pnl_updated_at = datetime.utcnow()
                 db.commit()
 
-            # Create HyperliquidTrade record only if order is filled
+            # Create HyperliquidTrade record only if order is filled.
+            # Skip for paper: PaperEngine._record_fill already wrote the authoritative
+            # row (with the real fee) for this fill via the PaperTradingClient call
+            # path; writing here too would duplicate it with fee=0 and corrupt
+            # fee-attribution joins keyed on order_id.
             order_status = order_result.get('status')
-            if order_status == 'filled':
+            if order_status == 'filled' and environment != "paper":
                 self._create_hyperliquid_trade(
                     binding, decision, order_result, wallet_address, environment, exchange
                 )

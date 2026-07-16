@@ -103,3 +103,86 @@ def test_update_log_with_order_skips_realized_pnl_for_real_fill(db_session, monk
     db_session.refresh(log)
     assert log.realized_pnl is None
     assert log.pnl_updated_at is None
+
+
+def test_update_log_with_order_skips_hyperliquid_trade_write_for_paper_fill(db_session):
+    """Guards item 1 (double-recorded paper fills): PaperEngine._record_fill is the
+    sole writer of HyperliquidTrade rows for environment="paper" (real fee included).
+    _update_log_with_order must NOT also call _create_hyperliquid_trade for paper
+    fills, or every paper fill gets a second row (same order_id, fee=0) that
+    corrupts fee-attribution joins keyed on order_id."""
+    from database.models import User, Account, ProgramExecutionLog
+    from services.program_execution_service import ProgramExecutionService
+
+    ProgramExecutionLog.__table__.create(bind=db_session.get_bind(), checkfirst=True)
+
+    u = User(username="pt_paper_dup")
+    db_session.add(u)
+    db_session.flush()
+    account = Account(user_id=u.id, name="PTD", model="m", api_key="k")
+    db_session.add(account)
+    db_session.flush()
+
+    log = ProgramExecutionLog(
+        account_id=account.id, trigger_type="signal", success=True, environment="paper",
+    )
+    db_session.add(log)
+    db_session.flush()
+
+    service = ProgramExecutionService()
+    calls = []
+    service._create_hyperliquid_trade = lambda *a, **kw: calls.append(a)
+
+    class FakeDecision:
+        symbol = "BTC"
+        leverage = 1
+        operation = "close"
+
+    order_result = {"status": "filled", "order_id": "P-1", "realized_pnl": 12.5}
+
+    service._update_log_with_order(
+        db_session, log.id, order_result, binding=None, decision=FakeDecision(),
+        wallet_address="paper-1", environment="paper", exchange="hyperliquid",
+    )
+
+    assert calls == []  # no duplicate HyperliquidTrade write for paper fills
+
+
+def test_update_log_with_order_writes_hyperliquid_trade_for_real_fill(db_session):
+    """Real (non-paper) fills still get their HyperliquidTrade row from this pipeline
+    path, since there's no PaperEngine writing it on their behalf."""
+    from database.models import User, Account, ProgramExecutionLog
+    from services.program_execution_service import ProgramExecutionService
+
+    ProgramExecutionLog.__table__.create(bind=db_session.get_bind(), checkfirst=True)
+
+    u = User(username="pt_real_dup")
+    db_session.add(u)
+    db_session.flush()
+    account = Account(user_id=u.id, name="PTD2", model="m", api_key="k")
+    db_session.add(account)
+    db_session.flush()
+
+    log = ProgramExecutionLog(
+        account_id=account.id, trigger_type="signal", success=True, environment="mainnet",
+    )
+    db_session.add(log)
+    db_session.flush()
+
+    service = ProgramExecutionService()
+    calls = []
+    service._create_hyperliquid_trade = lambda *a, **kw: calls.append(a)
+
+    class FakeDecision:
+        symbol = "BTC"
+        leverage = 1
+        operation = "close"
+
+    order_result = {"status": "filled", "order_id": "R-1", "realized_pnl": 99.0}
+
+    service._update_log_with_order(
+        db_session, log.id, order_result, binding=None, decision=FakeDecision(),
+        wallet_address="0xabc", environment="mainnet", exchange="hyperliquid",
+    )
+
+    assert len(calls) == 1  # real-path write is untouched by the paper-dedup guard
