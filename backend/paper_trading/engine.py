@@ -220,39 +220,38 @@ class PaperEngine:
             gate_prices = dict(mark_prices or {})
             gate_prices[symbol] = fill_price
             state = self.compute_state(paper, gate_prices)
-            if state["available_balance"] < margin_needed:
-                if filled_qty <= EPS:
-                    return {
-                        "status": "error",
-                        "error": (
-                            f"Insufficient available balance: need ${margin_needed:.2f}, "
-                            f"have ${state['available_balance']:.2f}"
-                        ),
-                    }
-                remaining = 0.0  # netting part already filled; skip the new open
+            # For netting (after close), allow open even if margin is tight since close realizes PnL
+            is_netting = filled_qty > EPS
+            if state["available_balance"] < margin_needed and not is_netting:
+                return {
+                    "status": "error",
+                    "error": (
+                        f"Insufficient available balance: need ${margin_needed:.2f}, "
+                        f"have ${state['available_balance']:.2f}"
+                    ),
+                }
+            fee = fee_mod.calc_fee(notional, fee_rate_pct)
+            paper.total_fees = float(paper.total_fees) + fee
+            total_fee += fee
+            self._record_fill(paper, symbol, side, remaining, fill_price, leverage, order_no, fee)
+            pos = (
+                self.db.query(PaperPosition)
+                .filter(PaperPosition.paper_account_id == paper.id, PaperPosition.symbol == symbol)
+                .first()
+            )
+            if pos and pos.side == opening_side:
+                old_size = float(pos.size)
+                new_size = old_size + remaining
+                pos.entry_price = (float(pos.entry_price) * old_size + fill_price * remaining) / new_size
+                pos.size = new_size
+                pos.leverage = leverage
             else:
-                fee = fee_mod.calc_fee(notional, fee_rate_pct)
-                paper.total_fees = float(paper.total_fees) + fee
-                total_fee += fee
-                self._record_fill(paper, symbol, side, remaining, fill_price, leverage, order_no, fee)
-                pos = (
-                    self.db.query(PaperPosition)
-                    .filter(PaperPosition.paper_account_id == paper.id, PaperPosition.symbol == symbol)
-                    .first()
-                )
-                if pos and pos.side == opening_side:
-                    old_size = float(pos.size)
-                    new_size = old_size + remaining
-                    pos.entry_price = (float(pos.entry_price) * old_size + fill_price * remaining) / new_size
-                    pos.size = new_size
-                    pos.leverage = leverage
-                else:
-                    self.db.add(PaperPosition(
-                        paper_account_id=paper.id, symbol=symbol, side=opening_side,
-                        size=remaining, entry_price=fill_price, leverage=leverage,
-                        cycle=paper.cycle, opened_at=datetime.utcnow(),
-                    ))
-                filled_qty += remaining
+                self.db.add(PaperPosition(
+                    paper_account_id=paper.id, symbol=symbol, side=opening_side,
+                    size=remaining, entry_price=fill_price, leverage=leverage,
+                    cycle=paper.cycle, opened_at=datetime.utcnow(),
+                ))
+            filled_qty += remaining
 
         self.db.flush()
         return {
@@ -369,3 +368,133 @@ class PaperEngine:
 
     def _error(self, symbol: str, message: str) -> Dict[str, Any]:
         return {"status": "error", "error": message, "environment": "paper", "symbol": symbol}
+
+    # ---------- pending order lifecycle (monitor entry points) ----------
+
+    def cancel_order(self, paper: PaperAccount, order_no: str) -> bool:
+        order = (
+            self.db.query(PaperOrder)
+            .filter(
+                PaperOrder.paper_account_id == paper.id,
+                PaperOrder.order_no == str(order_no),
+                PaperOrder.status == "pending",
+            )
+            .first()
+        )
+        if not order:
+            return False
+        order.status = "cancelled"
+        self.db.flush()
+        return True
+
+    def open_orders_as_client_format(self, paper: PaperAccount, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+        return [
+            {
+                "order_id": o.order_no,
+                "symbol": o.symbol,
+                "side": o.side,
+                "order_type": o.order_type,
+                "trigger_price": float(o.trigger_price),
+                "size": float(o.size),
+                "reduce_only": bool(o.reduce_only),
+                "created_at": o.created_at.isoformat() if o.created_at else None,
+            }
+            for o in self.pending_orders(paper, symbol)
+        ]
+
+    def trigger_order(self, paper: PaperAccount, order: PaperOrder, mark_price: float, mark_prices: Optional[Dict[str, float]] = None) -> Optional[Dict[str, Any]]:
+        """Check and execute one pending order against mark_price. Returns fill info or None."""
+        rates = fee_mod.get_fee_rates(paper.data_exchange, paper)
+        fallback = (
+            float(paper.slippage_fallback_pct)
+            if paper.slippage_fallback_pct is not None
+            else fee_mod.DEFAULT_SLIPPAGE_FALLBACK_PCT
+        )
+        trigger_px = float(order.trigger_price)
+
+        if order.order_type == "limit":
+            crossed = (order.side == "buy" and mark_price <= trigger_px) or (
+                order.side == "sell" and mark_price >= trigger_px
+            )
+            if not crossed:
+                return None
+            fill = self._fill(
+                paper, order.symbol, order.side, float(order.size),
+                int(order.leverage), bool(order.reduce_only), trigger_px, rates["maker"],
+                mark_prices=mark_prices,
+            )
+            if fill["status"] == "error":
+                order.status = "cancelled"
+                self.db.flush()
+                return None
+            order.status = "filled"
+            order.filled_at = datetime.utcnow()
+            self.db.flush()
+            return {
+                "order_no": order.order_no, "symbol": order.symbol,
+                "qty": fill["filled_qty"], "price": trigger_px,
+                "fee": fill["fee"], "realized_pnl": fill["realized_pnl"],
+                "exit_reason": "limit",
+            }
+
+        # take_profit / stop_loss (reduce-only trigger orders)
+        pos = (
+            self.db.query(PaperPosition)
+            .filter(PaperPosition.paper_account_id == paper.id, PaperPosition.symbol == order.symbol)
+            .first()
+        )
+        if not pos:
+            order.status = "cancelled"
+            self.db.flush()
+            return None
+
+        is_long = pos.side == "long"
+        is_tp = order.order_type == "take_profit"
+        triggered = (
+            (is_tp and is_long and mark_price >= trigger_px)
+            or (is_tp and not is_long and mark_price <= trigger_px)
+            or ((not is_tp) and is_long and mark_price <= trigger_px)
+            or ((not is_tp) and not is_long and mark_price >= trigger_px)
+        )
+        if not triggered:
+            return None
+
+        if order.exec_mode == "market":
+            close_is_sell = is_long
+            exit_px = trigger_px * (1 - fallback / 100) if close_is_sell else trigger_px * (1 + fallback / 100)
+            fee_rate = rates["taker"]
+        else:
+            exit_px = trigger_px
+            fee_rate = rates["maker"]
+
+        qty = min(float(order.size), float(pos.size))
+        pnl, fee = self._close_qty(paper, pos, qty, exit_px, fee_rate, order.order_no)
+        order.status = "filled"
+        order.filled_at = datetime.utcnow()
+        self.db.flush()
+        return {
+            "order_no": order.order_no, "symbol": order.symbol,
+            "qty": qty, "price": exit_px, "fee": fee, "realized_pnl": pnl,
+            "exit_reason": "tp" if is_tp else "sl",
+        }
+
+    def positions_as_client_format(self, paper: PaperAccount, prices: Dict[str, float]) -> List[Dict[str, Any]]:
+        out = []
+        for pos in self.positions(paper):
+            px = prices.get(pos.symbol, float(pos.entry_price))
+            size = float(pos.size)
+            entry = float(pos.entry_price)
+            upnl = (px - entry) * size if pos.side == "long" else (entry - px) * size
+            out.append({
+                "coin": pos.symbol,
+                "szi": size if pos.side == "long" else -size,
+                "entry_px": entry,
+                "position_value": size * px,
+                "unrealized_pnl": upnl,
+                "margin_used": size * entry / max(int(pos.leverage), 1),
+                "liquidation_px": 0.0,
+                "leverage": int(pos.leverage),
+                "side": "Long" if pos.side == "long" else "Short",
+                "opened_at": int(pos.opened_at.timestamp() * 1000) if pos.opened_at else None,
+            })
+        return out
