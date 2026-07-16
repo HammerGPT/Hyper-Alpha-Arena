@@ -139,6 +139,11 @@ def initialize_services():
         print("Market flow collector started")
         logger.info("Market flow collector started (15-second aggregation)")
 
+        # Start paper trading monitor (pending orders / liquidation / funding / snapshots)
+        from paper_trading.monitor import paper_monitor
+        asyncio.create_task(paper_monitor.start())
+        logger.info("Paper trading monitor started (3-second interval)")
+
         # Add market flow data cleanup task (every 6 hours)
         task_scheduler.add_interval_task(
             task_func=cleanup_old_market_flow_data,

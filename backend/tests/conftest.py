@@ -22,7 +22,7 @@ def _memory_engine():
 def db_session():
     from database.connection import Base
     from database.models import (  # noqa: F401 - register tables
-        User, Account, AccountStrategyConfig, AIDecisionLog,
+        User, Account, AccountStrategyConfig, AIDecisionLog, ProgramExecutionLog,
         PaperAccount, PaperPosition, PaperOrder, PaperFundingRecord,
     )
     engine = _memory_engine()
@@ -30,7 +30,7 @@ def db_session():
         engine,
         tables=[
             User.__table__, Account.__table__, AccountStrategyConfig.__table__,
-            AIDecisionLog.__table__,
+            AIDecisionLog.__table__, ProgramExecutionLog.__table__,
             PaperAccount.__table__, PaperPosition.__table__,
             PaperOrder.__table__, PaperFundingRecord.__table__,
         ],
