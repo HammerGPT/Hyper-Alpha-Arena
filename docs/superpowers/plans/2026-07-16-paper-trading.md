@@ -1947,8 +1947,8 @@ git commit -m "Add PaperTradingClient with real-client interface parity"
 - Test: `backend/tests/test_execution_mode_config.py`
 
 **Interfaces:**
-- Produces: `StrategyConfigBase.execution_mode: str = "real"`（Pydantic）
-- Produces: `upsert_strategy(..., execution_mode: str = "real")`
+- Produces: `StrategyConfigBase.execution_mode: Optional[str] = None`（Pydantic；执行期修订：部分更新语义——omitted=保留现值。原 `str="real"` 默认会让不带该字段的调用方（如 Hyper AI 的 update_trader_strategy 工具）把纸交易账户静默重置回实盘，Task 8 审查定级 Critical 后改为 None-保留）
+- Produces: `upsert_strategy(..., execution_mode: Optional[str] = None)`（None=保留现值；创建路径默认 "real"；非 None 值大小写归一后校验，非法按 "real"）
 - Produces: `StrategyState.execution_mode: str = "real"`
 - 校验：execution_mode 只接受 "real"/"paper"，非法值按 "real" 处理
 
