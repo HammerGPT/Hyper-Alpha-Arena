@@ -338,49 +338,70 @@ class ProgramExecutionService:
 
             # Get trading environment and create trading client
             from services.hyperliquid_environment import get_global_trading_mode, get_hyperliquid_client, get_leverage_settings
+            from paper_trading import get_execution_mode
 
-            environment = get_global_trading_mode(db)
-            trading_client = None
-
-            if exchange == "binance":
-                # Use Binance trading client
-                if wallet_address:  # wallet_address here is actually API key presence indicator
-                    try:
-                        from services.binance_trading_client import BinanceTradingClient
-                        from utils.encryption import decrypt_private_key
-
-                        binance_wallet = db.query(BinanceWallet).filter(
-                            BinanceWallet.account_id == account.id,
-                            BinanceWallet.environment == (environment or "mainnet"),
-                            BinanceWallet.is_active == "true"
-                        ).first()
-
-                        if binance_wallet:
-                            api_key = decrypt_private_key(binance_wallet.api_key_encrypted)
-                            secret_key = decrypt_private_key(binance_wallet.secret_key_encrypted)
-                            trading_client = BinanceTradingClient(api_key, secret_key, environment or "mainnet")
-                        else:
-                            logger.warning(f"[ProgramExecution] No active Binance wallet found for account {account.id} on {environment}")
-                    except Exception as e:
-                        logger.warning(f"[ProgramExecution] Failed to create Binance trading client: {e}")
-                # Get leverage settings from BinanceWallet
-                leverage_settings = self._get_binance_leverage_settings(db, account.id, environment or "mainnet")
+            is_paper = get_execution_mode(db, account.id) == "paper"
+            if is_paper:
+                environment = "paper"
+                from paper_trading.client import PaperTradingClient
+                trading_client = PaperTradingClient(account.id, exchange)
+                # Paper accounts have no row in HyperliquidWallet/BinanceWallet for the
+                # global environment (_get_wallet_address above looked one up regardless
+                # of paper status), so use the client's own paper wallet identifier --
+                # matches the AI Trader pipeline's convention (trading_commands.py
+                # wallet_address="paper-{id}"). Without this, Hyperliquid paper accounts
+                # with no real wallet configured would be blocked later in
+                # _handle_decision's "no wallet address" check.
+                wallet_address = trading_client.wallet_address
+                if exchange == "binance":
+                    leverage_settings = self._get_binance_leverage_settings(db, account.id, "mainnet")
+                else:
+                    leverage_settings = get_leverage_settings(db, account.id, "mainnet")
             else:
-                # Use Hyperliquid trading client (default)
-                if environment and wallet_address:
-                    try:
-                        trading_client = get_hyperliquid_client(db, account.id, override_environment=environment)
-                    except Exception as e:
-                        logger.warning(f"[ProgramExecution] Failed to create Hyperliquid trading client: {e}")
-                # Get leverage settings (same as AI Trader)
-                leverage_settings = get_leverage_settings(db, account.id, environment or "mainnet")
+                environment = get_global_trading_mode(db)
+                trading_client = None
+
+                if exchange == "binance":
+                    # Use Binance trading client
+                    if wallet_address:  # wallet_address here is actually API key presence indicator
+                        try:
+                            from services.binance_trading_client import BinanceTradingClient
+                            from utils.encryption import decrypt_private_key
+
+                            binance_wallet = db.query(BinanceWallet).filter(
+                                BinanceWallet.account_id == account.id,
+                                BinanceWallet.environment == (environment or "mainnet"),
+                                BinanceWallet.is_active == "true"
+                            ).first()
+
+                            if binance_wallet:
+                                api_key = decrypt_private_key(binance_wallet.api_key_encrypted)
+                                secret_key = decrypt_private_key(binance_wallet.secret_key_encrypted)
+                                trading_client = BinanceTradingClient(api_key, secret_key, environment or "mainnet")
+                            else:
+                                logger.warning(f"[ProgramExecution] No active Binance wallet found for account {account.id} on {environment}")
+                        except Exception as e:
+                            logger.warning(f"[ProgramExecution] Failed to create Binance trading client: {e}")
+                    # Get leverage settings from BinanceWallet
+                    leverage_settings = self._get_binance_leverage_settings(db, account.id, environment or "mainnet")
+                else:
+                    # Use Hyperliquid trading client (default)
+                    if environment and wallet_address:
+                        try:
+                            trading_client = get_hyperliquid_client(db, account.id, override_environment=environment)
+                        except Exception as e:
+                            logger.warning(f"[ProgramExecution] Failed to create Hyperliquid trading client: {e}")
+                    # Get leverage settings (same as AI Trader)
+                    leverage_settings = get_leverage_settings(db, account.id, environment or "mainnet")
 
             max_leverage = leverage_settings["max_leverage"]
             default_leverage = leverage_settings["default_leverage"]
 
-            # Build MarketData with trading client (enable query recording for analysis)
+            # Build MarketData with trading client (enable query recording for analysis).
+            # Paper mode always trades against mainnet market data, regardless of the
+            # global testnet/mainnet toggle (matches trading_commands.py's paper branch).
             data_provider = DataProvider(
-                db, account.id, environment or "mainnet", trading_client,
+                db, account.id, "mainnet" if is_paper else (environment or "mainnet"), trading_client,
                 record_queries=True, exchange=exchange
             )
             market_data = self._build_market_data(
@@ -776,6 +797,16 @@ class ProgramExecutionService:
             db.commit()
             logger.info(f"[ProgramExecution] Updated log {log_id} with order IDs")
 
+            # Paper fills carry an accurate realized_pnl synchronously in order_result.
+            # Write it back immediately -- unlike real fills, whose realized_pnl on this
+            # log is otherwise only backfilled by a separate "user refresh" job (see
+            # ProgramExecutionLog.realized_pnl column comment) that has no real exchange
+            # order to reconcile paper trades against. Mirrors the immediate writeback
+            # trading_commands.py applies to AIDecisionLog.realized_pnl for paper closes.
+            if environment == "paper" and order_result.get("status") == "filled" and order_result.get("realized_pnl"):
+                log.realized_pnl = order_result["realized_pnl"]
+                db.commit()
+
             # Create HyperliquidTrade record only if order is filled
             order_status = order_result.get('status')
             if order_status == 'filled':
@@ -858,6 +889,7 @@ class ProgramExecutionService:
         """Handle the decision from program execution - execute actual trade."""
         from program_trader.executor import validate_decision
         from services.hyperliquid_environment import get_global_trading_mode, get_hyperliquid_client
+        from paper_trading import get_execution_mode
 
         op = decision.operation.lower() if hasattr(decision, 'operation') else decision.action.value
 
@@ -867,7 +899,8 @@ class ProgramExecutionService:
 
         # Validate decision
         positions_dict = {}
-        environment = get_global_trading_mode(db)
+        is_paper = get_execution_mode(db, binding.account_id) == "paper"
+        environment = "paper" if is_paper else get_global_trading_mode(db)
 
         # Note: Quota check is now done in _execute_binding before logging,
         # so we don't need to check again here.
@@ -875,7 +908,10 @@ class ProgramExecutionService:
         # Use provided trading_client or create one based on exchange
         client = trading_client
         if not client:
-            if exchange == "binance":
+            if is_paper:
+                from paper_trading.client import PaperTradingClient
+                client = PaperTradingClient(binding.account_id, exchange)
+            elif exchange == "binance":
                 try:
                     from services.binance_trading_client import BinanceTradingClient
                     from database.models import BinanceWallet
@@ -904,7 +940,12 @@ class ProgramExecutionService:
             # New Decision format - get positions for validation
             if environment and client:
                 try:
-                    data_provider = DataProvider(db, binding.account_id, environment, client, exchange=exchange)
+                    # Paper mode always reads mainnet market data (same rationale as
+                    # the DataProvider built in _execute_binding); "paper" itself is
+                    # not a valid environment for market-data API routing.
+                    data_provider = DataProvider(
+                        db, binding.account_id, "mainnet" if is_paper else environment, client, exchange=exchange
+                    )
                     for sym, pos in data_provider.get_positions().items():
                         positions_dict[sym] = {"side": pos.side, "size": pos.size}
                 except Exception as e:
@@ -936,7 +977,13 @@ class ProgramExecutionService:
             available_balance = account_info.get("available_balance", 0)
 
             # Get real-time market price based on exchange
-            if exchange == "binance":
+            if is_paper:
+                # PaperTradingClient has no get_mark_price()/exchange-specific price API;
+                # use the same generic lookup the paper client uses internally
+                # (services.market_data.get_last_price), always against mainnet data.
+                from services.market_data import get_last_price
+                market_price = get_last_price(decision.symbol, market=("binance" if exchange == "binance" else "CRYPTO"))
+            elif exchange == "binance":
                 market_price = client.get_mark_price(decision.symbol)
             else:
                 from services.hyperliquid_market_data import get_last_price_from_hyperliquid
