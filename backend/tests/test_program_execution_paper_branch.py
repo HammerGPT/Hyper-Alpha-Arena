@@ -54,6 +54,7 @@ def test_update_log_with_order_writes_realized_pnl_for_paper_fill(db_session, mo
 
     db_session.refresh(log)
     assert log.realized_pnl == 12.5
+    assert log.pnl_updated_at is not None
 
 
 def test_update_log_with_order_skips_realized_pnl_for_real_fill(db_session, monkeypatch):
@@ -101,3 +102,4 @@ def test_update_log_with_order_skips_realized_pnl_for_real_fill(db_session, monk
 
     db_session.refresh(log)
     assert log.realized_pnl is None
+    assert log.pnl_updated_at is None

@@ -805,6 +805,7 @@ class ProgramExecutionService:
             # trading_commands.py applies to AIDecisionLog.realized_pnl for paper closes.
             if environment == "paper" and order_result.get("status") == "filled" and order_result.get("realized_pnl"):
                 log.realized_pnl = order_result["realized_pnl"]
+                log.pnl_updated_at = datetime.utcnow()
                 db.commit()
 
             # Create HyperliquidTrade record only if order is filled
