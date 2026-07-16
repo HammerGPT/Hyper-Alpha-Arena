@@ -499,3 +499,78 @@ class PaperEngine:
                 "opened_at": int(pos.opened_at.timestamp() * 1000) if pos.opened_at else None,
             })
         return out
+
+    # ---------- risk: liquidation / funding / reset ----------
+
+    def check_liquidation(self, paper: PaperAccount, prices: Dict[str, float]) -> Optional[Dict[str, Any]]:
+        state = self.compute_state(paper, prices)
+        if state["used_margin"] <= 0:
+            return None
+        if state["total_equity"] >= state["maintenance_margin"]:
+            return None
+
+        rates = fee_mod.get_fee_rates(paper.data_exchange, paper)
+        fallback = (
+            float(paper.slippage_fallback_pct)
+            if paper.slippage_fallback_pct is not None
+            else fee_mod.DEFAULT_SLIPPAGE_FALLBACK_PCT
+        )
+        order_no = _new_order_no()
+        closed = []
+        for pos in list(self.positions(paper)):
+            px = prices.get(pos.symbol)
+            if not px:
+                continue
+            exit_px = px * (1 - fallback / 100) if pos.side == "long" else px * (1 + fallback / 100)
+            pnl, fee = self._close_qty(paper, pos, float(pos.size), exit_px, rates["taker"], order_no)
+            closed.append({"symbol": pos.symbol, "pnl": pnl, "fee": fee})
+        for o in self.pending_orders(paper):
+            o.status = "cancelled"
+        self.db.flush()
+        logger.warning(
+            f"[PAPER] LIQUIDATION account={paper.account_id} equity=${state['total_equity']:.2f} "
+            f"< maintenance=${state['maintenance_margin']:.2f}, closed {len(closed)} positions"
+        )
+        return {"order_no": order_no, "closed": closed}
+
+    def apply_funding(self, paper: PaperAccount, prices: Dict[str, float], now: Optional[datetime] = None) -> float:
+        now = now or datetime.utcnow()
+        interval_h = fee_mod.FUNDING_INTERVAL_HOURS.get(paper.data_exchange, 1)
+        last = paper.last_funding_at or paper.cycle_started_at
+        if last is not None and (now - last).total_seconds() < interval_h * 3600:
+            return 0.0
+
+        total = 0.0
+        for pos in self.positions(paper):
+            px = prices.get(pos.symbol)
+            rate = fee_mod.fetch_funding_rate(paper.data_exchange, pos.symbol)
+            if not px or rate is None:
+                continue
+            notional = float(pos.size) * px
+            # long pays positive funding, short receives
+            amount = -rate * notional if pos.side == "long" else rate * notional
+            paper.total_funding = float(paper.total_funding) + amount
+            self.db.add(PaperFundingRecord(
+                paper_account_id=paper.id, symbol=pos.symbol, funding_rate=rate,
+                position_notional=notional, amount=amount, cycle=paper.cycle, settled_at=now,
+            ))
+            total += amount
+        paper.last_funding_at = now
+        self.db.flush()
+        return total
+
+    def reset_cycle(self, paper: PaperAccount, initial_capital: Optional[float] = None) -> None:
+        for o in self.pending_orders(paper):
+            o.status = "cancelled"
+        for p in self.positions(paper):
+            self.db.delete(p)
+        if initial_capital is not None:
+            paper.initial_capital = initial_capital
+        paper.realized_pnl_total = 0
+        paper.total_fees = 0
+        paper.total_funding = 0
+        paper.cycle = int(paper.cycle) + 1
+        paper.cycle_started_at = datetime.utcnow()
+        paper.last_funding_at = None
+        self.db.flush()
+        logger.info(f"[PAPER] Reset account {paper.account_id} to cycle {paper.cycle}")
