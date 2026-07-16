@@ -1242,7 +1242,24 @@
     "selectExchange": "选择交易所",
     "exchangeHyperliquid": "Hyperliquid",
     "exchangeBinance": "币安",
-    "exchangeHint": "选择用于市场数据和交易执行的交易所"
+    "exchangeHint": "选择用于市场数据和交易执行的交易所",
+    "executionMode": "执行模式",
+    "selectExecutionMode": "选择执行模式",
+    "executionReal": "实盘交易",
+    "executionPaper": "纸交易",
+    "executionPaperHint": "使用主网实时行情模拟撮合，无需配置钱包。",
+    "executionRealHint": "订单发送到真实交易所。"
+  },
+  "paper": {
+    "title": "纸交易账户",
+    "notConfigured": "在策略配置中选择\"纸交易\"执行模式，首次交易时自动创建账户。",
+    "cycle": "周期",
+    "equity": "模拟权益",
+    "available": "可用余额",
+    "cycleReturn": "本周期收益",
+    "initialCapital": "初始资金 (USD)",
+    "reset": "重置",
+    "resetConfirm": "确定重置纸交易账户？将清空持仓和挂单、权益回到初始资金并开启新周期，历史记录保留。"
   },
   "order": {
     "title": "手动下单",

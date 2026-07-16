@@ -384,6 +384,7 @@ export default function AttributionAnalysis() {
             <SelectContent>
               <SelectItem value="testnet">Testnet</SelectItem>
               <SelectItem value="mainnet">Mainnet</SelectItem>
+              <SelectItem value="paper">Paper</SelectItem>
             </SelectContent>
           </Select>
 

@@ -14,6 +14,7 @@ import HyperliquidWalletSection from './HyperliquidWalletSection'
 import BinanceWalletSection from './BinanceWalletSection'
 import ExchangeIcon from '@/components/exchange/ExchangeIcon'
 import { getAccountWallet } from '@/lib/hyperliquidApi'
+import PaperAccountSection from './PaperAccountSection'
 
 interface ExchangeWalletsPanelProps {
   accountId: number
@@ -196,6 +197,8 @@ export default function ExchangeWalletsPanel({
         {renderExchangeSection('hyperliquid', 'Hyperliquid', status.hyperliquid, HyperliquidWalletSection)}
         {renderExchangeSection('binance', 'Binance Futures', status.binance, BinanceWalletSection)}
       </div>
+
+      <PaperAccountSection accountId={accountId} />
     </div>
   )
 }

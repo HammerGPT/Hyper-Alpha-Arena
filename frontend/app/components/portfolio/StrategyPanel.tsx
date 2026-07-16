@@ -25,6 +25,7 @@ interface StrategyConfig {
   signal_pool_name?: string | null  // Deprecated
   signal_pool_names?: string[] | null  // New: multiple pool names
   exchange?: string  // "hyperliquid" or "binance"
+  execution_mode?: string  // "real" or "paper"
 }
 
 interface SignalPool {
@@ -80,6 +81,7 @@ export default function StrategyPanel({
   const [signalPoolIds, setSignalPoolIds] = useState<number[]>([])
   const [signalPools, setSignalPools] = useState<SignalPool[]>([])
   const [exchange, setExchange] = useState<string>('hyperliquid')
+  const [executionMode, setExecutionMode] = useState<string>('real')
 
   // Global settings
   const [samplingInterval, setSamplingInterval] = useState<string>('18')
@@ -123,6 +125,7 @@ export default function StrategyPanel({
         const poolIds = strategy.signal_pool_ids ?? (strategy.signal_pool_id ? [strategy.signal_pool_id] : [])
         setSignalPoolIds(poolIds)
         setExchange(strategy.exchange ?? 'hyperliquid')
+        setExecutionMode(strategy.execution_mode ?? 'real')
       }
 
       if (signalsResponse.ok) {
@@ -254,6 +257,7 @@ export default function StrategyPanel({
         tick_batch_size: 1,
         signal_pool_ids: signalPoolIds.length > 0 ? signalPoolIds : null,
         exchange: exchange,
+        execution_mode: executionMode,
       }
       console.log('Frontend saving payload:', payload)
       const response = await fetch(`/api/account/${accountId}/strategy`, {
@@ -276,6 +280,7 @@ export default function StrategyPanel({
       const poolIds = result.signal_pool_ids ?? (result.signal_pool_id ? [result.signal_pool_id] : [])
       setSignalPoolIds(poolIds)
       setExchange(result.exchange ?? 'hyperliquid')
+      setExecutionMode(result.execution_mode ?? 'real')
 
       setSuccess('Trader configuration saved successfully.')
     } catch (err) {
@@ -284,7 +289,7 @@ export default function StrategyPanel({
     } finally {
       setSaving(false)
     }
-  }, [accountId, priceThreshold, triggerInterval, enabled, scheduledTriggerEnabled, signalPoolIds, exchange, resetMessages])
+  }, [accountId, priceThreshold, triggerInterval, enabled, scheduledTriggerEnabled, signalPoolIds, exchange, executionMode, resetMessages])
 
   const handleSaveGlobal = useCallback(async () => {
     resetMessages()
@@ -397,6 +402,26 @@ export default function StrategyPanel({
                   </Select>
                   <p className="text-xs text-muted-foreground">{t('strategy.exchangeHint', 'Select exchange for market data and trade execution')}</p>
                 </section>
+
+                <div className="space-y-1.5">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wide">
+                    {t('strategy.executionMode', 'Execution Mode')}
+                  </div>
+                  <Select value={executionMode} onValueChange={(value) => { setExecutionMode(value); resetMessages() }}>
+                    <SelectTrigger>
+                      <SelectValue placeholder={t('strategy.selectExecutionMode', 'Select execution mode')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="real">{t('strategy.executionReal', 'Live Trading')}</SelectItem>
+                      <SelectItem value="paper">{t('strategy.executionPaper', 'Paper Trading')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {executionMode === 'paper'
+                      ? t('strategy.executionPaperHint', 'Simulated fills on live mainnet data. No wallet required.')
+                      : t('strategy.executionRealHint', 'Orders are sent to the real exchange.')}
+                  </p>
+                </div>
 
                 <section className="space-y-2">
                   <div className="text-xs text-muted-foreground uppercase tracking-wide">{t('strategy.signalPools', 'Signal Pools')}</div>

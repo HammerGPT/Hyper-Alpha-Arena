@@ -1222,7 +1222,24 @@
     "selectExchange": "Select exchange",
     "exchangeHyperliquid": "Hyperliquid",
     "exchangeBinance": "Binance",
-    "exchangeHint": "Select exchange for market data and trade execution"
+    "exchangeHint": "Select exchange for market data and trade execution",
+    "executionMode": "Execution Mode",
+    "selectExecutionMode": "Select execution mode",
+    "executionReal": "Live Trading",
+    "executionPaper": "Paper Trading",
+    "executionPaperHint": "Simulated fills on live mainnet data. No wallet required.",
+    "executionRealHint": "Orders are sent to the real exchange."
+  },
+  "paper": {
+    "title": "Paper Trading Account",
+    "notConfigured": "Enable Paper Trading in the strategy config. The account is created on first trade.",
+    "cycle": "Cycle",
+    "equity": "Equity",
+    "available": "Available",
+    "cycleReturn": "Cycle Return",
+    "initialCapital": "Initial capital (USD)",
+    "reset": "Reset",
+    "resetConfirm": "Reset paper account? Positions and pending orders are cleared, equity returns to initial capital, and a new cycle starts. History is preserved."
   },
   "order": {
     "title": "Place Order (Manual)",
