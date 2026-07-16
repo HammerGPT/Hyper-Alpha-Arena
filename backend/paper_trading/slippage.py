@@ -47,8 +47,14 @@ def fetch_orderbook(data_exchange: str, symbol: str, depth: int = 50) -> Optiona
         return None
 
 
-def walk_the_book(levels: List[Tuple[float, float]], size: float, fallback_pct: float) -> Optional[float]:
-    """Weighted-average fill price walking price levels; leftover priced at worst level +/- fallback."""
+def walk_the_book(
+    levels: List[Tuple[float, float]], size: float, fallback_pct: float, side: str
+) -> Optional[float]:
+    """Weighted-average fill price walking price levels; leftover priced at worst level +/- fallback.
+
+    `side` is "buy" (leftover priced at worst_px * (1 + fallback_pct/100)) or
+    "sell" (worst_px * (1 - fallback_pct/100)).
+    """
     if not levels or size <= 0:
         return None
     remaining = size
@@ -62,9 +68,7 @@ def walk_the_book(levels: List[Tuple[float, float]], size: float, fallback_pct: 
         if remaining <= 1e-12:
             break
     if remaining > 1e-12:
-        # levels are ordered from best to worst; direction inferred from ordering
-        is_ask_side = len(levels) < 2 or levels[-1][0] >= levels[0][0]
-        adj = 1 + fallback_pct / 100 if is_ask_side else 1 - fallback_pct / 100
+        adj = 1 + fallback_pct / 100 if side == "buy" else 1 - fallback_pct / 100
         cost += remaining * worst_px * adj
     return cost / size
 
@@ -77,7 +81,7 @@ def compute_fill_price(
     book = fetch_orderbook(data_exchange, symbol)
     if book:
         levels = book["asks"] if side == "buy" else book["bids"]
-        avg = walk_the_book(levels, size, fallback_pct)
+        avg = walk_the_book(levels, size, fallback_pct, side)
         if avg is not None:
             return avg, "orderbook"
     if side == "buy":
