@@ -306,7 +306,6 @@ backend/static/
 backend/data.db
 us_crypto_news.json
 data.db
-backend/tests/
 .vscode/
 backend/.DS_Store
 
