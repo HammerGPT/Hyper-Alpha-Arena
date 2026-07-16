@@ -141,8 +141,23 @@ def get_all_asset_curves_data_new(
             end_date=end_date,
         )
 
+        # Paper trading curves always shown alongside real ones (marked)
+        paper_data = _build_hyperliquid_asset_curve(
+            db,
+            bucket_minutes,
+            environment="paper",
+            wallet_address=None,
+            account_id=account_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        for item in paper_data:
+            item["is_paper"] = True
+            if item.get("username") and not str(item["username"]).endswith(" [PAPER]"):
+                item["username"] = f"{item['username']} [PAPER]"
+
         # Merge and sort by timestamp
-        combined = hl_data + binance_data
+        combined = hl_data + binance_data + paper_data
         combined.sort(key=lambda item: (item["timestamp"], item["account_id"]))
         return combined
 
@@ -261,7 +276,9 @@ def _build_hyperliquid_asset_curve(
 
         account_map = {account.id: account for account in accounts}
 
-        env_filter_value = environment if environment in {"testnet", "mainnet"} else None
+        # "paper" is allowed here so dashboard paper-trading curves (environment="paper"
+        # in HyperliquidAccountSnapshot) can be queried the same way as testnet/mainnet.
+        env_filter_value = environment if environment in {"testnet", "mainnet", "paper"} else None
 
         # Build bucket query for Hyperliquid snapshots
         time_seconds = cast(func.extract('epoch', HyperliquidAccountSnapshot.created_at), Integer)

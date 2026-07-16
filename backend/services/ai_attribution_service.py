@@ -41,10 +41,11 @@ Before any analysis, you MUST confirm:
    - **binance**: Binance USDT-M futures
 
 2. **Environment** (for both exchanges):
-   - **testnet**: Test network trades (paper trading, testing)
+   - **testnet**: Test network trades (exchange test funds)
    - **mainnet**: Real money trades
+   - **paper**: Internal paper trading (simulated fills on mainnet data)
 
-Ask the user: "Which exchange do you want to analyze - Hyperliquid or Binance? Also specify testnet or mainnet."
+Ask the user: "Which exchange do you want to analyze - Hyperliquid or Binance? Also specify testnet, mainnet or paper."
 Only proceed after getting a clear answer. Pass the exchange and environment parameters to ALL tool calls.
 
 ## ACCOUNT IDENTIFICATION
@@ -60,7 +61,7 @@ NEVER ask user for account ID directly. Instead, use `list_ai_accounts` and pres
 ## GUIDED CONVERSATION
 Before using analysis tools, confirm:
 1. Which exchange? (hyperliquid or binance) - REQUIRED
-2. Which environment? (testnet or mainnet) - REQUIRED for both exchanges
+2. Which environment? (testnet, mainnet or paper) - REQUIRED for both exchanges
 3. Which account? (use `list_ai_accounts` to find by name)
 4. Time period? (default: 30 days)
 
@@ -135,7 +136,7 @@ def _define_tools():
                     "properties": {
                         "account_id": {"type": "integer", "description": "Account ID to analyze. Use 0 for all accounts."},
                         "exchange": {"type": "string", "enum": ["hyperliquid", "binance"], "description": "Exchange to analyze trades from. REQUIRED."},
-                        "environment": {"type": "string", "enum": ["testnet", "mainnet"], "description": "Trading environment. REQUIRED for both exchanges."},
+                        "environment": {"type": "string", "enum": ["testnet", "mainnet", "paper"], "description": "Trading environment. REQUIRED for both exchanges."},
                         "days": {"type": "integer", "description": "Number of days to analyze (7, 30, 90)", "default": 30}
                     },
                     "required": ["account_id", "exchange"]
@@ -194,7 +195,7 @@ def _define_tools():
                     "properties": {
                         "account_id": {"type": "integer", "description": "Account ID"},
                         "exchange": {"type": "string", "enum": ["hyperliquid", "binance"], "description": "Exchange to query trades from. REQUIRED."},
-                        "environment": {"type": "string", "enum": ["testnet", "mainnet"], "description": "Trading environment. REQUIRED for both exchanges."},
+                        "environment": {"type": "string", "enum": ["testnet", "mainnet", "paper"], "description": "Trading environment. REQUIRED for both exchanges."},
                         "limit": {"type": "integer", "description": "Number of recent trades to fetch", "default": 10},
                         "filter_type": {"type": "string", "enum": ["all", "wins", "losses"], "description": "Filter by trade outcome"}
                     },
@@ -229,7 +230,7 @@ def _define_tools():
                     "properties": {
                         "account_id": {"type": "integer", "description": "Account ID (0 for all)"},
                         "exchange": {"type": "string", "enum": ["hyperliquid", "binance"], "description": "Exchange. REQUIRED."},
-                        "environment": {"type": "string", "enum": ["testnet", "mainnet"], "description": "Environment. REQUIRED."},
+                        "environment": {"type": "string", "enum": ["testnet", "mainnet", "paper"], "description": "Environment. REQUIRED."},
                         "days": {"type": "integer", "description": "Analysis period in days", "default": 30}
                     },
                     "required": ["account_id", "exchange"]
