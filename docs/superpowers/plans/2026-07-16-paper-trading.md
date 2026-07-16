@@ -686,7 +686,7 @@ git commit -m "Add orderbook-walk slippage module for paper trading"
   - `positions(paper) -> List[PaperPosition]`、`pending_orders(paper, symbol=None) -> List[PaperOrder]`
   - `used_margin(paper) -> float`、`unrealized_pnl(paper, prices: Dict[str, float]) -> float`
   - `compute_state(paper, prices) -> Dict`（键与真实 client `get_account_state` 相同：environment/account_id/total_equity/available_balance/used_margin/maintenance_margin/margin_usage_percent/withdrawal_available/wallet_address/account_mode/timestamp）
-  - `place_order(paper, symbol, is_buy, size, limit_price, market_price, leverage=1, time_in_force="Ioc", reduce_only=False, take_profit_price=None, stop_loss_price=None, tp_execution="limit", sl_execution="limit") -> Dict`（返回结构与真实 client `place_order_with_tpsl` 相同 + 额外 `fee`/`realized_pnl` 键；status: "filled"|"resting"|"error"）
+  - `place_order(paper, symbol, is_buy, size, limit_price, market_price, leverage=1, time_in_force="Ioc", reduce_only=False, take_profit_price=None, stop_loss_price=None, tp_execution="limit", sl_execution="limit", mark_prices=None) -> Dict`（返回结构与真实 client `place_order_with_tpsl` 相同 + 额外 `fee`/`realized_pnl` 键；status: "filled"|"resting"|"error"。执行期修订：新增可选 `mark_prices` 参数——保证金校验必须计入其他持仓的实时未实现盈亏（规格权益公式要求），调用方（Task 7 client、Task 11 monitor）应传入全部持仓标记价）
   - 内部：`_fill(...)`、`_close_qty(...)`、`_register_tpsl(...)`、`_record_fill(...)`、`_new_order_no()`
 - 常量：`MAINTENANCE_MARGIN_RATIO = 0.5`
 
