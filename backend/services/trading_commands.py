@@ -525,6 +525,11 @@ def place_ai_driven_hyperliquid_order(
                     continue
             wallet_address = getattr(client, "wallet_address", None)
             decision_kwargs = {"wallet_address": wallet_address, "exchange": "hyperliquid"}
+            if is_paper:
+                # Tag every decision log for this account as paper-mode so
+                # attribution filters on AIDecisionLog.hyperliquid_environment
+                # can distinguish paper trades from testnet/mainnet ones.
+                decision_kwargs["environment"] = "paper"
 
             # Get tracking fields for decision analysis (failures should not affect core business)
             try:
@@ -1390,7 +1395,14 @@ def place_ai_driven_binance_order(
                 # references `wallet` (leverage fallback, quota check, trade
                 # attribution) must handle wallet=None.
                 wallet = None
-                decision_kwargs = {"wallet_address": f"paper-{account.id}", "exchange": "binance"}
+                decision_kwargs = {
+                    "wallet_address": f"paper-{account.id}",
+                    "exchange": "binance",
+                    # Tag every decision log for this account as paper-mode so
+                    # attribution filters on AIDecisionLog.hyperliquid_environment
+                    # can distinguish paper trades from testnet/mainnet ones.
+                    "environment": "paper",
+                }
                 logger.info(f"Processing PAPER trading for account: {account.name} (binance data)")
             else:
                 environment = get_global_trading_mode(db)
@@ -1710,11 +1722,21 @@ def _execute_binance_decision(
             result = client.close_position(symbol, cancel_tpsl=True)
             if result:
                 logger.info(f"[BINANCE] Position closed: {symbol}")
-                save_ai_decision(
+                decision_log = save_ai_decision(
                     db, account, decision, portfolio, executed=True,
                     hyperliquid_order_id=str(result.get("order_id")) if result.get("order_id") else None,
                     **decision_kwargs
                 )
+                if (
+                    is_paper
+                    and result.get("status") == "filled"
+                    and decision_log is not None
+                    and result.get("realized_pnl")
+                ):
+                    from datetime import datetime as _dt
+                    decision_log.realized_pnl = result["realized_pnl"]
+                    decision_log.pnl_updated_at = _dt.utcnow()
+                    db.commit()
                 # Save HyperliquidTrade record (consistent with Hyperliquid)
                 try:
                     from database.snapshot_connection import SnapshotSessionLocal
@@ -1732,7 +1754,7 @@ def _execute_binance_decision(
 
                         trade_record = HyperliquidTrade(
                             account_id=account.id,
-                            environment=wallet.environment if wallet else "mainnet",
+                            environment=("paper" if is_paper else (wallet.environment if wallet else "mainnet")),
                             wallet_address=f"binance_{account.id}",
                             symbol=symbol,
                             side="close",
@@ -1798,7 +1820,7 @@ def _execute_binance_decision(
 
                         trade_record = HyperliquidTrade(
                             account_id=account.id,
-                            environment=wallet.environment if wallet else "mainnet",
+                            environment=("paper" if is_paper else (wallet.environment if wallet else "mainnet")),
                             wallet_address=f"binance_{account.id}",
                             symbol=symbol,
                             side=operation,

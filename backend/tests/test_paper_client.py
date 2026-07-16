@@ -62,3 +62,20 @@ def test_place_order_passes_position_marks(client, db_session, monkeypatch):
     monkeypatch.setattr(PaperEngine, "place_order", spy)
     client.place_order_with_tpsl(db=db_session, symbol="BTC", is_buy=True, size=0.01, price=100000.0, leverage=2)
     assert captured.get("mark_prices") == {"ETH": 100000.0}
+
+
+def test_close_position(client, db_session):
+    client.place_order_with_tpsl(
+        db=db_session, symbol="BTC", is_buy=True, size=0.1, price=100000.0,
+        leverage=2, take_profit_price=110000.0,
+    )
+    result = client.close_position("BTC", cancel_tpsl=True, db=db_session)
+    assert result is not None
+    assert result.get("status") == "filled"
+    assert client.get_positions(db_session) == []
+    assert client.get_open_orders(db_session) == []
+
+
+def test_close_position_no_position(client, db_session):
+    result = client.close_position("ETH", cancel_tpsl=True, db=db_session)
+    assert result is None

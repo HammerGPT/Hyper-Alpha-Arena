@@ -36,3 +36,22 @@ def test_save_ai_decision_returns_log(db_session):
     )
     assert log is not None
     assert log.hyperliquid_order_id == "P-abc"
+
+
+def test_save_ai_decision_environment_override(db_session):
+    from database.models import User, Account, SystemConfig
+    SystemConfig.__table__.create(bind=db_session.get_bind(), checkfirst=True)
+    from services.ai_decision_service import save_ai_decision
+    u = User(username="t9fix")
+    db_session.add(u)
+    db_session.flush()
+    account = Account(user_id=u.id, name="T9", model="m", api_key="k")
+    db_session.add(account)
+    db_session.flush()
+    log = save_ai_decision(
+        db_session, account,
+        decision={"operation": "buy", "symbol": "BTC", "target_portion_of_balance": 0.1, "reason": "t"},
+        portfolio={"total_assets": 10000},
+        executed=True, exchange="binance", environment="paper",
+    )
+    assert log.hyperliquid_environment == "paper"

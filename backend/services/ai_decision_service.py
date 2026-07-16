@@ -2527,6 +2527,9 @@ def save_ai_decision(
     sl_order_id: Optional[str] = None,
     # Exchange identifier for attribution analysis
     exchange: Optional[str] = None,
+    # Explicit environment override (e.g. "paper") -- when omitted, falls back
+    # to the global testnet/mainnet trading mode as before.
+    environment: Optional[str] = None,
 ) -> Optional[AIDecisionLog]:
     """Save AI decision to the decision log"""
     try:
@@ -2575,9 +2578,12 @@ def save_ai_decision(
                     prev_portion = symbol_value / total_balance
 
         # Get Hyperliquid environment for decision tagging
-        # IMPORTANT: Always use global trading mode for accurate logging
+        # IMPORTANT: Callers processing paper-mode accounts pass an explicit
+        # `environment` (e.g. "paper") since the global testnet/mainnet trading
+        # mode does not reflect per-account paper execution. Fall back to the
+        # global trading mode for accurate logging when not provided.
         from services.hyperliquid_environment import get_global_trading_mode
-        hyperliquid_environment = get_global_trading_mode(db)
+        hyperliquid_environment = environment or get_global_trading_mode(db)
 
         # Create decision log entry
         decision_log = AIDecisionLog(

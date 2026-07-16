@@ -138,3 +138,79 @@ class PaperTradingClient:
         ok = engine.cancel_order(paper, str(order_id))
         db.commit()
         return ok
+
+    def close_position(
+        self,
+        symbol: str,
+        cancel_tpsl: bool = True,
+        db: Optional[Session] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Close the entire position for `symbol` via a reduce-only IOC order.
+
+        Mirrors BinanceTradingClient.close_position's call signature
+        (symbol, cancel_tpsl), but pipeline call sites invoke it without a
+        db session (`client.close_position(symbol, cancel_tpsl=True)`), so
+        this method self-manages one when the caller doesn't supply it.
+        """
+        owns_session = db is None
+        if owns_session:
+            from database.connection import SessionLocal
+            db = SessionLocal()
+        try:
+            symbol = symbol.upper()
+            engine = self._engine(db)
+            paper = engine.get_or_create(self.account_id, self.data_exchange)
+            position = next((p for p in engine.positions(paper) if p.symbol == symbol), None)
+            if position is None:
+                logger.info(f"[PAPER {self.data_exchange.upper()}] No position to close for {symbol}")
+                return None
+
+            is_long = position.side == "long"
+            size = float(position.size)
+            leverage = int(position.leverage)
+
+            market_price = _get_last_price(symbol, self.data_exchange)
+            if not market_price:
+                return {
+                    "status": "error",
+                    "error": f"Unable to get market price for {symbol}",
+                    "environment": "paper",
+                    "symbol": symbol,
+                }
+
+            position_symbols = [p.symbol for p in engine.positions(paper) if p.symbol != symbol]
+            mark_prices = self._prices_for(db, position_symbols) if position_symbols else None
+
+            fill = engine.place_order(
+                paper, symbol, is_buy=not is_long, size=size,
+                limit_price=market_price, market_price=market_price,
+                leverage=leverage, time_in_force="Ioc", reduce_only=True,
+                mark_prices=mark_prices,
+            )
+
+            if cancel_tpsl:
+                for order in engine.pending_orders(paper, symbol):
+                    engine.cancel_order(paper, order.order_no)
+
+            db.commit()
+            logger.info(
+                f"[PAPER {self.data_exchange.upper()}] CLOSE {symbol} "
+                f"status={fill.get('status')} avg={fill.get('average_price')}"
+            )
+
+            return {
+                "status": fill.get("status"),
+                "order_id": fill.get("order_id"),
+                "symbol": symbol,
+                "side": "sell" if is_long else "buy",
+                "filled_qty": fill.get("filled_amount", 0.0),
+                "avg_price": fill.get("average_price", 0.0),
+                "quantity": size,
+                "environment": "paper",
+                "realized_pnl": fill.get("realized_pnl", 0.0),
+                "fee": fill.get("fee", 0.0),
+                "error": fill.get("error"),
+            }
+        finally:
+            if owns_session:
+                db.close()
