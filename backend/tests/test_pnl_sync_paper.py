@@ -9,9 +9,13 @@ Covers:
 from datetime import datetime
 from decimal import Decimal
 
-from database.models import AIDecisionLog, PaperOrder, User, Account
+from database.models import (
+    AIDecisionLog, PaperOrder, User, Account, HyperliquidWallet, BinanceWallet,
+)
 from database.snapshot_models import HyperliquidTrade
-from api.arena_routes import _backfill_paper_pnl
+from database.connection import Base
+import api.arena_routes as arena_routes
+from api.arena_routes import _backfill_paper_pnl, check_pnl_sync_status
 
 
 def _make_account(db_session, username):
@@ -162,11 +166,13 @@ def test_backfill_skips_pending_tpsl_order(db_session, snapshot_session_factory,
     snap.close()
 
 
-def test_backfill_skips_records_with_existing_realized_pnl(
+def test_backfill_stamps_pnl_updated_at_when_realized_pnl_already_set(
     db_session, snapshot_session_factory, paper_account
 ):
-    """A row that already has realized_pnl but somehow lacks pnl_updated_at is left
-    alone (not double-counted / not overwritten)."""
+    """A row that already has realized_pnl (e.g. written by
+    program_execution_service, which sets realized_pnl without stamping
+    pnl_updated_at) gets pnl_updated_at stamped here so it drops out of the
+    "needs sync" count -- but realized_pnl must NOT be recomputed/overwritten."""
     account = _make_account(db_session, "t_pnl_existing")
     _make_filled_tpsl_order(db_session, paper_account, "P-tp5", side="sell", entry_price=100000)
     decision = _make_decision(db_session, account, tp_order_id="P-tp5")
@@ -178,10 +184,10 @@ def test_backfill_skips_records_with_existing_realized_pnl(
 
     result = _backfill_paper_pnl(db_session, snap)
 
-    assert result == {"backfilled": 0}
+    assert result == {"backfilled": 1}
     db_session.refresh(decision)
-    assert float(decision.realized_pnl) == 42.0
-    assert decision.pnl_updated_at is None
+    assert float(decision.realized_pnl) == 42.0  # unchanged, not recomputed to 1000
+    assert decision.pnl_updated_at is not None
     snap.close()
 
 
@@ -190,10 +196,15 @@ def test_backfill_skips_records_with_existing_realized_pnl(
 # ---------------------------------------------------------------------------
 
 def test_check_pnl_status_paper_filters_new_environment(db_session):
-    """Regression guard for the repointed semantics: a decision with
-    hyperliquid_environment IS NULL (legacy deprecated paper) must NOT be
-    counted for trading_mode="paper" anymore, while an environment="paper"
-    (new paper trading) row must be counted."""
+    """Regression guard for the repointed semantics: with trading_mode="paper",
+    only decisions with hyperliquid_environment == "paper" (new paper trading)
+    are counted -- a legacy hyperliquid_environment IS NULL row (old deprecated
+    paper mode) and a mainnet row must both be excluded.
+
+    Calls the real check_pnl_sync_status endpoint function directly (with
+    explicit kwargs, bypassing FastAPI's Query/Depends defaults) so this
+    actually exercises the production filter instead of a hand-rolled copy
+    of it that could drift out of sync."""
     account = _make_account(db_session, "t_status")
 
     legacy_null_env = AIDecisionLog(
@@ -208,19 +219,75 @@ def test_check_pnl_status_paper_filters_new_environment(db_session):
         executed="true", hyperliquid_environment="paper",
         hyperliquid_order_id="NEW-1", exchange="hyperliquid",
     )
-    db_session.add_all([legacy_null_env, new_paper_env])
+    mainnet_env = AIDecisionLog(
+        account_id=account.id, reason="r", operation="buy", symbol="BTC",
+        prev_portion=0, target_portion=0.1, total_balance=10000,
+        executed="true", hyperliquid_environment="mainnet",
+        hyperliquid_order_id="MAIN-1", exchange="hyperliquid",
+    )
+    db_session.add_all([legacy_null_env, new_paper_env, mainnet_env])
     db_session.flush()
 
-    ai_query = db_session.query(AIDecisionLog).filter(
-        AIDecisionLog.operation.in_(["buy", "sell", "close"]),
-        AIDecisionLog.executed == "true",
-        AIDecisionLog.pnl_updated_at == None,
-    )
-    trading_mode = "paper"
-    if trading_mode:
-        ai_query = ai_query.filter(AIDecisionLog.hyperliquid_environment == trading_mode)
-    else:
-        ai_query = ai_query.filter(AIDecisionLog.hyperliquid_environment.isnot(None))
+    result = check_pnl_sync_status(trading_mode="paper", db=db_session)
 
-    results = ai_query.all()
-    assert [r.hyperliquid_order_id for r in results] == ["NEW-1"]
+    assert result["ai_unsync_count"] == 1
+    assert result["program_unsync_count"] == 0
+    assert result["unsync_count"] == 1
+    assert result["needs_sync"] is True
+
+
+# ---------------------------------------------------------------------------
+# update_pnl_data: a paper-backfill failure must not poison db/snapshot_db
+# for the rest of the request (real Hyperliquid/Binance sync runs right after).
+# ---------------------------------------------------------------------------
+
+def test_paper_backfill_failure_rolls_back_and_does_not_abort_rest_of_sync(
+    db_session, snapshot_session_factory, monkeypatch
+):
+    """Forces _backfill_paper_pnl to raise mid-work via a *genuine* DB error
+    (an IntegrityError from a real ORM flush -- not a bare `raise`), so that on
+    SQLite (same as Postgres, since SQLAlchemy 1.4+/2.0 tracks this at the
+    Session level, not just the wire protocol) a missing rollback leaves the
+    session's transaction in a "must rollback" state: the very next query
+    raises PendingRollbackError instead of running.
+
+    Calls the real update_pnl_data function directly (bypassing FastAPI's
+    Depends wiring via an explicit db= kwarg). HyperliquidWallet/BinanceWallet
+    tables are added to db_session's in-memory engine (conftest's db_session
+    fixture doesn't create them) purely so the endpoint's wallet queries --
+    which run immediately after the paper backfill -- have a table to query
+    against; both stay empty so no wallet/fill processing actually happens.
+
+    Honesty check: without the fix (removing the two rollback() calls from
+    update_pnl_data's except block), db.query(HyperliquidWallet) below would
+    raise PendingRollbackError, which the endpoint's outer except would catch,
+    flipping result["success"] to False and adding a *second* unrelated error
+    -- so this test would fail on the pre-fix code.
+    """
+    engine = db_session.get_bind()
+    Base.metadata.create_all(
+        engine, tables=[HyperliquidWallet.__table__, BinanceWallet.__table__]
+    )
+
+    _make_account(db_session, "dup_me")  # existing username to collide with
+    db_session.commit()  # durable baseline row -- must survive the rollback below
+
+    def _boom(db, snapshot_db):
+        db.add(User(username="dup_me"))  # real UNIQUE-constraint violation
+        db.flush()  # -> IntegrityError, poisoning db's transaction on flush
+        return {"backfilled": 0}
+
+    monkeypatch.setattr(arena_routes, "_backfill_paper_pnl", _boom)
+    monkeypatch.setattr(arena_routes, "SnapshotSessionLocal", snapshot_session_factory)
+
+    result = arena_routes.update_pnl_data(db=db_session)
+
+    assert len(result["errors"]) == 1
+    assert "paper backfill" in result["errors"][0]
+    # If db.rollback() were missing, the query below (inside update_pnl_data,
+    # right after the paper backfill) would raise PendingRollbackError,
+    # which the outer except would catch and flip this to False.
+    assert result["success"] is True
+
+    # The session must remain directly usable by the caller afterward too.
+    assert db_session.query(User).filter(User.username == "dup_me").count() == 1

@@ -1464,6 +1464,12 @@ def _backfill_paper_pnl(db: Session, snapshot_db: Session) -> dict:
     brief's literal behavior of stamping pnl_updated_at alone, leaving
     realized_pnl untouched (NULL).
 
+    Separately, some rows reach this function with realized_pnl already
+    populated by another path (e.g. program_execution_service writes
+    realized_pnl without stamping pnl_updated_at) but pnl_updated_at still
+    NULL. For those, this function only stamps pnl_updated_at -- it never
+    recomputes or overwrites an existing realized_pnl.
+
     Caller (update_pnl_data) owns both sessions' lifecycle: db is the FastAPI
     request-scoped session, snapshot_db is opened/closed around the whole
     endpoint. This helper only reads/writes/commits `db`; it never opens or
@@ -1501,8 +1507,18 @@ def _backfill_paper_pnl(db: Session, snapshot_db: Session) -> dict:
         po = _filled_order(rec.tp_order_id) or _filled_order(rec.sl_order_id)
         if po is None or po.filled_at is None:
             continue
+        if rec.pnl_updated_at is not None:
+            # Already synced; nothing to do. (Query above already filters this,
+            # but keep the guard so this function stays correct if called
+            # directly, e.g. from tests, against rows that violate that filter.)
+            continue
         if rec.realized_pnl is not None:
-            # Already has PnL via some other path; nothing to backfill here.
+            # realized_pnl was already written by some other path (e.g.
+            # program_execution_service writes it without stamping
+            # pnl_updated_at) -- just stamp the sync marker, don't recompute
+            # or overwrite the existing PnL.
+            rec.pnl_updated_at = po.filled_at or datetime.utcnow()
+            paper_updated += 1
             continue
 
         recovered_pnl = None
@@ -1568,6 +1584,17 @@ def update_pnl_data(db: Session = Depends(get_db)):
         try:
             result["paper"] = _backfill_paper_pnl(db, snapshot_db)
         except Exception as e:
+            # A failure here must not leave either session's transaction poisoned --
+            # on Postgres an un-rolled-back error aborts every later query in this
+            # same request, silently killing the real Hyperliquid/Binance sync below.
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            try:
+                snapshot_db.rollback()
+            except Exception:
+                pass
             result["errors"].append(f"paper backfill: {e}")
 
         # ========== Process Hyperliquid wallets ==========
