@@ -78,3 +78,76 @@ def test_pending_orders_deterministic_order(db_session, engine):
     orders = engine.pending_orders(paper)
     ids = [o.id for o in orders]
     assert ids == sorted(ids)
+
+
+def test_snapshot_skips_account_with_missing_price_for_open_position(
+    db_session, engine, snapshot_session_factory, monkeypatch
+):
+    """A price outage for a symbol an account holds must not write a distorted
+    equity snapshot this round (missing price silently drops that position's
+    unrealized PnL from the computed equity)."""
+    import database.snapshot_connection as snapshot_connection
+    from database.snapshot_models import HyperliquidAccountSnapshot
+    from paper_trading.monitor import PaperMonitor
+
+    monkeypatch.setattr(snapshot_connection, "SnapshotSessionLocal", snapshot_session_factory)
+
+    paper = engine.get_or_create(1, "hyperliquid")
+    engine.place_order(paper, "BTC", True, 0.1, 100000.0, 100000.0, leverage=2)
+    db_session.commit()
+
+    monitor = PaperMonitor()
+    monkeypatch.setattr(monitor, "_get_prices", lambda data_exchange, symbols: {})
+    monitor._snapshot_all(db_session)
+
+    sdb = snapshot_session_factory()
+    rows = sdb.query(HyperliquidAccountSnapshot).all()
+    sdb.close()
+    assert rows == []
+
+
+def test_snapshot_writes_account_when_prices_available(
+    db_session, engine, snapshot_session_factory, monkeypatch
+):
+    import database.snapshot_connection as snapshot_connection
+    from database.snapshot_models import HyperliquidAccountSnapshot
+    from paper_trading.monitor import PaperMonitor
+
+    monkeypatch.setattr(snapshot_connection, "SnapshotSessionLocal", snapshot_session_factory)
+
+    paper = engine.get_or_create(1, "hyperliquid")
+    engine.place_order(paper, "BTC", True, 0.1, 100000.0, 100000.0, leverage=2)
+    db_session.commit()
+
+    monitor = PaperMonitor()
+    monkeypatch.setattr(monitor, "_get_prices", lambda data_exchange, symbols: {"BTC": 101000.0})
+    monitor._snapshot_all(db_session)
+
+    sdb = snapshot_session_factory()
+    rows = sdb.query(HyperliquidAccountSnapshot).all()
+    sdb.close()
+    assert len(rows) == 1
+    assert rows[0].account_id == 1
+
+
+def test_snapshot_writes_account_with_no_positions_and_empty_prices(
+    db_session, engine, snapshot_session_factory, monkeypatch
+):
+    """Accounts with no open positions have nothing that needs a price, so an
+    empty prices dict must still snapshot fine (unaffected by the outage guard)."""
+    import database.snapshot_connection as snapshot_connection
+    from database.snapshot_models import HyperliquidAccountSnapshot
+    from paper_trading.monitor import PaperMonitor
+
+    monkeypatch.setattr(snapshot_connection, "SnapshotSessionLocal", snapshot_session_factory)
+
+    engine.get_or_create(1, "hyperliquid")
+    db_session.commit()
+
+    monitor = PaperMonitor()
+    monitor._snapshot_all(db_session)
+
+    sdb = snapshot_session_factory()
+    rows = sdb.query(HyperliquidAccountSnapshot).all()
+    sdb.close()
+    assert len(rows) == 1

@@ -248,6 +248,19 @@ class PaperMonitor:
                 try:
                     symbols = [p.symbol for p in engine.positions(paper)]
                     prices = self._get_prices(paper.data_exchange, symbols) if symbols else {}
+                    # Price outage: an account with open positions whose prices we
+                    # couldn't fetch would otherwise snapshot with those positions'
+                    # unrealized PnL silently dropped (missing price -> excluded
+                    # from unrealized_pnl/used_margin), distorting equity for this
+                    # round. Accounts with no positions have nothing that needs a
+                    # price, so an empty prices dict is fine for them.
+                    missing = [s for s in symbols if s not in prices]
+                    if missing:
+                        logger.debug(
+                            f"[PAPER MONITOR] Snapshot skipped for account {paper.account_id}: "
+                            f"no prices for {missing}"
+                        )
+                        continue
                     state = engine.compute_state(paper, prices)
                     sdb.add(HyperliquidAccountSnapshot(
                         account_id=paper.account_id,
@@ -261,6 +274,10 @@ class PaperMonitor:
                     ))
                 except Exception as e:
                     logger.error(f"[PAPER MONITOR] Snapshot failed for account {paper.account_id}: {e}")
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
             sdb.commit()
         except Exception as e:
             sdb.rollback()
