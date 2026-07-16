@@ -289,6 +289,7 @@ class AccountStrategyConfig(Base):
     enabled = Column(String(10), nullable=False, default="true")
     scheduled_trigger_enabled = Column(Boolean, nullable=False, default=True)  # Enable/disable scheduled trigger
     exchange = Column(String(20), nullable=False, default="hyperliquid")  # "hyperliquid" or "binance"
+    execution_mode = Column(String(10), nullable=False, default="real")  # "real" or "paper"
     last_trigger_at = Column(TIMESTAMP, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(
@@ -1752,3 +1753,88 @@ class NewsArticle(Base):
         UniqueConstraint('source_domain', 'source_url',
                          name='news_articles_source_unique'),
     )
+
+
+# ============================================================================
+# Paper Trading Tables (internal simulated execution, mainnet read-only data)
+# ============================================================================
+
+class PaperAccount(Base):
+    """Per-trader paper trading account (persistent simulated equity)."""
+    __tablename__ = "paper_accounts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False, unique=True, index=True)
+    data_exchange = Column(String(20), nullable=False, default="hyperliquid")  # market data source
+    initial_capital = Column(DECIMAL(18, 2), nullable=False, default=10000.00)
+    realized_pnl_total = Column(DECIMAL(18, 6), nullable=False, default=0)
+    total_fees = Column(DECIMAL(18, 6), nullable=False, default=0)
+    total_funding = Column(DECIMAL(18, 6), nullable=False, default=0)  # positive = received
+    cycle = Column(Integer, nullable=False, default=1)
+    cycle_started_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    # Fee/slippage overrides (NULL = exchange defaults in paper_trading/fees.py)
+    taker_fee_pct = Column(DECIMAL(10, 6), nullable=True)
+    maker_fee_pct = Column(DECIMAL(10, 6), nullable=True)
+    slippage_fallback_pct = Column(DECIMAL(10, 6), nullable=True)
+    last_funding_at = Column(TIMESTAMP, nullable=True)
+    last_monitor_at = Column(TIMESTAMP, nullable=True)  # for restart kline catch-up
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at = Column(TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp())
+
+    account = relationship("Account")
+
+
+class PaperPosition(Base):
+    """Open paper position (netted per symbol, like Hyperliquid)."""
+    __tablename__ = "paper_positions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    paper_account_id = Column(Integer, ForeignKey("paper_accounts.id"), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False)
+    side = Column(String(10), nullable=False)  # "long" | "short"
+    size = Column(DECIMAL(18, 8), nullable=False)
+    entry_price = Column(DECIMAL(18, 6), nullable=False)  # weighted average on add
+    leverage = Column(Integer, nullable=False, default=1)
+    cycle = Column(Integer, nullable=False, default=1)
+    opened_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at = Column(TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp())
+
+    __table_args__ = (
+        UniqueConstraint('paper_account_id', 'symbol', name='uq_paper_positions_account_symbol'),
+    )
+
+
+class PaperOrder(Base):
+    """Pending paper order: resting GTC limit, or independent TP/SL trigger order."""
+    __tablename__ = "paper_orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    paper_account_id = Column(Integer, ForeignKey("paper_accounts.id"), nullable=False, index=True)
+    order_no = Column(String(40), unique=True, nullable=False, index=True)  # "P-<hex16>"
+    symbol = Column(String(20), nullable=False)
+    side = Column(String(10), nullable=False)  # "buy" | "sell"
+    order_type = Column(String(20), nullable=False)  # "limit" | "take_profit" | "stop_loss"
+    exec_mode = Column(String(10), nullable=False, default="limit")  # "limit" (maker) | "market" (taker+slippage)
+    trigger_price = Column(DECIMAL(18, 6), nullable=False)
+    size = Column(DECIMAL(18, 8), nullable=False)
+    entry_price = Column(DECIMAL(18, 6), nullable=True)  # entry px for TP/SL PnL attribution
+    leverage = Column(Integer, nullable=False, default=1)
+    reduce_only = Column(Boolean, nullable=False, default=True)
+    status = Column(String(20), nullable=False, default="pending")  # pending | filled | cancelled
+    cycle = Column(Integer, nullable=False, default=1)
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    filled_at = Column(TIMESTAMP, nullable=True)
+
+
+class PaperFundingRecord(Base):
+    """Funding settlement ledger for paper positions."""
+    __tablename__ = "paper_funding_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    paper_account_id = Column(Integer, ForeignKey("paper_accounts.id"), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False)
+    funding_rate = Column(DECIMAL(18, 10), nullable=False)
+    position_notional = Column(DECIMAL(18, 6), nullable=False)
+    amount = Column(DECIMAL(18, 6), nullable=False)  # positive = received by account
+    cycle = Column(Integer, nullable=False, default=1)
+    settled_at = Column(TIMESTAMP, server_default=func.current_timestamp())
