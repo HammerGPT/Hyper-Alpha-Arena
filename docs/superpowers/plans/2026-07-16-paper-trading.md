@@ -498,7 +498,7 @@ git commit -m "Add paper trading fee schedule and funding rate module"
 **Interfaces:**
 - Consumes: `fees.DEFAULT_SLIPPAGE_FALLBACK_PCT`
 - Produces: `fetch_orderbook(data_exchange: str, symbol: str, depth: int = 50) -> Optional[Dict[str, list]]`（`{"bids": [(px, sz), ...], "asks": [(px, sz), ...]}`，价格降序 bids / 升序 asks；失败返回 None）
-- Produces: `walk_the_book(levels: list, size: float, fallback_pct: float) -> Optional[float]`（逐档吃单加权均价；levels 为空返回 None；深度不足部分按最差档价 ± fallback）
+- Produces: `walk_the_book(levels: list, size: float, fallback_pct: float, side: str) -> Optional[float]`（逐档吃单加权均价；levels 为空返回 None；深度不足部分按最差档价 ± fallback，方向由显式 side "buy"/"sell" 决定——执行期修订：原 3 参签名无法从 levels 推断方向，单档订单簿会反转卖单滑点方向，Task 3 审查发现后改为显式传向。后续任务只调用 compute_fill_price，不受影响）
 - Produces: `compute_fill_price(data_exchange, symbol, side: str, size: float, reference_price: float, fallback_pct: float) -> Tuple[float, str]`（返回 `(成交价, "orderbook"|"fallback")`）
 
 - [ ] **Step 1: 写失败测试**
