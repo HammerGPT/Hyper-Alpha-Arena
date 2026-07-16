@@ -126,6 +126,7 @@ class PaperEngine:
         stop_loss_price: Optional[float] = None,
         tp_execution: str = "limit",
         sl_execution: str = "limit",
+        mark_prices: Optional[Dict[str, float]] = None,
     ) -> Dict[str, Any]:
         side = "buy" if is_buy else "sell"
         rates = fee_mod.get_fee_rates(paper.data_exchange, paper)
@@ -163,7 +164,8 @@ class PaperEngine:
             ))
             return result
 
-        fill = self._fill(paper, symbol, side, size, leverage, reduce_only, fill_price, rates["taker"])
+        fill = self._fill(paper, symbol, side, size, leverage, reduce_only, fill_price, rates["taker"],
+                          mark_prices=mark_prices)
         if fill["status"] == "error":
             return self._error(symbol, fill["error"])
 
@@ -183,6 +185,7 @@ class PaperEngine:
     def _fill(
         self, paper: PaperAccount, symbol: str, side: str, size: float,
         leverage: int, reduce_only: bool, fill_price: float, fee_rate_pct: float,
+        mark_prices: Optional[Dict[str, float]] = None,
     ) -> Dict[str, Any]:
         pos = (
             self.db.query(PaperPosition)
@@ -214,7 +217,9 @@ class PaperEngine:
         if remaining > EPS:
             notional = remaining * fill_price
             margin_needed = notional / max(leverage, 1)
-            state = self.compute_state(paper, {symbol: fill_price})
+            gate_prices = dict(mark_prices or {})
+            gate_prices[symbol] = fill_price
+            state = self.compute_state(paper, gate_prices)
             if state["available_balance"] < margin_needed:
                 if filled_qty <= EPS:
                     return {

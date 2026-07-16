@@ -84,6 +84,25 @@ def test_tpsl_orders_registered(engine):
     assert float(tp.entry_price) == 100000.0
 
 
+def test_margin_check_includes_other_positions_unrealized_loss(engine):
+    paper = engine.get_or_create(1, "hyperliquid")
+    # ETH long: 2 ETH @ 3000, 3x -> margin 2000
+    engine.place_order(paper, "ETH", True, 2.0, 3000.0, 3000.0, leverage=3)
+    # ETH crashes to 500: unrealized -5000, equity ~ 10000 - 5000 - fees ~ 4997
+    # BTC order needing 4000 margin: passes WITHOUT marks (stale equity ~9997),
+    # must be REJECTED with real marks (available = equity - used_margin(2000) < 4000...
+    # actually available ≈ 4997 - 2000 = 2997 < 4000)
+    result = engine.place_order(
+        paper, "BTC", True, 0.08, 100000.0, 100000.0, leverage=2,
+        mark_prices={"ETH": 500.0},
+    )
+    assert result["status"] == "error"
+    assert "Insufficient" in result["error"]
+    # sanity: without marks the same order would (wrongly) pass
+    result2 = engine.place_order(paper, "BTC", True, 0.08, 100000.0, 100000.0, leverage=2)
+    assert result2["status"] == "filled"
+
+
 def test_fill_recorded_to_snapshot_db(engine, snapshot_session_factory):
     from database.snapshot_models import HyperliquidTrade
     paper = engine.get_or_create(1, "hyperliquid")
