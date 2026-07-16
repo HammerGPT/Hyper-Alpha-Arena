@@ -49,9 +49,23 @@ class PaperMonitor:
         from paper_trading.engine import PaperEngine
 
         engine = PaperEngine(db)
-        papers = db.query(PaperAccount).all()
-        for paper in papers:
+        # Collect ids first, then re-fetch each account row-locked inside its own
+        # try block. Locking the plain query result directly would hold every
+        # account's row for the whole sweep and doesn't protect against another
+        # writer (e.g. a route handler) racing a single account between the
+        # initial query and this account's turn -- re-fetching per-account with
+        # with_for_update() closes that lost-update window.
+        paper_ids = [p.id for p in db.query(PaperAccount.id).all()]
+        for paper_id in paper_ids:
             try:
+                paper = (
+                    db.query(PaperAccount)
+                    .filter(PaperAccount.id == paper_id)
+                    .with_for_update()
+                    .first()
+                )
+                if paper is None:
+                    continue
                 symbols = {p.symbol for p in engine.positions(paper)}
                 symbols |= {o.symbol for o in engine.pending_orders(paper)}
                 if not symbols:
@@ -78,7 +92,7 @@ class PaperMonitor:
                 db.commit()
             except Exception as e:
                 db.rollback()
-                logger.error(f"[PAPER MONITOR] Account {paper.account_id} sweep failed: {e}", exc_info=True)
+                logger.error(f"[PAPER MONITOR] Account (paper_id={paper_id}) sweep failed: {e}", exc_info=True)
 
     def _sweep_account(self, db: Session, engine, paper, prices: Dict[str, float]) -> List[Dict[str, Any]]:
         fills = []
@@ -173,13 +187,24 @@ class PaperMonitor:
         from database.models import PaperAccount
         from paper_trading.engine import PaperEngine
         engine = PaperEngine(db)
-        for paper in db.query(PaperAccount).all():
+        # Same lost-update guard as run_once: collect ids first, then re-fetch
+        # each account row-locked inside its own try block.
+        paper_ids = [p.id for p in db.query(PaperAccount.id).all()]
+        for paper_id in paper_ids:
             try:
+                paper = (
+                    db.query(PaperAccount)
+                    .filter(PaperAccount.id == paper_id)
+                    .with_for_update()
+                    .first()
+                )
+                if paper is None:
+                    continue
                 self.catch_up(db, engine, paper)
                 db.commit()
             except Exception as e:
                 db.rollback()
-                logger.error(f"[PAPER MONITOR] Catch-up failed for {paper.account_id}: {e}")
+                logger.error(f"[PAPER MONITOR] Catch-up failed for paper_id={paper_id}: {e}")
 
     def catch_up(self, db: Session, engine, paper) -> None:
         """Replay 1m kline highs/lows since last_monitor_at through pending orders.

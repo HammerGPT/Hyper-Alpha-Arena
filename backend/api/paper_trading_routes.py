@@ -72,7 +72,12 @@ def do_reset(db: Session, account_id: int, initial_capital: Optional[float] = No
     from paper_trading.engine import PaperEngine
 
     engine = PaperEngine(db)
-    paper = db.query(PaperAccount).filter(PaperAccount.account_id == account_id).first()
+    paper = (
+        db.query(PaperAccount)
+        .filter(PaperAccount.account_id == account_id)
+        .with_for_update()
+        .first()
+    )
     if paper is None:
         raise HTTPException(status_code=404, detail="Paper account not found")
     engine.reset_cycle(paper, initial_capital=initial_capital)
@@ -102,7 +107,12 @@ def update_paper_config(account_id: int, payload: PaperConfigUpdate, db: Session
     from paper_trading.engine import PaperEngine
 
     engine = PaperEngine(db)
-    paper = db.query(PaperAccount).filter(PaperAccount.account_id == account_id).first()
+    paper = (
+        db.query(PaperAccount)
+        .filter(PaperAccount.account_id == account_id)
+        .with_for_update()
+        .first()
+    )
     if paper is None:
         paper = engine.get_or_create(account_id, "hyperliquid")
 
