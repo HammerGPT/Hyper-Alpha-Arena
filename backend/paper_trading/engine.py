@@ -266,6 +266,7 @@ class PaperEngine:
     def _close_qty(
         self, paper: PaperAccount, pos: PaperPosition, qty: float,
         exit_price: float, fee_rate_pct: float, order_no: str,
+        record_status: str = "filled",
     ) -> tuple:
         """Close qty of pos at exit_price. Returns (gross_pnl, fee). Deletes position when emptied."""
         qty = min(qty, float(pos.size))
@@ -275,7 +276,10 @@ class PaperEngine:
         paper.realized_pnl_total = float(paper.realized_pnl_total) + pnl
         paper.total_fees = float(paper.total_fees) + fee
         close_side = "sell" if pos.side == "long" else "buy"
-        self._record_fill(paper, pos.symbol, close_side, qty, exit_price, int(pos.leverage), order_no, fee)
+        self._record_fill(
+            paper, pos.symbol, close_side, qty, exit_price, int(pos.leverage), order_no, fee,
+            order_status=record_status,
+        )
         new_size = float(pos.size) - qty
         if new_size <= EPS:
             self.db.delete(pos)
@@ -318,6 +322,7 @@ class PaperEngine:
     def _record_fill(
         self, paper: PaperAccount, symbol: str, side: str, qty: float,
         price: float, leverage: int, order_no: str, fee: float,
+        order_status: str = "filled",
     ) -> None:
         """Write fill to snapshot DB HyperliquidTrade with environment='paper'."""
         try:
@@ -335,7 +340,7 @@ class PaperEngine:
                     price=Decimal(str(price)),
                     leverage=leverage,
                     order_id=order_no,
-                    order_status="filled",
+                    order_status=order_status,
                     trade_value=Decimal(str(qty)) * Decimal(str(price)),
                     fee=Decimal(str(fee)),
                 ))
@@ -525,7 +530,10 @@ class PaperEngine:
             if not px:
                 continue
             exit_px = px * (1 - fallback / 100) if pos.side == "long" else px * (1 + fallback / 100)
-            pnl, fee = self._close_qty(paper, pos, float(pos.size), exit_px, rates["taker"], order_no)
+            pnl, fee = self._close_qty(
+                paper, pos, float(pos.size), exit_px, rates["taker"], order_no,
+                record_status="liquidation",
+            )
             closed.append({"symbol": pos.symbol, "pnl": pnl, "fee": fee})
         for o in self.pending_orders(paper):
             o.status = "cancelled"

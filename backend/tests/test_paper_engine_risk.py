@@ -21,7 +21,7 @@ def test_no_liquidation_when_healthy(engine):
     assert engine.check_liquidation(paper, {"BTC": 99000.0}) is None
 
 
-def test_liquidation_closes_all_and_cancels_orders(engine):
+def test_liquidation_closes_all_and_cancels_orders(engine, snapshot_session_factory):
     paper = engine.get_or_create(1, "hyperliquid")
     # 10x leverage: margin 5000, position 0.5 BTC @ 100000
     engine.place_order(
@@ -38,6 +38,17 @@ def test_liquidation_closes_all_and_cancels_orders(engine):
     # realized loss applied
     state = engine.compute_state(paper, {})
     assert state["total_equity"] < 3000
+
+    # spec §5: liquidation fills must be annotated order_status="liquidation"
+    # (distinguishable from ordinary "filled" open/close rows in the snapshot DB)
+    from database.snapshot_models import HyperliquidTrade
+    sdb = snapshot_session_factory()
+    trades = sdb.query(HyperliquidTrade).all()
+    sdb.close()
+    open_fill = [t for t in trades if t.side == "buy"]
+    liquidation_fill = [t for t in trades if t.side == "sell"]
+    assert len(open_fill) == 1 and open_fill[0].order_status == "filled"
+    assert len(liquidation_fill) == 1 and liquidation_fill[0].order_status == "liquidation"
 
 
 def test_funding_not_due(engine):
