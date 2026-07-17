@@ -30,10 +30,12 @@ class FakeBinanceClient:
         }
 
     def close_position(self, symbol, cancel_tpsl=True):
+        # Real BinanceTradingClient.close_position returns place_order's normalized
+        # dict: executed_qty/avg_price, never filled_qty (see binance_trading_client.py:677-692).
         return {
             "status": "filled",
             "order_id": self.order_id,
-            "filled_qty": 0.01,
+            "executed_qty": 0.01,
             "avg_price": 50000.0,
             "realized_pnl": 5.0,
         }
