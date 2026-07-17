@@ -47,12 +47,12 @@ class AccountOverview(BaseModel):
 
 class StrategyConfigBase(BaseModel):
     """Base fields shared by strategy config schemas"""
-    trigger_mode: str = "unified"
+    trigger_mode: Optional[str] = None  # "unified"; omitted in PUT = preserve current
     interval_seconds: Optional[int] = None
     tick_batch_size: Optional[int] = None
-    enabled: bool = True
-    scheduled_trigger_enabled: bool = True  # Enable/disable scheduled trigger
-    exchange: str = "hyperliquid"  # "hyperliquid" or "binance"
+    enabled: Optional[bool] = None  # omitted in PUT = preserve current
+    scheduled_trigger_enabled: Optional[bool] = None  # omitted in PUT = preserve current
+    exchange: Optional[str] = None  # "hyperliquid" or "binance"; omitted in PUT = preserve current
     execution_mode: Optional[str] = None  # "real" or "paper"; omitted in PUT = preserve current
     price_threshold: Optional[float] = None  # Deprecated, kept for compatibility
     signal_pool_id: Optional[int] = None  # Deprecated: use signal_pool_ids instead

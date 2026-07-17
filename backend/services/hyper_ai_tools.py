@@ -2343,11 +2343,16 @@ def execute_bind_program_to_trader(
 def execute_update_trader_strategy(
     db: Session, trader_id: int,
     signal_pool_ids: list = None,
-    scheduled_trigger_enabled: bool = None,
+    scheduled_trigger_enabled: Optional[bool] = None,
     trigger_interval: int = None,
-    exchange: str = "hyperliquid"
+    exchange: Optional[str] = None
 ) -> str:
-    """Update trigger config for a Prompt-based AI Trader. Reuses upsert_strategy."""
+    """Update trigger config for a Prompt-based AI Trader. Reuses upsert_strategy.
+
+    Fields left as None (not supplied by the caller) are preserved by upsert_strategy
+    rather than reset to a default - e.g. omitting `exchange` will NOT flip the trader
+    back to hyperliquid, and this tool never touches `enabled` at all.
+    """
     from database.models import Account
     from repositories.strategy_repo import upsert_strategy
 
@@ -2369,9 +2374,9 @@ def execute_update_trader_strategy(
             "success": True,
             "trader_id": trader_id,
             "trader_name": account.name,
-            "exchange": exchange,
+            "exchange": strategy.exchange,
             "signal_pool_ids": signal_pool_ids,
-            "scheduled_trigger_enabled": scheduled_trigger_enabled,
+            "scheduled_trigger_enabled": strategy.scheduled_trigger_enabled,
             "trigger_interval": trigger_interval
         }, indent=2)
 
@@ -3473,7 +3478,7 @@ def execute_hyper_ai_tool(
                 signal_pool_ids=arguments.get("signal_pool_ids"),
                 scheduled_trigger_enabled=arguments.get("scheduled_trigger_enabled"),
                 trigger_interval=arguments.get("trigger_interval"),
-                exchange=arguments.get("exchange", "hyperliquid")
+                exchange=arguments.get("exchange")
             )
 
         # --- Update tools ---

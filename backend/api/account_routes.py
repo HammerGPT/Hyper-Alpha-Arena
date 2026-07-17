@@ -100,7 +100,7 @@ def _serialize_strategy(account: Account, strategy, db: Session = None) -> Strat
         interval_seconds=strategy.trigger_interval or 150,
         tick_batch_size=1,
         enabled=(strategy.enabled == "true" and account.auto_trading_enabled == "true"),
-        scheduled_trigger_enabled=strategy.scheduled_trigger_enabled,
+        scheduled_trigger_enabled=strategy.scheduled_trigger_enabled if strategy.scheduled_trigger_enabled is not None else True,
         exchange=getattr(strategy, 'exchange', None) or "hyperliquid",
         execution_mode=getattr(strategy, "execution_mode", None) or "real",
         last_trigger_at=last_iso,
@@ -366,6 +366,7 @@ def update_account_strategy(
     strategy = upsert_strategy(
         db,
         account_id=account_id,
+        trigger_mode=payload.trigger_mode,
         price_threshold=price_threshold,
         trigger_interval=trigger_interval,
         enabled=payload.enabled,

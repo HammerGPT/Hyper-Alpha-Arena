@@ -39,16 +39,16 @@ def parse_signal_pool_ids(strategy: AccountStrategyConfig) -> List[int]:
 def upsert_strategy(
     db: Session,
     account_id: int,
-    trigger_mode: str = "unified",
+    trigger_mode: Optional[str] = None,  # None = preserve current value; creation default "unified"
     interval_seconds: Optional[int] = None,
     tick_batch_size: Optional[int] = None,
-    enabled: bool = True,
-    scheduled_trigger_enabled: bool = True,
+    enabled: Optional[bool] = None,  # None = preserve current value; creation default True
+    scheduled_trigger_enabled: Optional[bool] = None,  # None = preserve current value; creation default True
     price_threshold: Optional[float] = None,
     trigger_interval: Optional[int] = None,
     signal_pool_id: Optional[int] = None,  # Deprecated: kept for backward compatibility
     signal_pool_ids: Optional[List[int]] = None,  # New: list of pool IDs
-    exchange: str = "hyperliquid",  # "hyperliquid" or "binance"
+    exchange: Optional[str] = None,  # "hyperliquid" or "binance"; None = preserve current value
     execution_mode: Optional[str] = None,  # "real" or "paper"; None = preserve current value
 ) -> AccountStrategyConfig:
     print(f"upsert_strategy called with: account_id={account_id}, signal_pool_ids={signal_pool_ids}, signal_pool_id={signal_pool_id}")
@@ -57,12 +57,41 @@ def upsert_strategy(
         strategy = AccountStrategyConfig(account_id=account_id)
         db.add(strategy)
 
-    strategy.trigger_mode = trigger_mode
+    # trigger_mode has no backing DB column today (legacy/vestigial field kept only
+    # as a transient attribute on the ORM instance); still honor None-preserve /
+    # creation-default semantics for parity with the other fields and the API contract.
+    if trigger_mode is not None:
+        strategy.trigger_mode = trigger_mode
+    elif getattr(strategy, "trigger_mode", None) is None:
+        strategy.trigger_mode = "unified"
+
     strategy.trigger_interval = trigger_interval or interval_seconds
     strategy.tick_batch_size = tick_batch_size
-    strategy.enabled = "true" if enabled else "false"
-    strategy.scheduled_trigger_enabled = scheduled_trigger_enabled
-    strategy.exchange = exchange
+
+    if enabled is not None:
+        strategy.enabled = "true" if enabled else "false"
+    elif strategy.enabled is None:
+        # creation path: new row before flush has no value yet
+        strategy.enabled = "true"
+
+    if scheduled_trigger_enabled is not None:
+        strategy.scheduled_trigger_enabled = scheduled_trigger_enabled
+    elif strategy.scheduled_trigger_enabled is None:
+        # creation path: new row before flush has no value yet
+        strategy.scheduled_trigger_enabled = True
+
+    if exchange is not None:
+        normalized_exchange = str(exchange).lower()
+        if normalized_exchange in ("hyperliquid", "binance"):
+            strategy.exchange = normalized_exchange
+        elif strategy.exchange is None:
+            # creation path with an invalid value supplied: fall back to the old default
+            strategy.exchange = "hyperliquid"
+        # else: invalid value on an existing row -> preserve current value (no-op)
+    elif strategy.exchange is None:
+        # creation path: new row before flush has no value yet
+        strategy.exchange = "hyperliquid"
+
     if execution_mode is not None:
         normalized_mode = str(execution_mode).lower()
         strategy.execution_mode = normalized_mode if normalized_mode in ("real", "paper") else "real"
