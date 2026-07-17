@@ -168,3 +168,80 @@ def test_schema_partial_update_fields_default_to_none():
     assert payload.enabled is False
     assert payload.trigger_mode == "unified"
     assert payload.exchange == "binance"
+
+
+# --- signal_pool_ids / signal_pool_id omission semantics -------------------
+#
+# Regression coverage for the bug where an upsert_strategy call that omitted
+# BOTH signal_pool_id and signal_pool_id args (e.g. an AI tool call that only
+# changes trigger_interval) was indistinguishable from an explicit
+# "unbind all pools" request, since both defaulted to None. Fixed via a
+# module-level _UNSET sentinel in strategy_repo.py: omitted now means
+# "preserve", while explicit None/[] still means "unbind" (the PUT route's
+# existing, documented contract).
+
+def test_omitting_pool_args_preserves_existing_bindings(db_session):
+    """The bug's regression test: binding pools, then calling upsert_strategy
+    again without mentioning signal_pool_ids/signal_pool_id at all (as the
+    hyper_ai_tools dispatcher does when the LLM only changes trigger_interval)
+    must NOT clear the trader's signal pool bindings."""
+    strategy = upsert_strategy(
+        db_session, account_id=201, trigger_interval=150,
+        signal_pool_ids=[1, 2, 3],
+    )
+    assert strategy.signal_pool_ids == "[1, 2, 3]"
+    assert strategy.signal_pool_id == 1
+
+    # Partial update that never mentions pool args at all.
+    strategy = upsert_strategy(db_session, account_id=201, trigger_interval=200)
+    assert strategy.signal_pool_ids == "[1, 2, 3]", "omitted pool args must preserve existing bindings"
+    assert strategy.signal_pool_id == 1
+    assert strategy.trigger_interval == 200
+
+
+def test_explicit_empty_list_unbinds_pools(db_session):
+    """Explicit signal_pool_ids=[] is the documented unbind-all signal and must
+    still clear bindings (unchanged from pre-fix behavior)."""
+    strategy = upsert_strategy(
+        db_session, account_id=202, trigger_interval=150,
+        signal_pool_ids=[1, 2],
+    )
+    assert strategy.signal_pool_ids == "[1, 2]"
+
+    strategy = upsert_strategy(db_session, account_id=202, trigger_interval=150, signal_pool_ids=[])
+    assert strategy.signal_pool_ids is None, "explicit signal_pool_ids=[] must unbind all pools"
+    assert strategy.signal_pool_id is None
+
+
+def test_explicit_none_unbinds_pools(db_session):
+    """Explicit signal_pool_ids=None (and signal_pool_id=None) is the PUT
+    route's existing contract for a JSON body that nulls out the field -
+    must still unbind, distinct from simply omitting the kwargs."""
+    strategy = upsert_strategy(
+        db_session, account_id=203, trigger_interval=150,
+        signal_pool_ids=[7, 8],
+    )
+    assert strategy.signal_pool_ids == "[7, 8]"
+
+    strategy = upsert_strategy(
+        db_session, account_id=203, trigger_interval=150,
+        signal_pool_id=None, signal_pool_ids=None,
+    )
+    assert strategy.signal_pool_ids is None, "explicit None/None must still unbind all pools"
+    assert strategy.signal_pool_id is None
+
+
+def test_explicit_signal_pool_id_alone_binds_single_pool(db_session):
+    """Explicit legacy signal_pool_id (int) with signal_pool_ids omitted must
+    still bind via the old single-pool format, unaffected by the sentinel
+    change (mirrors pre-fix behavior where signal_pool_ids defaulted to None)."""
+    strategy = upsert_strategy(
+        db_session, account_id=204, trigger_interval=150, signal_pool_id=9,
+    )
+    assert strategy.signal_pool_ids == "[9]"
+    assert strategy.signal_pool_id == 9
+
+    # Omitting both on a later call preserves it.
+    strategy = upsert_strategy(db_session, account_id=204, trigger_interval=175)
+    assert strategy.signal_pool_ids == "[9]"
+    assert strategy.signal_pool_id == 9

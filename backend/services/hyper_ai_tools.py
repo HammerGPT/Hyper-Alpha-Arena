@@ -22,6 +22,7 @@ from sqlalchemy import text, func
 
 from database.models import SystemConfig
 from services.hyper_ai_subagents import SUBAGENT_TOOLS, execute_subagent_tool
+from repositories.strategy_repo import _UNSET as _STRATEGY_UNSET
 
 logger = logging.getLogger(__name__)
 
@@ -478,7 +479,7 @@ HYPER_AI_TOOLS = [
                     "signal_pool_ids": {
                         "type": "array",
                         "items": {"type": "integer"},
-                        "description": "Signal pool IDs to bind"
+                        "description": "Signal pool IDs to bind. Omit this field entirely to leave the trader's current signal pool bindings unchanged (e.g. when only updating trigger_interval or exchange). Pass an empty array [] to explicitly unbind all signal pools."
                     },
                     "scheduled_trigger_enabled": {"type": "boolean", "description": "Enable scheduled trigger"},
                     "trigger_interval": {"type": "integer", "description": "Trigger interval in seconds"}
@@ -2340,9 +2341,33 @@ def execute_bind_program_to_trader(
         return json.dumps({"error": str(e)})
 
 
+def build_update_trader_strategy_kwargs(arguments: dict) -> dict:
+    """Build the kwargs for execute_update_trader_strategy from raw tool-call arguments.
+
+    `signal_pool_ids` is only included in the returned dict when the key is
+    actually present in `arguments`. An LLM that omits the key (e.g. a call
+    that only changes trigger_interval) must leave the trader's existing
+    signal pool bindings untouched - relying on execute_update_trader_strategy's
+    _STRATEGY_UNSET default - rather than being coerced to None via a bare
+    `arguments.get("signal_pool_ids")`, which previously caused an omitted key
+    to be indistinguishable from an explicit unbind-all request. An explicit
+    `[]` or list of ids from the LLM still passes through unchanged, since
+    that is the documented bind/unbind signal.
+    """
+    kwargs = {
+        "trader_id": arguments.get("trader_id"),
+        "scheduled_trigger_enabled": arguments.get("scheduled_trigger_enabled"),
+        "trigger_interval": arguments.get("trigger_interval"),
+        "exchange": arguments.get("exchange"),
+    }
+    if "signal_pool_ids" in arguments:
+        kwargs["signal_pool_ids"] = arguments.get("signal_pool_ids")
+    return kwargs
+
+
 def execute_update_trader_strategy(
     db: Session, trader_id: int,
-    signal_pool_ids: list = None,
+    signal_pool_ids=_STRATEGY_UNSET,
     scheduled_trigger_enabled: Optional[bool] = None,
     trigger_interval: int = None,
     exchange: Optional[str] = None
@@ -2352,9 +2377,15 @@ def execute_update_trader_strategy(
     Fields left as None (not supplied by the caller) are preserved by upsert_strategy
     rather than reset to a default - e.g. omitting `exchange` will NOT flip the trader
     back to hyperliquid, and this tool never touches `enabled` at all.
+
+    `signal_pool_ids` defaults to the shared _UNSET sentinel (aliased here as
+    _STRATEGY_UNSET) rather than None: the dispatcher only forwards this kwarg
+    when the LLM actually included "signal_pool_ids" in its tool-call arguments,
+    so an update that only changes e.g. trigger_interval leaves the trader's
+    signal pool bindings untouched instead of silently unbinding them.
     """
     from database.models import Account
-    from repositories.strategy_repo import upsert_strategy
+    from repositories.strategy_repo import upsert_strategy, parse_signal_pool_ids
 
     try:
         account = db.query(Account).filter(Account.id == trader_id, Account.is_deleted != True).first()
@@ -2375,7 +2406,10 @@ def execute_update_trader_strategy(
             "trader_id": trader_id,
             "trader_name": account.name,
             "exchange": strategy.exchange,
-            "signal_pool_ids": signal_pool_ids,
+            # Reflect the strategy's actual, persisted pool bindings rather than
+            # echoing the raw argument - it may be the _UNSET sentinel (omitted
+            # by the caller, meaning "preserved") which isn't JSON-serializable.
+            "signal_pool_ids": parse_signal_pool_ids(strategy),
             "scheduled_trigger_enabled": strategy.scheduled_trigger_enabled,
             "trigger_interval": trigger_interval
         }, indent=2)
@@ -3473,12 +3507,7 @@ def execute_hyper_ai_tool(
 
         elif tool_name == "update_trader_strategy":
             return execute_update_trader_strategy(
-                db,
-                trader_id=arguments.get("trader_id"),
-                signal_pool_ids=arguments.get("signal_pool_ids"),
-                scheduled_trigger_enabled=arguments.get("scheduled_trigger_enabled"),
-                trigger_interval=arguments.get("trigger_interval"),
-                exchange=arguments.get("exchange")
+                db, **build_update_trader_strategy_kwargs(arguments)
             )
 
         # --- Update tools ---
