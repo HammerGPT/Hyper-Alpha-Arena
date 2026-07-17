@@ -1564,6 +1564,45 @@ def place_ai_driven_binance_order(
             db.close()
 
 
+def _extract_binance_fill(result: Dict[str, Any]) -> Tuple[float, float, float]:
+    """Extract (quantity, avg_price, fee) from a Binance/paper fill result dict.
+
+    Handles multiple return shapes so the HyperliquidTrade snapshot-record
+    write sites don't silently record zero quantity/price:
+
+    - BinanceTradingClient.close_position / place_order (normalized, see
+      binance_trading_client.py place_order return, ~line 677-692) use
+      snake_case keys with float values: 'executed_qty', 'avg_price'.
+    - Raw Binance REST responses (if ever passed through directly) use
+      camelCase keys with STRING values: 'executedQty', 'avgPrice'. These
+      are checked defensively even though today's call sites don't hit
+      this case.
+    - The legacy/paper shape (PaperTradingClient.close_position,
+      BinanceTradingClient.place_order_with_tpsl) uses 'filled_qty' /
+      'avg_price' / 'fee'.
+
+    Binance's order-placement responses never include a commission/fee
+    field (fees only appear via the separate user-trades/income-history
+    endpoints), so `fee` will be 0.0 for real Binance fills today; the
+    'commission' key is checked for forward-compatibility and for the
+    paper shape's 'fee' key.
+    """
+    def _num(*keys: str, default: float = 0.0) -> float:
+        for key in keys:
+            val = result.get(key)
+            if val not in (None, ""):
+                try:
+                    return float(val)
+                except (TypeError, ValueError):
+                    continue
+        return default
+
+    quantity = _num("executedQty", "executed_qty", "filled_qty")
+    avg_price = _num("avgPrice", "avg_price")
+    fee = _num("commission", "fee")
+    return quantity, avg_price, fee
+
+
 def _execute_binance_decision(
     db: Session,
     account: Account,
@@ -1756,8 +1795,7 @@ def _execute_binance_decision(
                         snapshot_db = SnapshotSessionLocal()
                         try:
                             # Use Binance official fields, fallback to market price if 0
-                            filled_qty = float(result.get('filled_qty', 0))
-                            avg_price_val = float(result.get('avg_price', 0))
+                            filled_qty, avg_price_val, fee_val = _extract_binance_fill(result)
                             # For close, use filled_qty or position size from result
                             trade_qty = Decimal(str(filled_qty)) if filled_qty > 0 else Decimal('0')
                             trade_price = Decimal(str(avg_price_val)) if avg_price_val > 0 else Decimal(str(price))
@@ -1774,7 +1812,7 @@ def _execute_binance_decision(
                                 order_id=str(result.get('order_id', '')),
                                 order_status=result.get('status', 'filled'),
                                 trade_value=trade_qty * trade_price,
-                                fee=Decimal('0')
+                                fee=Decimal(str(fee_val))
                             )
                             snapshot_db.add(trade_record)
                             snapshot_db.commit()
@@ -1826,8 +1864,7 @@ def _execute_binance_decision(
                         snapshot_db = SnapshotSessionLocal()
                         try:
                             # Use Binance official fields, fallback to decision values if 0
-                            filled_qty = float(order_result.get('filled_qty', 0))
-                            avg_price = float(order_result.get('avg_price', 0))
+                            filled_qty, avg_price, fee_val = _extract_binance_fill(order_result)
                             # If Binance returns 0 (MARKET order not yet filled), use decision values
                             trade_qty = Decimal(str(filled_qty)) if filled_qty > 0 else Decimal(str(quantity))
                             trade_price = Decimal(str(avg_price)) if avg_price > 0 else Decimal(str(price))
@@ -1844,7 +1881,7 @@ def _execute_binance_decision(
                                 order_id=str(order_result.get('order_id', '')),
                                 order_status=status,
                                 trade_value=trade_qty * trade_price,
-                                fee=Decimal('0')
+                                fee=Decimal(str(fee_val))
                             )
                             snapshot_db.add(trade_record)
                             snapshot_db.commit()
