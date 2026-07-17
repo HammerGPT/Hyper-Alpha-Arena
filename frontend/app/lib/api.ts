@@ -190,6 +190,9 @@ export interface StrategyConfig {
   enabled: boolean
   last_trigger_at?: string | null
   exchange?: string  // "hyperliquid" or "binance"
+  // Response-only: account-level auto-trading pause switch (separate from the
+  // per-strategy `enabled` flag). Never send this back on PUT.
+  auto_trading_enabled?: boolean
 }
 
 export interface StrategyConfigUpdate {

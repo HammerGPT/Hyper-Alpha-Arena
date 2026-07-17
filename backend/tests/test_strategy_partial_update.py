@@ -104,6 +104,54 @@ def test_exchange_normalized_lowercase(db_session):
     assert strategy.exchange == "binance"
 
 
+def test_serialize_strategy_separates_enabled_from_account_pause(db_session):
+    """Regression test for the enabled/auto_trading_enabled conflation bug.
+
+    _serialize_strategy used to compute `enabled=(strategy.enabled == "true" and
+    account.auto_trading_enabled == "true")`. Since the frontend stores this
+    computed value and PUTs it back verbatim on every save, an account-level pause
+    (auto_trading_enabled="false") silently flipped strategy.enabled to "false" in
+    the DB on ANY save -- even one only touching an unrelated field. GET must
+    report the raw per-strategy flag plus a separate auto_trading_enabled field,
+    and that GET value must round-trip through PUT without mutating strategy.enabled.
+    """
+    from database.models import User, Account
+    from api.account_routes import _serialize_strategy
+
+    user = User(username="t_strategy_enabled_split")
+    db_session.add(user)
+    db_session.flush()
+
+    account = Account(
+        user_id=user.id, name="Paused Trader", model="m", api_key="k",
+        auto_trading_enabled="false",
+    )
+    db_session.add(account)
+    db_session.flush()
+
+    # scheduled_trigger_enabled=False (and no signal pools) so _serialize_strategy's
+    # prompt-binding warning lookup is skipped -- keeps this test independent of the
+    # account_prompt_bindings table, which the shared db_session fixture doesn't create.
+    strategy = upsert_strategy(
+        db_session, account_id=account.id, trigger_interval=150,
+        enabled=True, scheduled_trigger_enabled=False,
+    )
+    assert strategy.enabled == "true"
+
+    serialized = _serialize_strategy(account, strategy, db_session)
+    assert serialized.enabled is True, "enabled must reflect the strategy's own flag, not the account pause switch"
+    assert serialized.auto_trading_enabled is False, "auto_trading_enabled must reflect the account-level pause switch"
+
+    # Simulate the GET->PUT round-trip the frontend performs: it stores `enabled`
+    # from the GET response and PUTs it back on a save that only changes an
+    # unrelated field (e.g. trigger_interval). This must not clobber strategy.enabled.
+    strategy = upsert_strategy(
+        db_session, account_id=account.id, trigger_interval=200,
+        enabled=serialized.enabled,
+    )
+    assert strategy.enabled == "true", "round-trip must preserve strategy.enabled=true even while the account is paused"
+
+
 def test_schema_partial_update_fields_default_to_none():
     """Omitted fields in the PUT payload must decode to None (preserve), not the
     old hardcoded defaults - mirrors execution_mode's schema contract."""

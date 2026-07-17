@@ -26,6 +26,9 @@ interface StrategyConfig {
   signal_pool_names?: string[] | null  // New: multiple pool names
   exchange?: string  // "hyperliquid" or "binance"
   execution_mode?: string  // "real" or "paper"
+  // Response-only: account-level auto-trading pause switch (separate from `enabled`,
+  // which is this strategy's own flag). Never sent back on PUT.
+  auto_trading_enabled?: boolean
 }
 
 interface SignalPool {
@@ -76,6 +79,7 @@ export default function StrategyPanel({
   const [priceThreshold, setPriceThreshold] = useState<string>('1.0')
   const [triggerInterval, setTriggerInterval] = useState<string>('150')
   const [enabled, setEnabled] = useState<boolean>(true)
+  const [autoTradingEnabled, setAutoTradingEnabled] = useState<boolean>(true)
   const [scheduledTriggerEnabled, setScheduledTriggerEnabled] = useState<boolean>(true)
   const [lastTriggerAt, setLastTriggerAt] = useState<string | null>(null)
   const [signalPoolIds, setSignalPoolIds] = useState<number[]>([])
@@ -119,6 +123,7 @@ export default function StrategyPanel({
         setPriceThreshold((strategy.price_threshold ?? 1.0).toString())
         setTriggerInterval((strategy.interval_seconds ?? 150).toString())
         setEnabled(strategy.enabled)
+        setAutoTradingEnabled(strategy.auto_trading_enabled ?? true)
         setScheduledTriggerEnabled(strategy.scheduled_trigger_enabled ?? true)
         setLastTriggerAt(strategy.last_trigger_at ?? null)
         // Use new signal_pool_ids field, fallback to old signal_pool_id for compatibility
@@ -274,6 +279,7 @@ export default function StrategyPanel({
       setPriceThreshold((result.price_threshold ?? 1.0).toString())
       setTriggerInterval((result.interval_seconds ?? 150).toString())
       setEnabled(result.enabled)
+      setAutoTradingEnabled(result.auto_trading_enabled ?? true)
       setScheduledTriggerEnabled(result.scheduled_trigger_enabled ?? true)
       setLastTriggerAt(result.last_trigger_at ?? null)
       // Use new signal_pool_ids field
@@ -509,6 +515,9 @@ export default function StrategyPanel({
                     <div>
                       <div className="text-xs text-muted-foreground uppercase tracking-wide">{t('strategy.strategyStatus', 'Strategy Status')}</div>
                       <p className="text-xs text-muted-foreground">{enabled ? t('strategy.enabledDesc', 'Enabled: strategy reacts to signals and scheduled triggers.') : t('strategy.disabledDesc', 'Disabled: strategy will not auto-trade.')}</p>
+                      {!autoTradingEnabled && (
+                        <p className="text-xs text-muted-foreground">{t('strategy.accountAutoTradingPaused', 'Account auto-trading is paused')}</p>
+                      )}
                     </div>
                     <Switch
                       checked={enabled}

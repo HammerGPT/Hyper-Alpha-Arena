@@ -1202,6 +1202,7 @@
     "strategyStatus": "Strategy Status",
     "enabledDesc": "Enabled: strategy reacts to signals and scheduled triggers.",
     "disabledDesc": "Disabled: strategy will not auto-trade.",
+    "accountAutoTradingPaused": "Account auto-trading is paused",
     "lastTrigger": "Last Trigger",
     "saving": "Saving…",
     "saveTraderConfig": "Save Trader Config",

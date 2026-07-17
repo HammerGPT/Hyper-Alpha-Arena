@@ -99,7 +99,7 @@ def _serialize_strategy(account: Account, strategy, db: Session = None) -> Strat
         trigger_mode="unified",
         interval_seconds=strategy.trigger_interval or 150,
         tick_batch_size=1,
-        enabled=(strategy.enabled == "true" and account.auto_trading_enabled == "true"),
+        enabled=(strategy.enabled == "true"),
         scheduled_trigger_enabled=strategy.scheduled_trigger_enabled if strategy.scheduled_trigger_enabled is not None else True,
         exchange=getattr(strategy, 'exchange', None) or "hyperliquid",
         execution_mode=getattr(strategy, "execution_mode", None) or "real",
@@ -110,6 +110,7 @@ def _serialize_strategy(account: Account, strategy, db: Session = None) -> Strat
         signal_pool_name=signal_pool_name,  # Deprecated
         signal_pool_names=signal_pool_names if signal_pool_names else None,
         warning=warning,
+        auto_trading_enabled=(account.auto_trading_enabled == "true"),
     )
 
 

@@ -1222,6 +1222,7 @@
     "strategyStatus": "策略状态",
     "enabledDesc": "已启用：策略响应信号和定时触发。",
     "disabledDesc": "已禁用：策略不会自动交易。",
+    "accountAutoTradingPaused": "账户自动交易已暂停",
     "lastTrigger": "上次触发",
     "saving": "保存中…",
     "saveTraderConfig": "保存交易员配置",

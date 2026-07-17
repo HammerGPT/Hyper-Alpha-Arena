@@ -70,3 +70,8 @@ class StrategyConfig(StrategyConfigBase):
     signal_pool_name: Optional[str] = None  # Deprecated: use signal_pool_names instead
     signal_pool_names: Optional[List[str]] = None  # Signal pool names for display
     warning: Optional[str] = None  # Warning message if config is incomplete
+    # Response-only: reflects the account-level auto-trading pause switch (toggled via
+    # PUT /api/account/{account_id}, not this endpoint). Deliberately absent from
+    # StrategyConfigBase/StrategyConfigUpdate so a GET->PUT round-trip can never send
+    # it back and have it misinterpreted as the per-strategy `enabled` flag.
+    auto_trading_enabled: Optional[bool] = None
