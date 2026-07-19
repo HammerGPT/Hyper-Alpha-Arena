@@ -1,6 +1,7 @@
 """
 AI Decision Service - Handles AI model API calls for trading decisions
 """
+import asyncio
 import logging
 import random
 import json
@@ -2627,8 +2628,7 @@ def save_ai_decision(
         )
 
         # Broadcast AI decision update via WebSocket
-        import asyncio
-        from api.ws import broadcast_model_chat_update
+        from api.ws import broadcast_model_chat_update, manager
 
         try:
             broadcast_data = {
@@ -2650,15 +2650,20 @@ def save_ai_decision(
                 "decision_snapshot": decision_log.decision_snapshot,
                 "wallet_address": decision_log.wallet_address,
             }
-            
-            # Check if there's a running event loop
-            try:
-                loop = asyncio.get_running_loop()
-                # Event loop is running, create task
-                loop.create_task(broadcast_model_chat_update(broadcast_data))
-            except RuntimeError:
-                # No running event loop, run synchronously
-                asyncio.run(broadcast_model_chat_update(broadcast_data))
+
+            # save_ai_decision() is usually called from a BackgroundScheduler
+            # worker thread that has no event loop of its own. Running the
+            # coroutine with asyncio.run() there would execute it on a brand
+            # new loop, but the WebSocket connections live on the main
+            # FastAPI/uvicorn loop in a different thread, so sends would
+            # silently fail. schedule_task() hands the coroutine to that
+            # loop via run_coroutine_threadsafe (or the caller's loop if one
+            # is already running), which is the pattern the rest of the
+            # codebase uses for the same situation.
+            manager.schedule_task(
+                broadcast_model_chat_update(broadcast_data),
+                source="ai_decision",
+            )
         except Exception as broadcast_err:
             # Don't fail the save operation if broadcast fails
             logger.warning(f"Failed to broadcast AI decision update: {broadcast_err}")
