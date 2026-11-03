@@ -505,6 +505,30 @@ BTC news (24h, 46 articles):
 
 ---
 
+## Adanos 市场情绪变量（可选）
+
+配置 `ADANOS_API_KEY` 后，Adanos 变量会向提示词注入基于 Reddit 讨论的
+外部加密市场情绪数据。如果没有配置 API key，变量会渲染为不可用提示，
+不会阻塞提示词生成。
+
+| 变量 | 描述 |
+|------|------|
+| `{adanos_sentiment}` | 当前选中币种的 Adanos 情绪摘要 |
+| `{adanos_sentiment_14d}` | 使用自定义天数窗口的选中币种摘要 |
+| `{BTC_adanos_sentiment}` | BTC 专属 Adanos 情绪摘要 |
+| `{ETH_adanos_sentiment_30d}` | 使用自定义天数窗口的 ETH 摘要 |
+
+时间窗口后缀使用日历天（`_1d` 到 `_365d`），默认 7 天。
+
+示例：
+```
+=== 外部情绪 ===
+{adanos_sentiment}
+{BTC_adanos_sentiment}
+```
+
+---
+
 ## 遗留变量（向后兼容）
 
 | 变量 | 描述 | 推荐替代 |

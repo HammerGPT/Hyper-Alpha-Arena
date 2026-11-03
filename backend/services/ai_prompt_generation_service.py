@@ -292,11 +292,13 @@ VALID_VARIABLE_PATTERNS = [
     # Context variables
     r"runtime_minutes", r"current_time_utc", r"trading_environment", r"selected_symbols_detail",
     r"trigger_context", r"news_section", r"output_format",
+    r"adanos_sentiment(?:_\d+d)?",
     # Market regime
     r"market_regime_description", r"trigger_market_regime",
     r"market_regime(?:_(?:1m|5m|15m|1h|4h|1d))?",
     # Symbol-specific patterns (BTC, ETH, SOL, etc.)
     r"[A-Z]+_market_data",
+    r"[A-Z][A-Z0-9]*_adanos_sentiment(?:_\d+d)?",
     r"[A-Z]+_klines_(?:1m|3m|5m|15m|30m|1h|2h|4h|8h|12h|1d|3d|1w|1M)",
     r"[A-Z]+_market_regime(?:_(?:1m|5m|15m|1h|4h|1d))?",
     # Technical indicators

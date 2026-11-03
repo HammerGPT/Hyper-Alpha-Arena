@@ -186,6 +186,7 @@ name=RSI21(id=5) | period=1h | expr=RSI(close, 21) | desc=RSI with 21-period loo
 - `{trading_environment}` - Platform description (Hyperliquid Testnet/Mainnet)
 - `{selected_symbols_detail}` - List of symbols being monitored
 - `{news_section}` - Latest cryptocurrency news
+- `{adanos_sentiment}` / `{BTC_adanos_sentiment}` - Optional Adanos crypto market sentiment when `ADANOS_API_KEY` is configured
 - `{trigger_context}` - **IMPORTANT**: Trigger context information showing what triggered this AI decision (signal pool or scheduled interval), including signal details when triggered by signals
 
 ### Signal Pool System (IMPORTANT)
