@@ -2,6 +2,8 @@
 
 **English** | [简体中文](./README.zh-CN.md)
 
+> **Hosted login service closed:** The project's hosted login, registration, and membership services have been shut down. Self-hosted deployments that need sign-in or multi-user access must integrate their own identity, user-account, and authorization services. Features that depend on hosted membership checks also require your own entitlement integration.
+
 > **Multi-exchange AI trading platform with quantitative factor intelligence and market flow signal monitoring**. Supports **Hyperliquid** and **Binance Futures**. AI discovers, validates, and trades on quantitative factors — the same building blocks used by institutional quant desks. Monitors institutional order flow, OI changes, and funding rate extremes — triggers automated trading when market structure shifts. Two trading modes: AI Trader for strategies needing market understanding, or Program Trader for fixed-rule strategies. AI-assisted configuration throughout — no coding required to start.
 >
 > **Essential tool for crypto perpetual traders**. 86 built-in factors, custom expression engine, AI-driven factor mining with web research. One-click Docker deployment, frequent updates. Supports Hyperliquid testnet paper trading & mainnet real trading, plus Binance Futures. **English & 中文 supported.**
@@ -62,7 +64,7 @@ Hyper Alpha Arena is a production-ready AI trading platform where Large Language
 
 ### Smart Wallet Signal Integration
 
-Connect [Hyper Insight](https://hyper.akooi.com/) to bring tracked whale and smart-money activity into Hyper Alpha Arena as wallet signal pools. Hyper Insight currently indexes about **70,000** tracked addresses and can sync wallet actions into Hyper Alpha Arena for **AI Trader**, **Program Trader**, and bot notifications.
+Connect Hyper Insight to bring tracked whale and smart-money activity into Hyper Alpha Arena as wallet signal pools. Hyper Insight currently indexes about **70,000** tracked addresses and can sync wallet actions into Hyper Alpha Arena for **AI Trader**, **Program Trader**, and bot notifications.
 
 ### AI Agent Architecture
 
@@ -165,6 +167,12 @@ docker compose up -d --build # (or docker-compose up -d --build)
 - Only `docker-compose down -v` will delete data (don't use `-v` flag unless you want to reset everything)
 
 ## First-Time Setup
+
+### Self-hosted authentication
+
+The existing authentication code still contains dependencies on the retired hosted services. Integrating your own user system requires adapting `auth-config.json`, OAuth callbacks, token refresh and logout, membership API requests, and backend session validation and authorization. Changing a URL or environment variable alone does not provide a complete user system or per-user data isolation.
+
+Keep personal installations on localhost or a trusted private network until appropriate server-side access controls are in place. Exchange wallet/API credentials are separate from application user authentication.
 
 For detailed setup instructions including:
 - Hyperliquid wallet configuration (Testnet & Mainnet)
