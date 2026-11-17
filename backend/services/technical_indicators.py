@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
 技术指标计算服务
-使用pandas-ta库计算各种技术指标
+使用fin-primitives库计算各种技术指标
 """
 
 import pandas as pd
-import pandas_ta as ta
+import fin_primitives.pandas  # noqa: F401  (registers the .fp accessor)
 from typing import List, Dict, Any, Optional
 import logging
 
@@ -88,7 +88,7 @@ def calculate_indicators(kline_data: List[Dict[str, Any]], indicators: List[str]
 
 def _calculate_ema(df: pd.DataFrame, period: int) -> List[float]:
     """计算指数移动平均线"""
-    ema = ta.ema(df['close'], length=period)
+    ema = df['close'].fp.ema(length=period)
     if ema is None:
         return []
     return ema.fillna(0).tolist()
@@ -96,7 +96,7 @@ def _calculate_ema(df: pd.DataFrame, period: int) -> List[float]:
 
 def _calculate_sma(df: pd.DataFrame, period: int) -> List[float]:
     """计算简单移动平均线"""
-    sma = ta.sma(df['close'], length=period)
+    sma = df['close'].fp.sma(length=period)
     if sma is None:
         return []
     return sma.fillna(0).tolist()
@@ -104,7 +104,7 @@ def _calculate_sma(df: pd.DataFrame, period: int) -> List[float]:
 
 def _calculate_macd(df: pd.DataFrame) -> Dict[str, List[float]]:
     """计算MACD指标"""
-    macd_data = ta.macd(df['close'])
+    macd_data = df['close'].fp.macd()
     if macd_data is None or macd_data.empty:
         return {'macd': [], 'signal': [], 'histogram': []}
 
@@ -122,7 +122,7 @@ def _calculate_macd(df: pd.DataFrame) -> Dict[str, List[float]]:
 
 def _calculate_rsi(df: pd.DataFrame, period: int) -> List[float]:
     """计算相对强弱指数"""
-    rsi = ta.rsi(df['close'], length=period)
+    rsi = df['close'].fp.rsi(length=period)
     return rsi.fillna(50).tolist()  # RSI默认值设为50
 
 
@@ -138,7 +138,7 @@ def _calculate_bollinger_bands(df: pd.DataFrame, period: int = 20, std: float = 
 
         logger.info(f"Close price sample: {df['close'].head().tolist()}")
 
-        bb = ta.bbands(df['close'], length=period, std=std)
+        bb = df['close'].fp.bbands(length=period, std=std)
         logger.info(f"BOLL calculation completed, result type: {type(bb)}")
 
         if bb is None:
@@ -192,7 +192,7 @@ def _calculate_bollinger_bands(df: pd.DataFrame, period: int = 20, std: float = 
 
 def _calculate_atr(df: pd.DataFrame, period: int) -> List[float]:
     """计算平均真实波幅"""
-    atr = ta.atr(df['high'], df['low'], df['close'], length=period)
+    atr = df.fp.atr(length=period)
     if atr is None:
         return []
     return atr.fillna(0).tolist()
@@ -206,7 +206,7 @@ def _calculate_vwap(df: pd.DataFrame) -> List[float]:
         df_copy = df.copy()
         df_copy['datetime'] = pd.to_datetime(df_copy['timestamp'], unit='s')
         df_copy = df_copy.set_index('datetime')
-        vwap = ta.vwap(df_copy['high'], df_copy['low'], df_copy['close'], df_copy['volume'])
+        vwap = df_copy.fp.vwap()
         if vwap is None:
             return []
         return vwap.fillna(0).tolist()
@@ -217,7 +217,7 @@ def _calculate_vwap(df: pd.DataFrame) -> List[float]:
 
 def _calculate_stochastic(df: pd.DataFrame, k_period: int = 14, d_period: int = 3) -> Dict[str, List[float]]:
     """计算随机震荡指标"""
-    stoch = ta.stoch(df['high'], df['low'], df['close'], k=k_period, d=d_period)
+    stoch = df.fp.stoch(k=k_period, d=d_period)
     if stoch is None or stoch.empty:
         return {'k': [], 'd': []}
 
@@ -233,7 +233,7 @@ def _calculate_stochastic(df: pd.DataFrame, k_period: int = 14, d_period: int = 
 
 def _calculate_obv(df: pd.DataFrame) -> List[float]:
     """计算能量潮指标"""
-    obv = ta.obv(df['close'], df['volume'])
+    obv = df.fp.obv()
     if obv is None:
         return []
     return obv.fillna(0).tolist()
@@ -424,7 +424,7 @@ def get_macd_for_signal(
             return None
 
         # Calculate MACD
-        macd_data = ta.macd(df['close'])
+        macd_data = df['close'].fp.macd()
         if macd_data is None or macd_data.empty:
             return None
 

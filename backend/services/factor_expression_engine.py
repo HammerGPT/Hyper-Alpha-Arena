@@ -2,7 +2,7 @@
 Factor Expression Engine
 
 Safely evaluates user/AI-submitted factor expressions against K-line data.
-Uses asteval (safe expression evaluator) + pandas-ta (130+ TA indicators).
+Uses asteval (safe expression evaluator) + fin-primitives (TA indicators).
 
 Example expressions:
     EMA(close, 7) / EMA(close, 21) - 1
@@ -145,7 +145,7 @@ del _reg
 
 
 class FactorExpressionEngine:
-    """Evaluate factor expressions safely using asteval + pandas-ta."""
+    """Evaluate factor expressions safely using asteval + fin-primitives."""
 
     # Legacy compat — FUNCTION_DOCS derived from FUNCTION_REGISTRY
     FUNCTION_DOCS = {
@@ -158,8 +158,8 @@ class FactorExpressionEngine:
 
     def _ensure_ta(self):
         if self._ta is None:
-            import pandas_ta as ta
-            self._ta = ta
+            import fin_primitives.pandas  # noqa: F401  (registers the .fp accessor)
+            self._ta = True
 
     def _to_series(self, x) -> pd.Series:
         if isinstance(x, pd.Series):
@@ -178,28 +178,30 @@ class FactorExpressionEngine:
     def _build_functions(self, df: pd.DataFrame) -> Dict:
         """Build function dict bound to the given DataFrame context."""
         self._ensure_ta()
-        ta = self._ta
         s = self._to_series
         sf = self._safe_float
+
+        def ohlcv(**cols):
+            return pd.DataFrame({k: s(v) for k, v in cols.items()}).fp
 
         funcs = {}
 
         # ── Moving Average ──
-        funcs["SMA"] = lambda series, period=20: ta.sma(s(series), length=int(period))
-        funcs["EMA"] = lambda series, period=20: ta.ema(s(series), length=int(period))
-        funcs["WMA"] = lambda series, period=20: ta.wma(s(series), length=int(period))
-        funcs["DEMA"] = lambda series, period=20: ta.dema(s(series), length=int(period))
-        funcs["TEMA"] = lambda series, period=20: ta.tema(s(series), length=int(period))
-        funcs["HMA"] = lambda series, period=20: ta.hma(s(series), length=int(period))
-        funcs["KAMA"] = lambda series, period=20: ta.kama(s(series), length=int(period))
+        funcs["SMA"] = lambda series, period=20: s(series).fp.sma(length=int(period))
+        funcs["EMA"] = lambda series, period=20: s(series).fp.ema(length=int(period))
+        funcs["WMA"] = lambda series, period=20: s(series).fp.wma(length=int(period))
+        funcs["DEMA"] = lambda series, period=20: s(series).fp.dema(length=int(period))
+        funcs["TEMA"] = lambda series, period=20: s(series).fp.tema(length=int(period))
+        funcs["HMA"] = lambda series, period=20: s(series).fp.hma(length=int(period))
+        funcs["KAMA"] = lambda series, period=20: s(series).fp.kama(length=int(period))
 
         # ── Momentum ──
-        funcs["RSI"] = lambda series, period=14: ta.rsi(s(series), length=int(period))
-        funcs["ROC"] = lambda series, period=10: ta.roc(s(series), length=int(period))
-        funcs["MOM"] = lambda series, period=10: ta.mom(s(series), length=int(period))
+        funcs["RSI"] = lambda series, period=14: s(series).fp.rsi(length=int(period))
+        funcs["ROC"] = lambda series, period=10: s(series).fp.roc(length=int(period))
+        funcs["MOM"] = lambda series, period=10: s(series).fp.mom(length=int(period))
 
         def _macd_col(series, fast=12, slow=26, signal=9, col=0):
-            r = ta.macd(s(series), fast=int(fast), slow=int(slow), signal=int(signal))
+            r = s(series).fp.macd(fast=int(fast), slow=int(slow), signal=int(signal))
             if r is not None and r.shape[1] > col:
                 return r.iloc[:, col]
             return s(series) * 0
@@ -209,21 +211,21 @@ class FactorExpressionEngine:
         funcs["MACD_HIST"] = lambda series, fast=12, slow=26, signal=9: _macd_col(series, fast, slow, signal, 2)
 
         def _stoch_col(high, low, close, period=14, col=0):
-            r = ta.stoch(s(high), s(low), s(close), k=int(period))
+            r = ohlcv(high=high, low=low, close=close).stoch(k=int(period))
             if r is not None and r.shape[1] > col:
                 return r.iloc[:, col]
             return s(close) * 0
 
         funcs["STOCH_K"] = lambda h, l, c, period=14: _stoch_col(h, l, c, period, 0)
         funcs["STOCH_D"] = lambda h, l, c, period=14: _stoch_col(h, l, c, period, 1)
-        funcs["CCI"] = lambda h, l, c, period=20: ta.cci(s(h), s(l), s(c), length=int(period))
-        funcs["WILLR"] = lambda h, l, c, period=14: ta.willr(s(h), s(l), s(c), length=int(period))
-        funcs["PPO"] = lambda series, fast=12, slow=26: ta.ppo(s(series), fast=int(fast), slow=int(slow)).iloc[:, 0]
-        funcs["TRIX"] = lambda series, period=15: ta.trix(s(series), length=int(period)).iloc[:, 0]
+        funcs["CCI"] = lambda h, l, c, period=20: ohlcv(high=h, low=l, close=c).cci(length=int(period))
+        funcs["WILLR"] = lambda h, l, c, period=14: ohlcv(high=h, low=l, close=c).willr(length=int(period))
+        funcs["PPO"] = lambda series, fast=12, slow=26: s(series).fp.ppo(fast=int(fast), slow=int(slow)).iloc[:, 0]
+        funcs["TRIX"] = lambda series, period=15: s(series).fp.trix(length=int(period)).iloc[:, 0]
 
         # ── Trend ──
         def _adx_col(high, low, close, period=14, col=0):
-            r = ta.adx(s(high), s(low), s(close), length=int(period))
+            r = ohlcv(high=high, low=low, close=close).adx(length=int(period))
             if r is not None and r.shape[1] > col:
                 return r.iloc[:, col]
             return s(close) * 0
@@ -233,7 +235,7 @@ class FactorExpressionEngine:
         funcs["MINUS_DI"] = lambda h, l, c, period=14: _adx_col(h, l, c, period, 2)
 
         def _aroon_col(high, low, period=25, col=0):
-            r = ta.aroon(s(high), s(low), length=int(period))
+            r = ohlcv(high=high, low=low).aroon(length=int(period))
             if r is not None and r.shape[1] > col:
                 return r.iloc[:, col]
             return s(high) * 0
@@ -242,13 +244,13 @@ class FactorExpressionEngine:
         funcs["AROON_DOWN"] = lambda h, l, period=25: _aroon_col(h, l, period, 0)
 
         # ── Volatility ──
-        funcs["ATR"] = lambda h, l, c, period=14: ta.atr(s(h), s(l), s(c), length=int(period))
-        funcs["NATR"] = lambda h, l, c, period=14: ta.natr(s(h), s(l), s(c), length=int(period))
-        funcs["TRUE_RANGE"] = lambda h, l, c: ta.true_range(s(h), s(l), s(c))
+        funcs["ATR"] = lambda h, l, c, period=14: ohlcv(high=h, low=l, close=c).atr(length=int(period))
+        funcs["NATR"] = lambda h, l, c, period=14: ohlcv(high=h, low=l, close=c).natr(length=int(period))
+        funcs["TRUE_RANGE"] = lambda h, l, c: ohlcv(high=h, low=l, close=c).true_range()
         funcs["STDDEV"] = lambda series, period=20: s(series).rolling(window=int(period)).std()
 
         def _bb(series, period=20, col_idx=0):
-            r = ta.bbands(s(series), length=int(period))
+            r = s(series).fp.bbands(length=int(period))
             if r is not None and r.shape[1] > col_idx:
                 return r.iloc[:, col_idx]
             return s(series) * 0
@@ -258,11 +260,11 @@ class FactorExpressionEngine:
         funcs["BBANDS_UPPER"] = lambda series, period=20: _bb(series, period, 2)
 
         # ── Volume ──
-        funcs["OBV"] = lambda close, volume: ta.obv(s(close), s(volume))
-        funcs["VWAP"] = lambda h, l, c, v: ta.vwap(s(h), s(l), s(c), s(v))
-        funcs["AD"] = lambda h, l, c, v: ta.ad(s(h), s(l), s(c), s(v))
-        funcs["CMF"] = lambda h, l, c, v, period=20: ta.cmf(s(h), s(l), s(c), s(v), length=int(period))
-        funcs["MFI"] = lambda h, l, c, v, period=14: ta.mfi(s(h), s(l), s(c), s(v), length=int(period))
+        funcs["OBV"] = lambda close, volume: ohlcv(close=close, volume=volume).obv()
+        funcs["VWAP"] = lambda h, l, c, v: ohlcv(high=h, low=l, close=c, volume=v).vwap()
+        funcs["AD"] = lambda h, l, c, v: ohlcv(high=h, low=l, close=c, volume=v).ad()
+        funcs["CMF"] = lambda h, l, c, v, period=20: ohlcv(high=h, low=l, close=c, volume=v).cmf(length=int(period))
+        funcs["MFI"] = lambda h, l, c, v, period=14: ohlcv(high=h, low=l, close=c, volume=v).mfi(length=int(period))
 
         # ── Time Series Operators ──
         funcs["DELAY"] = lambda series, period=1: s(series).shift(int(period))

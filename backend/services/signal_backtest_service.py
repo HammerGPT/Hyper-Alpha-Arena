@@ -646,7 +646,7 @@ class SignalBacktestService:
         Checks for golden cross, death cross, and other MACD events.
         """
         import pandas as pd
-        import pandas_ta as ta
+        import fin_primitives.pandas  # noqa: F401  (registers the .fp accessor)
         from database.models import CryptoKline
         from sqlalchemy import desc
 
@@ -694,7 +694,7 @@ class SignalBacktestService:
         df['close'] = pd.to_numeric(df['close'], errors='coerce')
 
         # Calculate MACD
-        macd_result = ta.macd(df['close'])
+        macd_result = df['close'].fp.macd()
         if macd_result is None or macd_result.empty:
             return []
 
